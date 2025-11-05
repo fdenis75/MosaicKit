@@ -4,23 +4,37 @@
 import PackageDescription
 
 let package = Package(
-    name: "MyLibrary",
+    name: "MosaicKit",
+    platforms: [.macOS(.v14), .iOS(.v17), .macCatalyst(.v17)],
     products: [
-        // Products define the executables and libraries a package produces, making them visible to other packages.
         .library(
-            name: "MyLibrary",
-            targets: ["MyLibrary"]
-        ),
+            name: "MosaicKit",
+            targets: ["MosaicKit"]
+        )
+    ],
+    dependencies: [
+        .package(url: "https://github.com/apple/swift-log.git", from: "1.5.0"),
+        .package(url: "https://github.com/DenDmitriev/DominantColors.git", .upToNextMajor(from: "1.2.0"))
     ],
     targets: [
-        // Targets are the basic building blocks of a package, defining a module or a test suite.
-        // Targets can depend on other targets in this package and products from dependencies.
         .target(
-            name: "MyLibrary"
+            name: "MosaicKit",
+            dependencies: [
+                .product(name: "Logging", package: "swift-log"),
+                .product(name: "DominantColors", package: "DominantColors")
+            ],
+            path: "Sources",
+            resources: [
+                .process("Shaders")
+            ],
+            swiftSettings: [
+                .enableUpcomingFeature("BareSlashRegexLiterals")
+            ]
         ),
         .testTarget(
-            name: "MyLibraryTests",
-            dependencies: ["MyLibrary"]
-        ),
+            name: "MosaicKitTests",
+            dependencies: ["MosaicKit"],
+            path: "Tests/MosaicKitTests"
+        )
     ]
 )
