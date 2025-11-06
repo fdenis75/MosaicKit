@@ -99,8 +99,8 @@ public struct VideoInput: Codable, Hashable, Sendable {
 
         // Extract basic properties
         let duration = try await asset.load(.duration).seconds
-        let naturalSize = try await videoTrack.load(.naturalSize)
-        let nominalFrameRate = try await videoTrack.load(.nominalFrameRate)
+        let (naturalSize,nominalFrameRate,formatDescriptions,estimatedDataRate) = try await videoTrack.load(.naturalSize, .nominalFrameRate,.formatDescriptions,.estimatedDataRate)
+       // let nominalFrameRate = try await videoTrack.load(.nominalFrameRate)
 
         // Get file size
         var fileSize: Int64?
@@ -113,7 +113,7 @@ public struct VideoInput: Codable, Hashable, Sendable {
         var codec: String?
         var bitrate: Int64?
 
-        let formatDescriptions = try await videoTrack.load(.formatDescriptions)
+      //  let formatDescriptions = try await videoTrack.load(.formatDescriptions)
         if let formatDescription = formatDescriptions.first {
             let mediaType = CMFormatDescriptionGetMediaType(formatDescription)
             let mediaSubType = CMFormatDescriptionGetMediaSubType(formatDescription)
@@ -129,9 +129,9 @@ public struct VideoInput: Codable, Hashable, Sendable {
         }
 
         // Try to get bitrate
-        if let estimatedDataRate = try? await videoTrack.load(.estimatedDataRate) {
+       // if let estimatedDataRate = try? await videoTrack.load(.estimatedDataRate) {
             bitrate = Int64(estimatedDataRate)
-        }
+        //}
 
         self.init(
             url: url,

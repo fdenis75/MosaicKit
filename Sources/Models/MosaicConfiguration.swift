@@ -37,7 +37,7 @@ public struct MosaicConfiguration: Codable, Sendable {
         format: OutputFormat = .heif,
         layout: LayoutConfiguration = .default,
         includeMetadata: Bool = true,
-        useAccurateTimestamps: Bool = true,
+        useAccurateTimestamps: Bool = false,
     compressionQuality: Double = 0.4,
         ourputdirectory: URL? = nil
     ) {
@@ -54,8 +54,8 @@ public struct MosaicConfiguration: Codable, Sendable {
     /// Default configuration for mosaic generation
     public static var `default`: MosaicConfiguration {
         MosaicConfiguration(
-            width: 5120,
-            density: .default,
+            width: 4000,
+            density: .xl,
             format: .heif,
             layout: .default,
             compressionQuality: 0.4

@@ -35,11 +35,19 @@ import Metal
 /// ```
 public final class MosaicGenerator {
     private let logger = Logger(label: "com.mosaickit")
+    private let internalGenerator: Any?
 
     public init() throws {
         // Initialize Metal processor
         guard MTLCreateSystemDefaultDevice() != nil else {
             throw MosaicError.metalNotSupported
+        }
+
+        // Create internal generator if available
+        if #available(macOS 15, iOS 18, *) {
+            self.internalGenerator = try? MetalMosaicGenerator()
+        } else {
+            self.internalGenerator = nil
         }
     }
 
@@ -56,14 +64,33 @@ public final class MosaicGenerator {
     ) async throws -> URL {
         logger.info("Generating mosaic from \(videoURL.lastPathComponent)")
 
+        // Check platform availability
+        guard #available(macOS 15, iOS 18, *) else {
+            throw MosaicError.invalidConfiguration("MosaicKit requires macOS 15.0+ or iOS 18.0+")
+        }
+
+        // Get the internal generator
+        guard let generator = internalGenerator as? MetalMosaicGenerator else {
+            throw MosaicError.metalNotSupported
+        }
+
         // Create VideoInput from URL
+        logger.debug("Loading video metadata from \(videoURL.lastPathComponent)")
         let video = try await VideoInput(from: videoURL)
 
-        // TODO: Call Metal mosaic generator
-        // This requires adapting the MetalMosaicGenerator to work with VideoInput
-        // and removing SwiftData dependencies
+        // Update config with output directory
+        var updatedConfig = config
+        updatedConfig.outputdirectory = outputDirectory
 
-        throw MosaicError.processingFailed("Not yet implemented - see README.md")
+        // Generate mosaic using Metal
+        logger.info("Generating mosaic with Metal acceleration...")
+        let mosaicURL = try await generator.generate(
+            for: video,
+            config: updatedConfig
+        )
+
+        logger.info("Mosaic generated successfully at \(mosaicURL.lastPathComponent)")
+        return mosaicURL
     }
 
     /// Generate mosaics from multiple video files

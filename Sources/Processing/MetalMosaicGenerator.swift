@@ -32,7 +32,7 @@ public actor MetalMosaicGenerator{
     
     private var generationTasks: [UUID: Task<URL, Error>] = [:]
     private var frameCache: [UUID: [CMTime: CGImage]] = [:]
-    private var progressHandlers: [UUID: @Sendable (Double) -> Void] = [:]
+    private var progressHandlers: [UUID: (MosaicGenerationProgress) -> Void] = [:]
     
     // Performance metrics
     private var lastGenerationTime: CFAbsoluteTime = 0
@@ -114,7 +114,11 @@ public actor MetalMosaicGenerator{
               //  logger.debug("📐 Video aspect ratio: \(aspectRatio)")*/
                 let duration = video.duration ?? 9999.99
                 let aspectRatio = (video.width ?? 1.0) / (video.height ?? 1.0)  
-                
+                progressHandlers[videoID]?(MosaicGenerationProgress(
+                    video: video,
+                    progress: 0.2,
+                    status: .countingThumbnails
+                ))
                 let frameCount = await layoutProcessor.calculateThumbnailCount(
                     duration: duration,
                     width: config.width,
@@ -124,6 +128,11 @@ public actor MetalMosaicGenerator{
                 logger.debug("🖼️ \(video.title ?? "N/A") - Calculated frame count: \(frameCount)")
                 layoutProcessor.updateAspectRatio(config.layout.aspectRatio.ratio)
                 // Calculate layout
+                progressHandlers[videoID]?(MosaicGenerationProgress(
+                    video: video,
+                    progress: 0.3,
+                    status: .computingLayout
+                ))
                 let layout = await layoutProcessor.calculateLayout(
                     originalAspectRatio: aspectRatio,
                     mosaicAspectRatio: config.layout.aspectRatio,
@@ -138,25 +147,44 @@ public actor MetalMosaicGenerator{
                 logger.debug("📏 \(video.title ?? "N/A") Layout calculated - Size: \(layout.mosaicSize.width)x\(layout.mosaicSize.height), Thumbnails: \(layout.thumbCount)")
                 
                 // Extract frames using VideoToolbox for hardware acceleration
-                progressHandlers[videoID]?(0.1) // Use unwrapped ID
+       /*         progressHandlers[videoID]?(MosaicGenerationProgress(
+                    video: video,
+                    progress: 0.4,
+                    status: .extractingThumbnails
+                ))
+               // progressHandlers[videoID]? (0.1) // Use unwrapped ID
                 /*let frames = try await extractFramesWithVideoToolbox(
                     from: asset,
                     count: layout.thumbCount,
                     accurate: config.useAccurateTimestamps
-                )*/
+                )*/*/
+                let currentProgressHandler1 = progressHandlers[videoID]
                 let frames = try await thumbnailProcessor.extractThumbnails(
                     from: videoURL, // Use unwrapped URL
                     layout: layout,
                     asset: asset,
                     preview: false,
-                    accurate: config.useAccurateTimestamps
+                    accurate: config.useAccurateTimestamps,
+                    progressHandler: { @Sendable progress in
+                        // Scale the progress to fit within the overall progress range (0.5-0.8)
+                        let scaledProgress = 0.4 + (0.3 * progress)
+                        (MosaicGenerationProgress(
+                            video: video,
+                            progress: scaledProgress,
+                            status: .extractingThumbnails
+                        ))
+                    }
                 )
               //  logger.debug("🎞️ Extracted \(frames.count) frames")
                 
             //    logger.debug("🎞️ Extracted \(frames.count) frames using VideoToolbox")
                 
-                progressHandlers[videoID]?(0.5)
-                
+           /*     progressHandlers[videoID]?(MosaicGenerationProgress(
+                    video: video,
+                    progress: 0.5,
+                    status: .extractingThumbnails
+                ))
+                */
                 // If metadata is enabled, create a header image with enhanced information
                 var metadataHeader: CGImage? = nil
                 if config.includeMetadata {
@@ -186,14 +214,21 @@ public actor MetalMosaicGenerator{
                     forIphone: forIphone,
                     progressHandler: { @Sendable progress in
                         // Scale the progress to fit within the overall progress range (0.5-0.8)
-                        let scaledProgress = 0.5 + (0.3 * progress)
-                        currentProgressHandler?(scaledProgress)
+                        let scaledProgress = 0.7 + (0.2 * progress)
+                        (MosaicGenerationProgress(
+                            video: video,
+                            progress: scaledProgress,
+                            status: .creatingMosaic
+                        ))
                     }
                 )
                // logger.debug("🖼️ Metal mosaic created - Size: \(mosaic.width)x\(mosaic.height)")
                 
-                progressHandlers[videoID]?(0.8) // Use unwrapped ID
-                
+                progressHandlers[videoID]?(MosaicGenerationProgress(
+                    video: video,
+                    progress: 0.9,
+                    status: .savingMosaic
+                ))
                 // Save the mosaic to disk
                 let mosaicURL = try await saveMosaic(
                     mosaic,
@@ -203,7 +238,11 @@ public actor MetalMosaicGenerator{
                 )
                 logger.debug("💾 Saved mosaic to: \(mosaicURL.path)")
                 
-                progressHandlers[videoID]?(1.0)
+                progressHandlers[videoID]?(MosaicGenerationProgress(
+                    video: video,
+                    progress: 0.999,
+                    status: .savingMosaic
+                ))
                 
              //   await MainActor.run {
                //     video.mosaicURL = mosaicURL.absoluteString
@@ -249,7 +288,7 @@ public actor MetalMosaicGenerator{
     /// - Parameters:
     ///   - video: The video to set the progress handler for
     ///   - handler: The progress handler
-    public func setProgressHandler(for video: VideoInput, handler: @escaping @Sendable (Double) -> Void) {
+    public func setProgressHandler(for video: VideoInput, handler: @escaping @Sendable (MosaicGenerationProgress) -> Void) {
              progressHandlers[video.id] = handler
         }
     
@@ -466,8 +505,8 @@ public actor MetalMosaicGenerator{
           //  if config.outputdirectory.addFullPath
                 // Replace path separators and spaces with underscores
                   let videoURL = video.url // Safely unwrap video.url
-                     logger.error("❌ Cannot generate filename: Video is missing URL.")
-                     throw MosaicError.saveFailed(URL(fileURLWithPath: "/dev/null"), NSError(domain: "com.hypermovie", code: -5, userInfo: [NSLocalizedDescriptionKey: "Missing video URL for filename generation"])) // Or a more specific error
+                    // logger.error("❌ Cannot generate filename: Video is missing URL.")
+                    // throw MosaicError.saveFailed(URL(fileURLWithPath: "/dev/null"), NSError(domain: "com.hypermovie", code: -5, userInfo: [NSLocalizedDescriptionKey: "Missing video URL for filename generation"])) // Or a more specific error
                  
                 let fullPath = videoURL.deletingPathExtension().path
                     .replacingOccurrences(of: "/", with: "_")

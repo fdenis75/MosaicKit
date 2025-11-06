@@ -67,6 +67,12 @@ public enum MosaicGenerationStatus: Sendable {
     /// Generation is in progress
     case inProgress
     
+    case countingThumbnails
+    case computingLayout
+    case extractingThumbnails
+    case creatingMosaic
+    case savingMosaic
+    
     /// Generation is complete
     case completed
     
@@ -103,7 +109,7 @@ public actor MosaicGeneratorCoordinator {
     public init(
         mosaicGenerator: (MetalMosaicGenerator)? = nil,
         modelContext: ModelContext,
-        concurrencyLimit: Int = 4,
+        concurrencyLimit: Int = 31,
         generatorType: MosaicGeneratorFactory.GeneratorType = .metal
     ) {
         if let generator = mosaicGenerator {
@@ -155,6 +161,7 @@ public actor MosaicGeneratorCoordinator {
                 ))
                 
                 // Generate mosaic
+                await mosaicGenerator.setProgressHandler(for: video, handler: progressHandler)
                 let outputURL = try await mosaicGenerator.generate(for: video, config: config, forIphone: forIphone)
                 
                 // Report completion
@@ -300,7 +307,7 @@ public actor MosaicGeneratorCoordinator {
         logger.debug("🎬 Starting mosaic generation for \(videos.count) videos")
         
         // Dynamically adjust concurrency based on system capabilities
-        let processorCount = ProcessInfo.processInfo.activeProcessorCount
+        let processorCount = ProcessInfo.processInfo.activeProcessorCount * 4
         let systemMemory = ProcessInfo.processInfo.physicalMemory
         let memoryGB = Double(systemMemory) / 1_073_741_824.0 // Convert to GB
         
@@ -308,10 +315,10 @@ public actor MosaicGeneratorCoordinator {
         // - Consider both CPU cores and available memory
         // - Higher memory systems can handle more concurrent generations
         // - But we still don't want to overload the system
-        let memoryBasedLimit = max(2, Int(memoryGB / 4)) // Rough estimate: 4GB per concurrent task
+        let memoryBasedLimit = max(2, Int(memoryGB / config.density.factor)) // Rough estimate: 4GB per concurrent task
         let cpuBasedLimit = max(2, processorCount - 1) // Leave one core free for system
-        let dynamicLimit = min(memoryBasedLimit, cpuBasedLimit, concurrencyLimit)
-        
+        let dynamicLimit = min(memoryBasedLimit, cpuBasedLimit)
+       // let dynamicLimit = concurrencyLimit
         logger.debug("⚙️ Using dynamic concurrency limit of \(dynamicLimit) (CPU: \(processorCount), Memory: \(Int(memoryGB))GB, Config: \(self.concurrencyLimit))")
         
         // Prioritize videos based on various factors

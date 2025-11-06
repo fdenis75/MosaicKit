@@ -56,42 +56,84 @@ public final class ThumbnailProcessor: @unchecked Sendable {
         )
         //logger.debug("⏱️ Calculated \(times.count) extraction times")
         
-        var thumbnails: [(Int, CGImage, String)] = []
-        var failedCount = 0
-        
+        var thumbnails: [Int: (CGImage, String)] = [:] // Use dictionary to track by index
+        var failedIndices: [Int] = []
+        var currentIndex = 0
+
+        // First pass: Extract all frames
         for await result in generator.images(for: times) {
+            let index = currentIndex
+            currentIndex += 1
+
             switch result {
             case .success(requestedTime: _, image: let image, actualTime: let actual):
                 let timestamp = self.formatTimestamp(seconds: actual.seconds)
-                let imageWithTimestamp = addTimestampToImage(image: image, timestamp: timestamp, size: layout.thumbnailSizes[thumbnails.count])
-                thumbnails.append((thumbnails.count, imageWithTimestamp, timestamp))
-              //  logger.debug("✅ Extracted frame at \(timestamp)")
-            case .failure(requestedTime: _, error: let error):
-                logger.error("❌ Frame extraction failed: \(error.localizedDescription)")
-                failedCount += 1
-                if let blankImage = createBlankImage(size: layout.thumbnailSize) {
-                    thumbnails.append((thumbnails.count, blankImage, "00:00:00"))
-                    logger.debug("⚠️ Using blank image for failed frame")
+                let imageWithTimestamp = addTimestampToImage(image: image, timestamp: timestamp, size: layout.thumbnailSizes[index])
+                thumbnails[index] = (imageWithTimestamp, timestamp)
+            case .failure(requestedTime: let requestedTime, error: let error):
+                logger.warning("⚠️ Frame extraction failed at \(self.formatTimestamp(seconds: requestedTime.seconds)): \(error.localizedDescription)")
+                failedIndices.append(index)
+            }
+        }
+
+        // Retry failed extractions once
+        if !failedIndices.isEmpty {
+            logger.debug("🔄 Retrying \(failedIndices.count) failed extractions...")
+            let failedTimes = failedIndices.map { times[$0] }
+            var retryIndex = 0
+            var stillFailed: [Int] = []
+
+            for await result in generator.images(for: failedTimes) {
+                let originalIndex = failedIndices[retryIndex]
+                retryIndex += 1
+
+                switch result {
+                case .success(requestedTime: _, image: let image, actualTime: let actual):
+                    let timestamp = self.formatTimestamp(seconds: actual.seconds)
+                    let imageWithTimestamp = addTimestampToImage(image: image, timestamp: timestamp, size: layout.thumbnailSizes[originalIndex])
+                    thumbnails[originalIndex] = (imageWithTimestamp, timestamp)
+                    logger.debug("✅ Retry successful for frame \(originalIndex)")
+                case .failure(requestedTime: let requestedTime, error: let error):
+                    logger.error("❌ Retry failed for frame \(originalIndex) at \(self.formatTimestamp(seconds: requestedTime.seconds)): \(error.localizedDescription)")
+                    stillFailed.append(originalIndex)
                 }
             }
-        }
-        
-        if failedCount > 0 {
-            logger.warning("⚠️ Extraction partial failure - Failed: \(failedCount), Success: \(thumbnails.count)")
-            if thumbnails.isEmpty {
-                logger.error("❌ All extractions failed")
-                throw MosaicError.generationFailed(NSError(
-                    domain: "com.hypermovie",
-                    code: -1,
-                    userInfo: [NSLocalizedDescriptionKey: "Failed to extract any thumbnails"]
-                ))
+
+            // Use blank images for frames that failed twice
+            for index in stillFailed {
+                if let blankImage = createBlankImage(size: layout.thumbnailSizes[index]) {
+                    thumbnails[index] = (blankImage, "00:00:00")
+                    logger.debug("⚠️ Using blank image for frame \(index) after retry failure")
+                }
+            }
+
+            let successfulRetries = failedIndices.count - stillFailed.count
+            if successfulRetries > 0 {
+                logger.debug("✅ Successfully recovered \(successfulRetries) frames on retry")
+            }
+            if !stillFailed.isEmpty {
+                logger.warning("⚠️ \(stillFailed.count) frames still failed after retry, using blank images")
             }
         }
+
+        // Check if we have any valid thumbnails
+        if thumbnails.isEmpty {
+            logger.error("❌ All extractions failed")
+            throw MosaicError.generationFailed(NSError(
+                domain: "com.hypermovie",
+                code: -1,
+                userInfo: [NSLocalizedDescriptionKey: "Failed to extract any thumbnails"]
+            ))
+        }
         
-        logger.debug("✅ \(file.lastPathComponent) - Thumbnail extraction complete - Total: \(thumbnails.count)")
-        return thumbnails
-            .sorted { $0.0 < $1.0 }
-            .map { ($0.1, $0.2) }
+        let successCount = thumbnails.count
+        let totalExpected = times.count
+        logger.debug("✅ \(file.lastPathComponent) - Thumbnail extraction complete - Success: \(successCount)/\(totalExpected)")
+
+        // Convert dictionary back to sorted array
+        return (0..<totalExpected).compactMap { index in
+            thumbnails[index]
+        }
     }
     
     /// Extract thumbnails from video with timestamps
@@ -292,14 +334,14 @@ public final class ThumbnailProcessor: @unchecked Sendable {
             generator.requestedTimeToleranceBefore = .zero
             generator.requestedTimeToleranceAfter = .zero
         } else {
-            generator.requestedTimeToleranceBefore = CMTime(seconds: 2, preferredTimescale: 600)
-            generator.requestedTimeToleranceAfter = CMTime(seconds: 2, preferredTimescale: 600)
+            generator.requestedTimeToleranceBefore = CMTime(seconds: 10, preferredTimescale: 600)
+            generator.requestedTimeToleranceAfter = CMTime(seconds: 10, preferredTimescale: 600)
         }
         
         if !preview {
             generator.maximumSize = CGSize(
-                width: layout.thumbnailSize.width * 4,
-                height: layout.thumbnailSize.height * 4
+                width: layout.thumbnailSize.width * 2,
+                height: layout.thumbnailSize.height * 2
             )
         }
         
@@ -476,8 +518,8 @@ public final class ThumbnailProcessor: @unchecked Sendable {
             .font: font,
             .foregroundColor: forIphone ? NSColor.white : NSColor.gray,
             .paragraphStyle: paragraphStyle,
-            .strokeWidth: -0.5, // Text outline for better visibility against semi-transparent background
-            .strokeColor: NSColor.black.withAlphaComponent(0.5)
+         //   .strokeWidth: -0.5, // Text outline for better visibility against semi-transparent background
+           // .strokeColor: NSColor.black.withAlphaComponent(0.5)
            
         ]
         
@@ -485,18 +527,18 @@ public final class ThumbnailProcessor: @unchecked Sendable {
             .font: font,
             .foregroundColor: forIphone ? NSColor.white : NSColor.darkGray,
             .paragraphStyle: paragraphStyle,
-            .strokeWidth: -0.5, // Text outline
-            .strokeColor: NSColor.black.withAlphaComponent(0.5)
+         //   .strokeWidth: -0.5, // Text outline
+          //  .strokeColor: NSColor.black.withAlphaComponent(0.5)
         
         ]
         
         let pathAttributes: [NSAttributedString.Key: Any] = [
             .font: smallerFont,
         
-            .foregroundColor: NSColor(white: 1.0, alpha: 0.9), // Brighter text for better visibility
+            .foregroundColor: forIphone ? NSColor.white : NSColor.darkGray,// Brighter text for better visibility
             .paragraphStyle: paragraphStyle,
-            .strokeWidth: -0.3, // Subtle text outline
-            .strokeColor: NSColor.black.withAlphaComponent(0.3)
+            //.strokeWidth: -0.3, // Subtle text outline
+           // .strokeColor: NSColor.black.withAlphaComponent(0.3)
           
         ]
 #elseif canImport(UIKit)
@@ -873,7 +915,8 @@ public final class ThumbnailProcessor: @unchecked Sendable {
         
         // Calculate font size - more elegant proportions for Apple-like design
         // Apple often uses highly legible but slightly smaller fonts in their designs
-        let fontSize = max(11.0, min(17.0, Double(image.width) / 18)) * scale
+        // Increased by 50% for better visibility
+        let fontSize = max(11.0, min(17.0, Double(image.width) / 18)) * scale * 1.5
         
         // Use a system font with bold weight for better readability
         #if canImport(AppKit)
@@ -1117,7 +1160,8 @@ public final class ThumbnailProcessor: @unchecked Sendable {
         newContext.restoreGState()
         
         // Continue with text rendering
-        let fontSize = max(11.0, min(17.0, Double(image.width) / 18)) * scale
+        // Increased by 50% for better visibility
+        let fontSize = max(11.0, min(17.0, Double(image.width) / 18)) * scale * 1.5
         
         // Create font and attributes
         let font = CTFontCreateWithName("Helvetica-Bold" as CFString, fontSize, nil)
