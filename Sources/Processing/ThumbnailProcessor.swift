@@ -58,9 +58,11 @@ public final class ThumbnailProcessor: @unchecked Sendable {
         
         var thumbnails: [Int: (CGImage, String)] = [:] // Use dictionary to track by index
         var failedIndices: [Int] = []
-        var currentIndex = 0
+        var extractedFrames: [(index: Int, image: CGImage, timestamp: String)] = []
 
-        // First pass: Extract all frames
+        // First pass: Extract all frames sequentially (AVAssetImageGenerator is not thread-safe)
+        // but process timestamps in parallel afterward
+        var currentIndex = 0
         for await result in generator.images(for: times) {
             let index = currentIndex
             currentIndex += 1
@@ -68,20 +70,40 @@ public final class ThumbnailProcessor: @unchecked Sendable {
             switch result {
             case .success(requestedTime: _, image: let image, actualTime: let actual):
                 let timestamp = self.formatTimestamp(seconds: actual.seconds)
-                let imageWithTimestamp = addTimestampToImage(image: image, timestamp: timestamp, size: layout.thumbnailSizes[index])
-                thumbnails[index] = (imageWithTimestamp, timestamp)
+                extractedFrames.append((index: index, image: image, timestamp: timestamp))
             case .failure(requestedTime: let requestedTime, error: let error):
                 logger.warning("⚠️ Frame extraction failed at \(self.formatTimestamp(seconds: requestedTime.seconds)): \(error.localizedDescription)")
                 failedIndices.append(index)
             }
+
+            // Report progress
+            progressHandler?(Double(currentIndex) / Double(times.count) * 0.6)
+        }
+
+        // Process extracted frames in parallel (add timestamps)
+        await withTaskGroup(of: (Int, CGImage, String).self) { group in
+            for frame in extractedFrames {
+                let size = layout.thumbnailSizes[frame.index]
+                group.addTask { [self] in
+                    let imageWithTimestamp = self.addTimestampToImage(image: frame.image, timestamp: frame.timestamp, size: size)
+                    return (frame.index, imageWithTimestamp, frame.timestamp)
+                }
+            }
+
+            for await (index, image, timestamp) in group {
+                thumbnails[index] = (image, timestamp)
+                // Report progress
+                progressHandler?(0.6 + Double(thumbnails.count) / Double(times.count) * 0.2)
+            }
         }
 
         // Retry failed extractions once
+        var stillFailed: [Int] = []
         if !failedIndices.isEmpty {
             logger.debug("🔄 Retrying \(failedIndices.count) failed extractions...")
             let failedTimes = failedIndices.map { times[$0] }
             var retryIndex = 0
-            var stillFailed: [Int] = []
+            var retriedFrames: [(index: Int, image: CGImage, timestamp: String)] = []
 
             for await result in generator.images(for: failedTimes) {
                 let originalIndex = failedIndices[retryIndex]
@@ -90,12 +112,26 @@ public final class ThumbnailProcessor: @unchecked Sendable {
                 switch result {
                 case .success(requestedTime: _, image: let image, actualTime: let actual):
                     let timestamp = self.formatTimestamp(seconds: actual.seconds)
-                    let imageWithTimestamp = addTimestampToImage(image: image, timestamp: timestamp, size: layout.thumbnailSizes[originalIndex])
-                    thumbnails[originalIndex] = (imageWithTimestamp, timestamp)
+                    retriedFrames.append((index: originalIndex, image: image, timestamp: timestamp))
                     logger.debug("✅ Retry successful for frame \(originalIndex)")
                 case .failure(requestedTime: let requestedTime, error: let error):
                     logger.error("❌ Retry failed for frame \(originalIndex) at \(self.formatTimestamp(seconds: requestedTime.seconds)): \(error.localizedDescription)")
                     stillFailed.append(originalIndex)
+                }
+            }
+
+            // Process retried frames in parallel
+            await withTaskGroup(of: (Int, CGImage, String).self) { group in
+                for frame in retriedFrames {
+                    let size = layout.thumbnailSizes[frame.index]
+                    group.addTask { [self] in
+                        let imageWithTimestamp = self.addTimestampToImage(image: frame.image, timestamp: frame.timestamp, size: size)
+                        return (frame.index, imageWithTimestamp, frame.timestamp)
+                    }
+                }
+
+                for await (index, image, timestamp) in group {
+                    thumbnails[index] = (image, timestamp)
                 }
             }
 
@@ -334,8 +370,10 @@ public final class ThumbnailProcessor: @unchecked Sendable {
             generator.requestedTimeToleranceBefore = .zero
             generator.requestedTimeToleranceAfter = .zero
         } else {
-            generator.requestedTimeToleranceBefore = CMTime(seconds: 10, preferredTimescale: 600)
-            generator.requestedTimeToleranceAfter = CMTime(seconds: 10, preferredTimescale: 600)
+            // Use 1 second tolerance for better frame accuracy while maintaining performance
+            // Previously was 10 seconds which could select incorrect frames
+            generator.requestedTimeToleranceBefore = CMTime(seconds: 1.0, preferredTimescale: 600)
+            generator.requestedTimeToleranceAfter = CMTime(seconds: 1.0, preferredTimescale: 600)
         }
         
         if !preview {
@@ -387,6 +425,7 @@ public final class ThumbnailProcessor: @unchecked Sendable {
     }
     
     private func createBlankImage(size: CGSize) -> CGImage? {
+        // Use standard RGB color space for blank images
         let colorSpace = CGColorSpaceCreateDeviceRGB()
         let context = CGContext(
             data: nil,
@@ -429,16 +468,23 @@ public final class ThumbnailProcessor: @unchecked Sendable {
         let bgColor = backgroundColor ?? UIColor(white: 0.1, alpha: 0.25).cgColor
         #endif
         logger.debug("🏷️ Creating enhanced metadata header image - Width: \(width)")
-        
-        // Use provided height or calculate based on width
-        var metadataHeight = height ?? Int(round(Double(width) * 0.08))
-        
+
         // Format resolution using video dimensions from metadata
         let resolution = "\(video.metadata.custom["width"] ?? "0")×\(video.metadata.custom["height"] ?? "0")"
-        
+
         let padding: CGFloat = 8.0
-        
-        let fontSize = max(forIphone ? 6.0 : 12.0, CGFloat(metadataHeight) / 4.0)
+
+        // Calculate font size first, independent of height
+        let baseFontSize = forIphone ? 6.0 : 12.0
+        let fontSize = max(baseFontSize, CGFloat(width) * 0.012) // 1.2% of width for scalability
+
+        // Calculate height based on content needs (3 lines + padding)
+        let estimatedLineHeight = fontSize * 1.5
+        let numberOfLines: CGFloat = 3.0 // title/duration/size, codec/resolution/bitrate, path
+        let calculatedHeight = Int(estimatedLineHeight * numberOfLines + padding * 4)
+
+        // Use provided height or calculated height
+        let metadataHeight = height ?? calculatedHeight
         
         // Create bitmap context for the header
         let colorSpace = CGColorSpaceCreateDeviceRGB()
@@ -835,7 +881,8 @@ public final class ThumbnailProcessor: @unchecked Sendable {
     private func addTimestampToImage(image: CGImage, timestamp: String, size: CGSize) -> CGImage {
         // Create a context for the image with appropriate scale
         let scale = max(1.0, min(1.2,Double(image.width) / size.width)) // Handle high-resolution images
-        let colorSpace = CGColorSpaceCreateDeviceRGB()
+        // Preserve source color space for accurate color representation
+        let colorSpace = image.colorSpace ?? CGColorSpaceCreateDeviceRGB()
         // Create a context that supports transparency
         guard let context = CGContext(
             data: nil,
@@ -864,7 +911,11 @@ public final class ThumbnailProcessor: @unchecked Sendable {
         
         // Save graphics state before clipping
         context.saveGState()
-        
+
+        // Enable antialiasing for smooth rounded corners
+        context.setShouldAntialias(true)
+        context.setAllowsAntialiasing(true)
+
         // Apply the clipping path for the rounded rectangle
         context.beginPath()
         context.addPath(roundedPath)
@@ -913,10 +964,10 @@ public final class ThumbnailProcessor: @unchecked Sendable {
         // Restore graphics state after image and vignette
         context.restoreGState()
         
-        // Calculate font size - more elegant proportions for Apple-like design
-        // Apple often uses highly legible but slightly smaller fonts in their designs
-        // Increased by 50% for better visibility
-        let fontSize = max(11.0, min(17.0, Double(image.width) / 18)) * scale * 1.5
+        // Calculate font size based on thumbnail height for consistent sizing
+        // Use 8% of thumbnail height, ensuring good readability across all sizes
+        // Previously calculated based on width which caused inconsistencies
+        let fontSize = max(10.0, min(24.0, size.height * 0.08)) * 1.5
         
         // Use a system font with bold weight for better readability
         #if canImport(AppKit)
@@ -957,21 +1008,19 @@ public final class ThumbnailProcessor: @unchecked Sendable {
         let nsString = NSString(string: timestamp)
         let stringSize = nsString.size(withAttributes: textAttributes)
         
-        // Padding for the pill-shaped background (Apple often uses minimal padding)
-        let paddingX: CGFloat = 10.0 * scale
-        let paddingY: CGFloat = 5.0 * scale
+        // Padding for the pill-shaped background (proportional to font size)
+        let paddingX: CGFloat = fontSize * 0.6
+        let paddingY: CGFloat = fontSize * 0.3
         
         // Calculate background rectangle dimensions with more subtle proportions
         let bgWidth = stringSize.width + (paddingX * 2)
         let bgHeight = stringSize.height + (paddingY * 2)
         
-        // Position at the bottom right corner - Apple often uses this placement
-        // for timestamps and similar metadata overlays
-        let margin = 12.0 * scale
+        // Position at the bottom right corner with proportional margins
+        // Use 2% of thumbnail width/height for consistent spacing
+        let margin = size.width * 0.02
         let bgX = rect.maxX - bgWidth - margin
-        // Force placement at the bottom (not top) by using a smaller value from the bottom edge
-        // This ensures the timestamp appears at the bottom right corner
-        let bottomMargin = 20.0 * scale // Slightly larger margin from bottom than sides for better visual balance
+        let bottomMargin = size.height * 0.02 // Proportional bottom margin
         let bgY = rect.maxY - bgHeight - bottomMargin
         
         // Draw a pill-shaped background with Apple's signature blur effect
@@ -1127,7 +1176,8 @@ public final class ThumbnailProcessor: @unchecked Sendable {
     private func addTimestampToBaseImage(image: CGImage, timestamp: String, size: CGSize, context: CGContext, rect: CGRect) -> CGImage {
         // Start fresh with a properly configured context
         let scale = max(1.0, Double(image.width) / size.width)
-        let colorSpace = CGColorSpaceCreateDeviceRGB()
+        // Preserve source color space for accurate color representation
+        let colorSpace = image.colorSpace ?? CGColorSpaceCreateDeviceRGB()
         
         // Create a new context with proper transparency settings
         guard let newContext = CGContext(
@@ -1148,8 +1198,13 @@ public final class ThumbnailProcessor: @unchecked Sendable {
         // Create rounded corners
         let cornerRadius = CGFloat(min(image.width, image.height)) * 0.08
         let roundedPath = CGPath(roundedRect: rect, cornerWidth: cornerRadius, cornerHeight: cornerRadius, transform: nil)
-        
+
         newContext.saveGState()
+
+        // Enable antialiasing for smooth rounded corners
+        newContext.setShouldAntialias(true)
+        newContext.setAllowsAntialiasing(true)
+
         newContext.beginPath()
         newContext.addPath(roundedPath)
         newContext.closePath()
@@ -1159,9 +1214,9 @@ public final class ThumbnailProcessor: @unchecked Sendable {
         newContext.draw(image, in: rect)
         newContext.restoreGState()
         
-        // Continue with text rendering
-        // Increased by 50% for better visibility
-        let fontSize = max(11.0, min(17.0, Double(image.width) / 18)) * scale * 1.5
+        // Calculate font size based on thumbnail height for consistent sizing
+        // Use 8% of thumbnail height, ensuring good readability across all sizes
+        let fontSize = max(10.0, min(24.0, size.height * 0.08)) * 1.5
         
         // Create font and attributes
         let font = CTFontCreateWithName("Helvetica-Bold" as CFString, fontSize, nil)
@@ -1191,12 +1246,11 @@ public final class ThumbnailProcessor: @unchecked Sendable {
         
         let nsString = NSString(string: timestamp)
         let stringSize = nsString.size(withAttributes: textAttributes)
-        
-        // Calculate text position for bottom right placement
-        let margin = 12.0 * scale
+
+        // Calculate text position for bottom right placement with proportional margins
+        let margin = size.width * 0.02
         let textX = rect.maxX - stringSize.width - margin
-        // Match the same bottom margin as the main method
-        let bottomMargin = 20.0 * scale
+        let bottomMargin = size.height * 0.02
         let textY = rect.maxY - stringSize.height - bottomMargin
         
         // Draw text directly without background

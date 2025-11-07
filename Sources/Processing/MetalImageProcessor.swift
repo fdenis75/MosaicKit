@@ -24,6 +24,7 @@ public final class MetalImageProcessor: @unchecked Sendable {
     private let commandQueue: MTLCommandQueue
     private let library: MTLLibrary
     private var textureCache: CVMetalTextureCache?
+    private let textureLoader: MTKTextureLoader
     private let signposter = OSSignposter(subsystem: "com.hypermovie", category: "metal-processor")
     
     // Compute pipelines for different operations
@@ -78,7 +79,10 @@ public final class MetalImageProcessor: @unchecked Sendable {
             throw MetalProcessorError.textureCacheCreationFailed
         }
         self.textureCache = textureCache
-        
+
+        // Create texture loader for efficient CGImage to MTLTexture conversion
+        self.textureLoader = MTKTextureLoader(device: device)
+
         // Create compute pipelines
         do {
             guard let scaleFunction = library.makeFunction(name: "scaleTexture"),
@@ -107,7 +111,7 @@ public final class MetalImageProcessor: @unchecked Sendable {
     
     // MARK: - Public Methods
     
-    /// Create a Metal texture from a CGImage
+    /// Create a Metal texture from a CGImage using MTKTextureLoader for efficiency
     /// - Parameter cgImage: The source CGImage
     /// - Returns: A Metal texture containing the image data
     public func createTexture(from cgImage: CGImage) throws -> MTLTexture {

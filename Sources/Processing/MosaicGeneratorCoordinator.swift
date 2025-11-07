@@ -307,19 +307,20 @@ public actor MosaicGeneratorCoordinator {
         logger.debug("🎬 Starting mosaic generation for \(videos.count) videos")
         
         // Dynamically adjust concurrency based on system capabilities
-        let processorCount = ProcessInfo.processInfo.activeProcessorCount * 4
+        let processorCount = ProcessInfo.processInfo.activeProcessorCount
         let systemMemory = ProcessInfo.processInfo.physicalMemory
         let memoryGB = Double(systemMemory) / 1_073_741_824.0 // Convert to GB
-        
-        // Calculate optimal concurrency:
-        // - Consider both CPU cores and available memory
-        // - Higher memory systems can handle more concurrent generations
-        // - But we still don't want to overload the system
-        let memoryBasedLimit = max(2, Int(memoryGB / config.density.factor)) // Rough estimate: 4GB per concurrent task
-        let cpuBasedLimit = max(2, processorCount - 1) // Leave one core free for system
-        let dynamicLimit = min(memoryBasedLimit, cpuBasedLimit)
-       // let dynamicLimit = concurrencyLimit
-        logger.debug("⚙️ Using dynamic concurrency limit of \(dynamicLimit) (CPU: \(processorCount), Memory: \(Int(memoryGB))GB, Config: \(self.concurrencyLimit))")
+
+        // Calculate optimal concurrency with balanced approach:
+        // - Don't oversubscribe CPU (use half of available cores)
+        // - Account for memory-intensive operations (realistic estimate per task)
+        // - Cap at 8 to prevent thermal throttling and maintain system responsiveness
+        let cpuBasedLimit = max(2, processorCount / 2) // Use half of cores to avoid oversubscription
+        let memoryPerTask = Double(config.width) * config.density.factor / 2000.0 // More realistic memory estimate in GB
+        let memoryBasedLimit = max(2, Int(memoryGB / memoryPerTask))
+        let dynamicLimit = min(memoryBasedLimit, cpuBasedLimit, 8, self.concurrencyLimit) // Cap at 8 for stability
+
+        logger.debug("⚙️ Using dynamic concurrency limit of \(dynamicLimit) (CPU cores: \(processorCount), Memory: \(Int(memoryGB))GB, Configured: \(self.concurrencyLimit))")
         
         // Prioritize videos based on various factors
         let prioritizedVideos = videos
