@@ -1,0 +1,61 @@
+{
+  "configurations" : [
+    {
+      "id" : "6EA90B91-B091-46F8-B2E9-56523957708C",
+      "name" : "Configuration 1",
+      "options" : {
+
+      }
+    }
+  ],
+  "defaultOptions" : {
+    "testTimeoutsEnabled" : true
+  },
+  "testTargets" : [
+    {
+      "parallelizable" : true,
+      "skippedTests" : [
+        "BatchMosaicGenerationTests",
+        "BatchMosaicGenerationTests\/testBatchGeneration1000pxM()",
+        "BatchMosaicGenerationTests\/testBatchGeneration1000pxS()",
+        "BatchMosaicGenerationTests\/testBatchGeneration1000pxXS()",
+        "BatchMosaicGenerationTests\/testBatchGeneration1000pxXXL()",
+        "BatchMosaicGenerationTests\/testBatchGeneration2000pxM()",
+        "BatchMosaicGenerationTests\/testBatchGeneration2000pxS()",
+        "BatchMosaicGenerationTests\/testBatchGeneration2000pxXS()",
+        "BatchMosaicGenerationTests\/testBatchGeneration2000pxXXL()",
+        "BatchMosaicGenerationTests\/testBatchGeneration5000pxM()",
+        "BatchMosaicGenerationTests\/testBatchGeneration5000pxS()",
+        "BatchMosaicGenerationTests\/testBatchGeneration5000pxXS()",
+        "BatchMosaicGenerationTests\/testBatchGeneration5000pxXXL()",
+        "BatchMosaicGenerationTests\/testBatchGenerationPerformance()",
+        "GeneratorComparisonTests\/testExtraLargeMosaicComparison()",
+        "GeneratorComparisonTests\/testMultipleDensityComparison()",
+        "VideoInputPerformanceTests",
+        "VideoInputPerformanceTests\/testConcurrentLoadingPerformance()",
+        "VideoInputPerformanceTests\/testConcurrentLoadingStructured()",
+        "VideoInputPerformanceTests\/testConcurrentVideoLoading()",
+        "VideoInputPerformanceTests\/testSequentialLoadingPerformance()",
+        "VideoInputPerformanceTests\/testSequentialLoadingWithMetrics()",
+        "VideoInputPerformanceTests\/testSequentialVideoLoading()",
+        "VideoInputPerformanceTests\/testSequentialVsConcurrentComparison()",
+        "VideoInputTests",
+        "VideoInputTests\/testAspectRatioEdgeCases()",
+        "VideoInputTests\/testCodableConformance()",
+        "VideoInputTests\/testEdgeCaseValues()",
+        "VideoInputTests\/testHashableConformance()",
+        "VideoInputTests\/testInitDefaultTitle()",
+        "VideoInputTests\/testInitFromInvalidRemoteURL()",
+        "VideoInputTests\/testInitFromRemoteURL()",
+        "VideoInputTests\/testInitWithExplicitMetadata()",
+        "VideoInputTests\/testRemoteURLPerformance()"
+      ],
+      "target" : {
+        "containerPath" : "container:",
+        "identifier" : "MosaicKitTests",
+        "name" : "MosaicKitTests"
+      }
+    }
+  ],
+  "version" : 1
+}

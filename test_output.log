@@ -1,0 +1,79 @@
+warning: 'mosaickit': found 1 file(s) which are unhandled; explicitly declare them as resources or exclude from the target
+    /Users/francois/Dev/Packages/MosaicKit/MosaicKit/Tests/MosaicKitTests/README_COMPARISON_TEST.md
+[0/1] Planning build
+Building for debugging...
+[0/4] Write sources
+[1/4] Write swift-version--58304C5D6DBC2206.txt
+[3/9] Emitting module MosaicKitTests
+/Users/francois/Dev/Packages/MosaicKit/MosaicKit/Tests/MosaicKitTests/BatchMosaicGenerationTests.swift:98:13: warning: 'nonisolated(unsafe)' has no effect on instance method 'createModelContext()', consider using 'nonisolated'
+ 96 | 
+ 97 |     /// Create a fresh ModelContext for each test run
+ 98 |     private nonisolated(unsafe) func createModelContext() throws -> ModelContext {
+    |             `- warning: 'nonisolated(unsafe)' has no effect on instance method 'createModelContext()', consider using 'nonisolated'
+ 99 |         let schema = Schema([])
+100 |         let config = ModelConfiguration(isStoredInMemoryOnly: true)
+[4/9] Compiling MosaicKitTests VideoInputTests.swift
+[5/9] Compiling MosaicKitTests BatchMosaicGenerationTests.swift
+/Users/francois/Dev/Packages/MosaicKit/MosaicKit/Tests/MosaicKitTests/BatchMosaicGenerationTests.swift:98:13: warning: 'nonisolated(unsafe)' has no effect on instance method 'createModelContext()', consider using 'nonisolated'
+ 96 | 
+ 97 |     /// Create a fresh ModelContext for each test run
+ 98 |     private nonisolated(unsafe) func createModelContext() throws -> ModelContext {
+    |             `- warning: 'nonisolated(unsafe)' has no effect on instance method 'createModelContext()', consider using 'nonisolated'
+ 99 |         let schema = Schema([])
+100 |         let config = ModelConfiguration(isStoredInMemoryOnly: true)
+
+/Users/francois/Dev/Packages/MosaicKit/MosaicKit/Tests/MosaicKitTests/BatchMosaicGenerationTests.swift:287:27: warning: sending 'context' risks causing data races [#SendingRisksDataRace]
+285 |         let context = try createModelContext()
+286 |         // Note: Using nonisolated(unsafe) context for testing purposes
+287 |         let coordinator = MosaicGeneratorCoordinator(
+    |                           |- warning: sending 'context' risks causing data races [#SendingRisksDataRace]
+    |                           `- note: sending task-isolated 'context' to actor-isolated initializer 'init(mosaicGenerator:modelContext:concurrencyLimit:generatorPreference:)' risks causing data races between actor-isolated and task-isolated uses
+288 |             modelContext: context,
+289 |             concurrencyLimit: 4
+
+[#SendingRisksDataRace]: <https://docs.swift.org/compiler/documentation/diagnostics/sending-risks-data-race>
+[6/9] Compiling MosaicKitTests GeneratorComparisonTests.swift
+/Users/francois/Dev/Packages/MosaicKit/MosaicKit/Tests/MosaicKitTests/GeneratorComparisonTests.swift:240:13: warning: variable 'progressUpdates' was never mutated; consider changing to 'let' constant
+238 | 
+239 |         // Track progress
+240 |         var progressUpdates: [Double] = []
+    |             `- warning: variable 'progressUpdates' was never mutated; consider changing to 'let' constant
+241 | 
+242 |         // Generate mosaic
+[7/9] Compiling MosaicKitTests VideoInputPerformanceTests.swift
+[8/11] Emitting module MosaicKitPackageTests
+[9/11] Compiling MosaicKitPackageTests runner.swift
+[9/11] Write Objects.LinkFileList
+[10/11] Linking MosaicKitPackageTests
+Build complete! (4.04s)
+Test Suite 'Selected tests' started at 2025-11-08 14:51:51.323.
+Test Suite 'MosaicKitPackageTests.xctest' started at 2025-11-08 14:51:51.325.
+Test Suite 'GeneratorComparisonTests' started at 2025-11-08 14:51:51.325.
+Test Case '-[MosaicKitTests.GeneratorComparisonTests testLargeMosaicComparison]' started.
+/Users/francois/Dev/Packages/MosaicKit/MosaicKit/Sources/Processing/MetalMosaicGenerator.swift:55: error: -[MosaicKitTests.GeneratorComparisonTests testLargeMosaicComparison] : failed: caught error: "libraryCreationFailed"
+Test Case '-[MosaicKitTests.GeneratorComparisonTests testLargeMosaicComparison]' failed (0.378 seconds).
+Test Suite 'GeneratorComparisonTests' failed at 2025-11-08 14:51:51.702.
+	 Executed 1 test, with 1 failure (1 unexpected) in 0.378 (0.378) seconds
+Test Suite 'MosaicKitPackageTests.xctest' failed at 2025-11-08 14:51:51.702.
+	 Executed 1 test, with 1 failure (1 unexpected) in 0.378 (0.378) seconds
+Test Suite 'Selected tests' failed at 2025-11-08 14:51:51.702.
+	 Executed 1 test, with 1 failure (1 unexpected) in 0.378 (0.379) seconds
+
+📁 Output directories:
+  Metal:         /var/folders/6d/dv5dx7bn6gg9f48k5f0y2t2h0000gn/T/MosaicKitTests/Metal
+  Core Graphics: /var/folders/6d/dv5dx7bn6gg9f48k5f0y2t2h0000gn/T/MosaicKitTests/CoreGraphics
+
+================================================================================
+🔬 Large Mosaic Performance Comparison Test
+Video: /Volumes/Ext-6TB-2/0002025/11/04/Kristy Black.mp4
+================================================================================
+
+📊 Testing Metal Implementation...
+
+✅ Mosaics saved to:
+  open /var/folders/6d/dv5dx7bn6gg9f48k5f0y2t2h0000gn/T/MosaicKitTests/Metal
+  open /var/folders/6d/dv5dx7bn6gg9f48k5f0y2t2h0000gn/T/MosaicKitTests/CoreGraphics
+􀟈  Test run started.
+􀄵  Testing Library Version: 1085
+􀄵  Target Platform: arm64e-apple-macos14.0
+􁁛  Test run with 0 tests in 0 suites passed after 0.001 seconds.

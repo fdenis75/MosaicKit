@@ -1,15 +1,20 @@
 import Foundation
 import Logging
+#if os(macOS)
 import Metal
+#endif
 
 /// Main entry point for MosaicKit - Video Mosaic Generation Library
 ///
-/// MosaicKit provides high-performance video mosaic generation using Metal acceleration.
+/// MosaicKit provides high-performance video mosaic generation with platform-specific optimizations:
+/// - **macOS**: Metal-accelerated GPU processing (default) or Core Graphics
+/// - **iOS**: Core Graphics with vImage/Accelerate optimization (default)
 ///
 /// ## Usage
 ///
-/// ### Single Video
+/// ### Single Video (Default Generator)
 /// ```swift
+/// // Auto-selects Metal on macOS, Core Graphics on iOS
 /// let generator = try MosaicGenerator()
 /// let videoURL = URL(fileURLWithPath: "/path/to/video.mp4")
 /// let outputDir = URL(fileURLWithPath: "/path/to/output")
@@ -20,6 +25,15 @@ import Metal
 ///     config: config,
 ///     outputDirectory: outputDir
 /// )
+/// ```
+///
+/// ### Choosing a Specific Generator
+/// ```swift
+/// // Use Core Graphics on macOS (instead of Metal)
+/// let cgGenerator = try MosaicGenerator(preference: .preferCoreGraphics)
+///
+/// // Prefer Metal (macOS only, falls back to CG on iOS)
+/// let metalGenerator = try MosaicGenerator(preference: .preferMetal)
 /// ```
 ///
 /// ### Multiple Videos (Batch)
@@ -33,21 +47,33 @@ import Metal
 ///     print("Progress: \(completed)/\(total)")
 /// }
 /// ```
+@available(iOS 18, *)
 public final class MosaicGenerator {
     private let logger = Logger(label: "com.mosaickit")
     private let internalGenerator: Any?
+    private let generatorPreference: MosaicGeneratorFactory.GeneratorPreference
 
-    public init() throws {
-        // Initialize Metal processor
-        guard MTLCreateSystemDefaultDevice() != nil else {
-            throw MosaicError.metalNotSupported
-        }
+    /// Initialize a mosaic generator with default platform preference
+    /// - Default: Metal on macOS, Core Graphics on iOS
+    @available(iOS 18, *)
+    public convenience init() throws {
+        try self.init(preference: .auto)
+    }
 
-        // Create internal generator if available
+    /// Initialize a mosaic generator with specified preference
+    /// - Parameter preference: The preferred generator implementation
+    ///   - `.auto`: Metal on macOS, Core Graphics on iOS (default)
+    ///   - `.preferMetal`: Metal (macOS only, falls back to Core Graphics on iOS)
+    ///   - `.preferCoreGraphics`: Core Graphics (available on both platforms)
+    @available(iOS 18, *)
+    public init(preference: MosaicGeneratorFactory.GeneratorPreference) throws {
+        self.generatorPreference = preference
+
         if #available(macOS 15, iOS 18, *) {
-            self.internalGenerator = try? MetalMosaicGenerator()
+            self.internalGenerator = try MosaicGeneratorFactory.createGenerator(preference: preference)
         } else {
             self.internalGenerator = nil
+            throw MosaicError.invalidConfiguration("MosaicKit requires macOS 15.0+ or iOS 18.0+")
         }
     }
 
@@ -64,14 +90,12 @@ public final class MosaicGenerator {
     ) async throws -> URL {
         logger.info("Generating mosaic from \(videoURL.lastPathComponent)")
 
-        // Check platform availability
         guard #available(macOS 15, iOS 18, *) else {
             throw MosaicError.invalidConfiguration("MosaicKit requires macOS 15.0+ or iOS 18.0+")
         }
 
-        // Get the internal generator
-        guard let generator = internalGenerator as? MetalMosaicGenerator else {
-            throw MosaicError.metalNotSupported
+        guard let generator = internalGenerator as? any MosaicGeneratorProtocol else {
+            throw MosaicError.invalidConfiguration("Generator not available")
         }
 
         // Create VideoInput from URL
@@ -82,11 +106,25 @@ public final class MosaicGenerator {
         var updatedConfig = config
         updatedConfig.outputdirectory = outputDirectory
 
-        // Generate mosaic using Metal
-        logger.info("Generating mosaic with Metal acceleration...")
+        // Log which generator is being used
+        switch generatorPreference {
+        case .auto:
+            #if os(macOS)
+            logger.info("Generating mosaic with Metal acceleration (auto-selected)...")
+            #else
+            logger.info("Generating mosaic with Core Graphics acceleration (auto-selected)...")
+            #endif
+        case .preferMetal:
+            logger.info("Generating mosaic with Metal acceleration (preferred)...")
+        case .preferCoreGraphics:
+            logger.info("Generating mosaic with Core Graphics acceleration (preferred)...")
+        }
+
+        // Generate mosaic using the selected generator
         let mosaicURL = try await generator.generate(
             for: video,
-            config: updatedConfig
+            config: updatedConfig,
+            forIphone: false
         )
 
         logger.info("Mosaic generated successfully at \(mosaicURL.lastPathComponent)")

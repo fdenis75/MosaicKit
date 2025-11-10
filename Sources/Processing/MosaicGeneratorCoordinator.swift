@@ -90,37 +90,37 @@ public actor MosaicGeneratorCoordinator {
     
     
     // MARK: - Properties
-    
+
     public let logger = Logger(subsystem: "com.hypermovie", category: "mosaic-coordinator")
-    public let mosaicGenerator: MetalMosaicGenerator
+    public let mosaicGenerator: any MosaicGeneratorProtocol
     public let concurrencyLimit: Int
     public var activeTasks: [UUID: Task<MosaicGenerationResult, Error>] = [:]
     public var progressHandlers: [UUID: (MosaicGenerationProgress) -> Void] = [:]
     public let modelContext: ModelContext
-    
+
     // MARK: - Initialization
-    
+
     /// Creates a new mosaic generator coordinator
     /// - Parameters:
-    ///   - mosaicGenerator: The mosaic generator to use
+    ///   - mosaicGenerator: The mosaic generator to use (optional, will auto-create if nil)
     ///   - modelContext: The SwiftData model context
     ///   - concurrencyLimit: Maximum number of concurrent generation tasks
-    ///   - generatorType: The type of mosaic generator to use (standard, metal, or auto)
+    ///   - generatorPreference: Preference for which generator implementation to use
     public init(
-        mosaicGenerator: (MetalMosaicGenerator)? = nil,
+        mosaicGenerator: (any MosaicGeneratorProtocol)? = nil,
         modelContext: ModelContext,
         concurrencyLimit: Int = 31,
-        generatorType: MosaicGeneratorFactory.GeneratorType = .metal
+        generatorPreference: MosaicGeneratorFactory.GeneratorPreference = .auto
     ) {
         if let generator = mosaicGenerator {
             self.mosaicGenerator = generator
             logger.debug("🎬 MosaicGeneratorCoordinator initialized with provided generator")
         } else {
-            let generator = try! MosaicGeneratorFactory.createGenerator()
+            let generator = try! MosaicGeneratorFactory.createGenerator(preference: generatorPreference)
             self.mosaicGenerator = generator
-            logger.debug("🎬 MosaicGeneratorCoordinator initialized with Metal generator")
+            logger.debug("🎬 MosaicGeneratorCoordinator initialized with auto-created generator")
         }
-        
+
         self.modelContext = modelContext
         self.concurrencyLimit = concurrencyLimit
         logger.debug("🎬 MosaicGeneratorCoordinator initialized with concurrency limit: \(concurrencyLimit)")

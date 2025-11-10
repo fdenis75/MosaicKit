@@ -20,9 +20,9 @@ typealias PlatformImage = NSImage
 typealias PlatformImage = UIImage
 #endif
 
-/// A Metal-accelerated implementation of the MosaicGenerating protocol
+/// A Metal-accelerated implementation of the MosaicGeneratorProtocol
 @available(macOS 15, iOS 18, *)
-public actor MetalMosaicGenerator{
+public actor MetalMosaicGenerator: MosaicGeneratorProtocol {
     // MARK: - Properties
     
     private let logger = Logger(subsystem: "com.hypermovie", category: "metal-mosaic-generator")
