@@ -494,7 +494,7 @@ public actor MetalMosaicGenerator: MosaicGeneratorProtocol {
         }
 
         // Generate structured path: {root}/{service}/{creator}/{configHash}/
-        baseOutputDirectory = config.generateOutputDirectory(rootDirectory: rootFolder)
+        baseOutputDirectory = config.generateOutputDirectory(rootDirectory: rootFolder, videoInput: video)
 
         if baseOutputDirectory.startAccessingSecurityScopedResource() {
             defer { baseOutputDirectory.stopAccessingSecurityScopedResource() }
@@ -507,7 +507,7 @@ public actor MetalMosaicGenerator: MosaicGeneratorProtocol {
         // Generate filename using configuration method
         let videoURL = video.url
         let originalFilename = videoURL.deletingPathExtension().lastPathComponent
-        let filename = config.generateFilename(originalFilename: originalFilename)
+        let filename = config.generateFilename(originalFilename: originalFilename, videoInput: video)
 
         mosaicURL = baseOutputDirectory.appendingPathComponent(filename)
         

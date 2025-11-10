@@ -28,17 +28,6 @@ public struct MosaicConfiguration: Codable, Sendable {
 
     public var outputdirectory:  URL? = nil
 
-    // MARK: - Metadata for Structured Output
-
-    /// The service name (e.g., "onlyfans", "fansly", "candfans")
-    public var serviceName: String?
-
-    /// The creator name for organizing output
-    public var creatorName: String?
-
-    /// The post ID for file naming
-    public var postID: String?
-
     // MARK: - Initialization
 
     /// Creates a new MosaicConfiguration instance.
@@ -50,10 +39,7 @@ public struct MosaicConfiguration: Codable, Sendable {
         includeMetadata: Bool = true,
         useAccurateTimestamps: Bool = false,
         compressionQuality: Double = 0.4,
-        ourputdirectory: URL? = nil,
-        serviceName: String? = nil,
-        creatorName: String? = nil,
-        postID: String? = nil
+        ourputdirectory: URL? = nil
     ) {
         self.width = width
         self.density = density
@@ -63,9 +49,6 @@ public struct MosaicConfiguration: Codable, Sendable {
         self.useAccurateTimestamps = useAccurateTimestamps
         self.compressionQuality = compressionQuality
         self.outputdirectory = ourputdirectory
-        self.serviceName = serviceName
-        self.creatorName = creatorName
-        self.postID = postID
     }
 
     /// Default configuration for mosaic generation
@@ -85,7 +68,7 @@ public struct MosaicConfiguration: Codable, Sendable {
     /// Format: "{width}_{density}_{aspectRatio}"
     /// Example: "5120_XL_16-9"
     public var configurationHash: String {
-        let aspectRatioString = layout.aspectRatio.description.replacingOccurrences(of: ":", with: "-")
+        let aspectRatioString = layout.aspectRatio.rawValue.replacingOccurrences(of: ":", with: "-")
         return "\(width)_\(density.name)_\(aspectRatioString)"
     }
 
@@ -98,16 +81,20 @@ public struct MosaicConfiguration: Codable, Sendable {
 
     /// Generate the structured output path
     /// Format: {rootDir}/{service}/{creator}/{configHash}/
-    public func generateOutputDirectory(rootDirectory: URL) -> URL {
+    /// - Parameters:
+    ///   - rootDirectory: The root directory for output
+    ///   - videoInput: The video input containing organizational metadata
+    /// - Returns: The full output directory URL
+    public func generateOutputDirectory(rootDirectory: URL, videoInput: VideoInput) -> URL {
         var path = rootDirectory
 
         // Add service name if available
-        if let service = serviceName {
+        if let service = videoInput.serviceName {
             path = path.appendingPathComponent(Self.sanitizeForFilePath(service))
         }
 
         // Add creator name if available
-        if let creator = creatorName {
+        if let creator = videoInput.creatorName {
             path = path.appendingPathComponent(Self.sanitizeForFilePath(creator))
         }
 
@@ -119,7 +106,11 @@ public struct MosaicConfiguration: Codable, Sendable {
 
     /// Generate filename with post ID prefix
     /// Format: {postID}_{originalFilename}_{configHash}.{extension}
-    public func generateFilename(originalFilename: String) -> String {
+    /// - Parameters:
+    ///   - originalFilename: The original video filename
+    ///   - videoInput: The video input containing organizational metadata
+    /// - Returns: The sanitized filename with configuration hash
+    public func generateFilename(originalFilename: String, videoInput: VideoInput) -> String {
         var sanitizedName = Self.sanitizeForFilePath(originalFilename)
 
         // Remove existing extension
@@ -135,7 +126,7 @@ public struct MosaicConfiguration: Codable, Sendable {
 
         // Build filename with optional post ID prefix
         var filename: String
-        if let postID = postID {
+        if let postID = videoInput.postID {
             filename = "\(Self.sanitizeForFilePath(postID))_\(sanitizedName)"
         } else {
             filename = sanitizedName

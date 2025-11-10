@@ -46,6 +46,17 @@ public struct VideoInput: Codable, Hashable, Sendable {
     /// Video metadata (codec, bitrate, etc.)
     public let metadata: VideoMetadata
 
+    // MARK: - Organizational Metadata
+
+    /// Service name (e.g., "onlyfans", "fansly", "candfans")
+    public let serviceName: String?
+
+    /// Creator name for organizing output
+    public let creatorName: String?
+
+    /// Post ID for file naming
+    public let postID: String?
+
     // MARK: - Computed Properties
 
     /// Video resolution as CGSize
@@ -72,7 +83,10 @@ public struct VideoInput: Codable, Hashable, Sendable {
         height: Double? = nil,
         frameRate: Double? = nil,
         fileSize: Int64? = nil,
-        metadata: VideoMetadata = VideoMetadata()
+        metadata: VideoMetadata = VideoMetadata(),
+        serviceName: String? = nil,
+        creatorName: String? = nil,
+        postID: String? = nil
     ) {
         self.id = id
         self.url = url
@@ -83,12 +97,19 @@ public struct VideoInput: Codable, Hashable, Sendable {
         self.frameRate = frameRate
         self.fileSize = fileSize
         self.metadata = metadata
+        self.serviceName = serviceName
+        self.creatorName = creatorName
+        self.postID = postID
     }
 
     /// Initialize from URL and extract metadata
-    /// - Parameter url: URL to the video file
+    /// - Parameters:
+    ///   - url: URL to the video file
+    ///   - serviceName: Optional service name for organization
+    ///   - creatorName: Optional creator name for organization
+    ///   - postID: Optional post ID for file naming
     /// - Throws: Error if video cannot be accessed or metadata cannot be extracted
-    public init(from url: URL) async throws {
+    public init(from url: URL, serviceName: String? = nil, creatorName: String? = nil, postID: String? = nil) async throws {
         let asset = AVURLAsset(url: url)
 
         // Load all tracks
@@ -140,7 +161,10 @@ public struct VideoInput: Codable, Hashable, Sendable {
             height: Double(naturalSize.height),
             frameRate: Double(nominalFrameRate),
             fileSize: fileSize,
-            metadata: VideoMetadata(codec: codec, bitrate: bitrate)
+            metadata: VideoMetadata(codec: codec, bitrate: bitrate),
+            serviceName: serviceName,
+            creatorName: creatorName,
+            postID: postID
         )
     }
 }
