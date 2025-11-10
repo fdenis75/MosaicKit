@@ -484,47 +484,32 @@ public actor MetalMosaicGenerator: MosaicGeneratorProtocol {
         // Determine base output directory
         var baseOutputDirectory: URL
         var mosaicURL: URL!
-       
-            
-          
-                let rootFolder = config.outputdirectory!
-                    
-                        baseOutputDirectory = rootFolder.appendingPathComponent(dirSuffix, isDirectory: true)
-                    
-            
-            if baseOutputDirectory.startAccessingSecurityScopedResource() {
-                defer { baseOutputDirectory.stopAccessingSecurityScopedResource() }
-            }
-            
-            try FileManager.default.createDirectory(at: baseOutputDirectory,
-                                                    withIntermediateDirectories: true,
-                                                    attributes: nil)
-            
-            // Generate filename based on configuration
-            let filename: String
-          //  if config.outputdirectory.addFullPath
-                // Replace path separators and spaces with underscores
-                  let videoURL = video.url // Safely unwrap video.url
-                    // logger.error("❌ Cannot generate filename: Video is missing URL.")
-                    // throw MosaicError.saveFailed(URL(fileURLWithPath: "/dev/null"), NSError(domain: "com.hypermovie", code: -5, userInfo: [NSLocalizedDescriptionKey: "Missing video URL for filename generation"])) // Or a more specific error
-                 
-                let fullPath = videoURL.deletingPathExtension().path
-                    .replacingOccurrences(of: "/", with: "_")
-                    .replacingOccurrences(of: " ", with: "_")
-                
-                // Ensure the filename isn't too long
-                let maxLength = 200 - dirSuffix.count
-                let truncatedPath = fullPath.count > maxLength
-                ? String(fullPath.suffix(maxLength))
-                : fullPath
-                
-                filename = "\(truncatedPath)_\(config.width)_\(config.density.name)_\(config.layout.aspectRatio)"
-     
-            
-            
-             mosaicURL = baseOutputDirectory
-                .appendingPathComponent(filename)
-                .appendingPathExtension(config.format.rawValue)
+
+        // Use structured output directory if metadata is available
+        guard let rootFolder = config.outputdirectory else {
+            logger.error("❌ No output directory specified in configuration")
+            throw MosaicError.saveFailed(URL(fileURLWithPath: "/dev/null"),
+                                        NSError(domain: "com.mosaickit", code: -1,
+                                               userInfo: [NSLocalizedDescriptionKey: "Missing output directory"]))
+        }
+
+        // Generate structured path: {root}/{service}/{creator}/{configHash}/
+        baseOutputDirectory = config.generateOutputDirectory(rootDirectory: rootFolder)
+
+        if baseOutputDirectory.startAccessingSecurityScopedResource() {
+            defer { baseOutputDirectory.stopAccessingSecurityScopedResource() }
+        }
+
+        try FileManager.default.createDirectory(at: baseOutputDirectory,
+                                                withIntermediateDirectories: true,
+                                                attributes: nil)
+
+        // Generate filename using configuration method
+        let videoURL = video.url
+        let originalFilename = videoURL.deletingPathExtension().lastPathComponent
+        let filename = config.generateFilename(originalFilename: originalFilename)
+
+        mosaicURL = baseOutputDirectory.appendingPathComponent(filename)
         
         logger.debug("💾 Saving mosaic to: \(mosaicURL.path)")
         
