@@ -5,10 +5,12 @@
 import Testing
 @testable import MosaicKit
 import Foundation
+import CoreGraphics
+import ImageIO
 
 /// Performance comparison tests between Metal and Core Graphics implementations
-@available(macOS 15, iOS 18, *)
-final struct TestMetal {
+//@available(macOS 15, iOS 18, *)
+struct TestMetal : ~Copyable {
     
     // MARK: - Properties
     

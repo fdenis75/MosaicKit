@@ -15,8 +15,8 @@
     {
       "target" : {
         "containerPath" : "container:",
-        "identifier" : "Metal",
-        "name" : "Metal"
+        "identifier" : "MetalPerformance",
+        "name" : "MetalPerformance"
       }
     }
   ],
