@@ -1,9 +1,9 @@
 import Foundation
 import Logging
-#if os(macOS)
+/*#if os(macOS)
 import Metal
 #endif
-
+*/
 /// Main entry point for MosaicKit - Video Mosaic Generation Library
 ///
 /// MosaicKit provides high-performance video mosaic generation with platform-specific optimizations:

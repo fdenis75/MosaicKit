@@ -32,9 +32,9 @@ let package = Package(
             ]
         ),
         .testTarget(
-            name: "MosaicKitTests",
+            name: "MetalPerformance",
             dependencies: ["MosaicKit"],
-            path: "Tests/MosaicKitTests"
+            path: "Tests/MetalPerformance"
         )
     ]
 )
