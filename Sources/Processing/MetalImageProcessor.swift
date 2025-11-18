@@ -32,7 +32,7 @@ public final class MetalImageProcessor: @unchecked Sendable {
     private let compositePipeline: MTLComputePipelineState
     private let fillPipeline: MTLComputePipelineState
     private let borderPipeline: MTLComputePipelineState
-    private let shadowPipeline: MTLComputePipelineState
+    // Note: shadowPipeline removed - unused in codebase
     
     // Performance metrics
     private var lastExecutionTime: CFAbsoluteTime = 0
@@ -88,18 +88,17 @@ public final class MetalImageProcessor: @unchecked Sendable {
             guard let scaleFunction = library.makeFunction(name: "scaleTexture"),
                   let compositeFunction = library.makeFunction(name: "compositeTextures"),
                   let fillFunction = library.makeFunction(name: "fillTexture"),
-                  let borderFunction = library.makeFunction(name: "addBorder"),
-                  let shadowFunction = library.makeFunction(name: "addShadow") else {
+                  let borderFunction = library.makeFunction(name: "addBorder") else {
                 logger.error("❌ Failed to create Metal functions")
                 throw MetalProcessorError.functionNotFound
             }
-            
+
             self.scalePipeline = try device.makeComputePipelineState(function: scaleFunction)
             self.compositePipeline = try device.makeComputePipelineState(function: compositeFunction)
             self.fillPipeline = try device.makeComputePipelineState(function: fillFunction)
             self.borderPipeline = try device.makeComputePipelineState(function: borderFunction)
-            self.shadowPipeline = try device.makeComputePipelineState(function: shadowFunction)
-            
+            // Note: shadowPipeline removed - unused shader
+
             logger.debug("✅ Created all compute pipelines")
         } catch {
             logger.error("❌ Failed to create compute pipeline: \(error.localizedDescription)")
@@ -111,17 +110,60 @@ public final class MetalImageProcessor: @unchecked Sendable {
     
     // MARK: - Public Methods
     
+    /// Create a Metal texture directly from a CVPixelBuffer using CVMetalTextureCache (zero-copy)
+    /// - Parameter pixelBuffer: The source CVPixelBuffer (from VideoToolbox)
+    /// - Returns: A Metal texture containing the image data
+    /// - Note: This is the PREFERRED method for VideoToolbox frames as it avoids CPU-GPU copies
+    public func createTexture(from pixelBuffer: CVPixelBuffer) throws -> MTLTexture {
+        let startTime = CFAbsoluteTimeGetCurrent()
+        defer { trackPerformance(startTime: startTime) }
+
+        guard let textureCache = textureCache else {
+            logger.error("❌ Texture cache not available")
+            throw MetalProcessorError.textureCacheCreationFailed
+        }
+
+        let width = CVPixelBufferGetWidth(pixelBuffer)
+        let height = CVPixelBufferGetHeight(pixelBuffer)
+
+        var cvMetalTexture: CVMetalTexture?
+        let status = CVMetalTextureCacheCreateTextureFromImage(
+            kCFAllocatorDefault,
+            textureCache,
+            pixelBuffer,
+            nil,
+            .rgba8Unorm,
+            width,
+            height,
+            0,
+            &cvMetalTexture
+        )
+
+        guard status == kCVReturnSuccess, let cvTexture = cvMetalTexture else {
+            logger.error("❌ Failed to create texture from pixel buffer: \(status)")
+            throw MetalProcessorError.textureCreationFailed
+        }
+
+        guard let texture = CVMetalTextureGetTexture(cvTexture) else {
+            logger.error("❌ Failed to get Metal texture from CVMetalTexture")
+            throw MetalProcessorError.textureCreationFailed
+        }
+
+        return texture
+    }
+
     /// Create a Metal texture from a CGImage using MTKTextureLoader for efficiency
     /// - Parameter cgImage: The source CGImage
     /// - Returns: A Metal texture containing the image data
+    /// - Note: Prefer createTexture(from: CVPixelBuffer) for VideoToolbox frames
     public func createTexture(from cgImage: CGImage) throws -> MTLTexture {
         let startTime = CFAbsoluteTimeGetCurrent()
         defer { trackPerformance(startTime: startTime) }
-        
+
         let width = cgImage.width
         let height = cgImage.height
    //     print("width: \(width), height: \(height)")
-        
+
         // Create a texture descriptor with proper alpha channel support
         let textureDescriptor = MTLTextureDescriptor.texture2DDescriptor(
             pixelFormat: .rgba8Unorm,  // Change from bgra8Unorm to rgba8Unorm
@@ -130,16 +172,16 @@ public final class MetalImageProcessor: @unchecked Sendable {
             mipmapped: false
         )
         textureDescriptor.usage = [.shaderRead, .shaderWrite]
-        
+
         guard let texture = device.makeTexture(descriptor: textureDescriptor) else {
             logger.error("❌ Failed to create texture")
             throw MetalProcessorError.textureCreationFailed
         }
-        
+
         // Create a bitmap context with proper alpha channel support
         let bytesPerRow = 4 * width
         let region = MTLRegionMake2D(0, 0, width, height)
-        
+
         // Create a Core Graphics context with proper alpha channel support
         guard let context = CGContext(
             data: nil,
@@ -153,15 +195,15 @@ public final class MetalImageProcessor: @unchecked Sendable {
             logger.error("❌ Failed to create CGContext")
             throw MetalProcessorError.contextCreationFailed
         }
-        
+
         // Draw the image to the context
         context.draw(cgImage, in: CGRect(x: 0, y: 0, width: width, height: height))
-        
+
         // Copy the data to the texture
         if let data = context.data {
             texture.replace(region: region, mipmapLevel: 0, withBytes: data, bytesPerRow: bytesPerRow)
         }
-        
+
    //     logger.debug("✅ Created Metal texture: \(width)x\(height)")
         return texture
     }
@@ -217,12 +259,14 @@ public final class MetalImageProcessor: @unchecked Sendable {
     /// - Parameters:
     ///   - texture: The source texture
     ///   - size: The target size
+    ///   - commandBuffer: Optional shared command buffer for batching operations
     /// - Returns: A new scaled texture
-    public func scaleTexture(_ texture: MTLTexture, to size: CGSize) throws -> MTLTexture {
+    public func scaleTexture(_ texture: MTLTexture, to size: CGSize, commandBuffer: MTLCommandBuffer? = nil) throws -> MTLTexture {
         let startTime = CFAbsoluteTimeGetCurrent()
         defer { trackPerformance(startTime: startTime) }
-        
+
         // Create output texture
+        // OPTIMIZATION: Use .private storage for GPU-only intermediate textures (2-3x faster)
         let textureDescriptor = MTLTextureDescriptor.texture2DDescriptor(
             pixelFormat: .rgba8Unorm,
             width: Int(size.width),
@@ -230,23 +274,27 @@ public final class MetalImageProcessor: @unchecked Sendable {
             mipmapped: false
         )
         textureDescriptor.usage = [.shaderRead, .shaderWrite]
-        
+        textureDescriptor.storageMode = .private // GPU-only memory, faster than managed/shared
+
         guard let outputTexture = device.makeTexture(descriptor: textureDescriptor) else {
             logger.error("❌ Failed to create output texture")
             throw MetalProcessorError.textureCreationFailed
         }
-        
-        // Create command buffer and encoder
-        guard let commandBuffer = commandQueue.makeCommandBuffer(),
-              let encoder = commandBuffer.makeComputeCommandEncoder() else {
+
+        // Use provided command buffer or create a new one
+        let shouldCommit = commandBuffer == nil
+        let cmdBuffer = commandBuffer ?? commandQueue.makeCommandBuffer()
+
+        guard let cmdBuffer = cmdBuffer,
+              let encoder = cmdBuffer.makeComputeCommandEncoder() else {
             logger.error("❌ Failed to create command buffer or encoder")
             throw MetalProcessorError.commandBufferCreationFailed
         }
-        
+
         encoder.setComputePipelineState(scalePipeline)
         encoder.setTexture(texture, index: 0)
         encoder.setTexture(outputTexture, index: 1)
-        
+
         // Calculate threadgroup size
         let threadgroupSize = calculateThreadgroupSize(pipeline: scalePipeline)
         let threadgroupCount = MTLSize(
@@ -254,13 +302,15 @@ public final class MetalImageProcessor: @unchecked Sendable {
             height: (outputTexture.height + threadgroupSize.height - 1) / threadgroupSize.height,
             depth: 1
         )
-        
+
         encoder.dispatchThreadgroups(threadgroupCount, threadsPerThreadgroup: threadgroupSize)
         encoder.endEncoding()
-        
-        commandBuffer.commit()
-        commandBuffer.waitUntilCompleted()
-        
+
+        // Only commit if we created the command buffer (not batching)
+        if shouldCommit {
+            cmdBuffer.commit()
+        }
+
       //  logger.debug("✅ Scaled texture: \(texture.width)x\(texture.height) -> \(outputTexture.width)x\(outputTexture.height)")
         return outputTexture
     }
@@ -270,28 +320,33 @@ public final class MetalImageProcessor: @unchecked Sendable {
     ///   - sourceTexture: The source texture to composite
     ///   - destinationTexture: The destination texture
     ///   - position: The position to place the source texture
+    ///   - commandBuffer: Optional shared command buffer for batching operations
     public func compositeTexture(
         _ sourceTexture: MTLTexture,
         onto destinationTexture: MTLTexture,
-        at position: CGPoint
+        at position: CGPoint,
+        commandBuffer: MTLCommandBuffer? = nil
     ) throws {
         let startTime = CFAbsoluteTimeGetCurrent()
         defer { trackPerformance(startTime: startTime) }
-        
-        // Create command buffer and encoder
-        guard let commandBuffer = commandQueue.makeCommandBuffer(),
-              let encoder = commandBuffer.makeComputeCommandEncoder() else {
+
+        // Use provided command buffer or create a new one
+        let shouldCommit = commandBuffer == nil
+        let cmdBuffer = commandBuffer ?? commandQueue.makeCommandBuffer()
+
+        guard let cmdBuffer = cmdBuffer,
+              let encoder = cmdBuffer.makeComputeCommandEncoder() else {
             logger.error("❌ Failed to create command buffer or encoder")
             throw MetalProcessorError.commandBufferCreationFailed
         }
-        
+
         encoder.setComputePipelineState(compositePipeline)
         encoder.setTexture(sourceTexture, index: 0)
         encoder.setTexture(destinationTexture, index: 1)
-        
+
         var positionValue = uint2(UInt32(position.x), UInt32(position.y))
         encoder.setBytes(&positionValue, length: MemoryLayout<uint2>.size, index: 0)
-        
+
         // Calculate threadgroup size
         let threadgroupSize = calculateThreadgroupSize(pipeline: compositePipeline)
         let threadgroupCount = MTLSize(
@@ -299,13 +354,15 @@ public final class MetalImageProcessor: @unchecked Sendable {
             height: (sourceTexture.height + threadgroupSize.height - 1) / threadgroupSize.height,
             depth: 1
         )
-        
+
         encoder.dispatchThreadgroups(threadgroupCount, threadsPerThreadgroup: threadgroupSize)
         encoder.endEncoding()
-        
-        commandBuffer.commit()
-        commandBuffer.waitUntilCompleted()
-        
+
+        // Only commit if we created the command buffer (not batching)
+        if shouldCommit {
+            cmdBuffer.commit()
+        }
+
        // logger.debug("✅ Composited texture at position: (\(position.x), \(position.y))")
     }
     
@@ -313,11 +370,12 @@ public final class MetalImageProcessor: @unchecked Sendable {
     /// - Parameters:
     ///   - size: The size of the texture
     ///   - color: The color to fill with (RGBA, 0.0-1.0)
+    ///   - commandBuffer: Optional shared command buffer for batching operations
     /// - Returns: A new texture filled with the specified color
-    public func createFilledTexture(size: CGSize, color: SIMD4<Float>) throws -> MTLTexture {
+    public func createFilledTexture(size: CGSize, color: SIMD4<Float>, commandBuffer: MTLCommandBuffer? = nil) throws -> MTLTexture {
         let startTime = CFAbsoluteTimeGetCurrent()
         defer { trackPerformance(startTime: startTime) }
-        
+
         // Create output texture
         let textureDescriptor = MTLTextureDescriptor.texture2DDescriptor(
             pixelFormat: .rgba8Unorm,
@@ -326,25 +384,28 @@ public final class MetalImageProcessor: @unchecked Sendable {
             mipmapped: false
         )
         textureDescriptor.usage = [.shaderRead, .shaderWrite]
-        
+
         guard let outputTexture = device.makeTexture(descriptor: textureDescriptor) else {
             logger.error("❌ Failed to create output texture")
             throw MetalProcessorError.textureCreationFailed
         }
-        
-        // Create command buffer and encoder
-        guard let commandBuffer = commandQueue.makeCommandBuffer(),
-              let encoder = commandBuffer.makeComputeCommandEncoder() else {
+
+        // Use provided command buffer or create a new one
+        let shouldCommit = commandBuffer == nil
+        let cmdBuffer = commandBuffer ?? commandQueue.makeCommandBuffer()
+
+        guard let cmdBuffer = cmdBuffer,
+              let encoder = cmdBuffer.makeComputeCommandEncoder() else {
             logger.error("❌ Failed to create command buffer or encoder")
             throw MetalProcessorError.commandBufferCreationFailed
         }
-        
+
         encoder.setComputePipelineState(fillPipeline)
         encoder.setTexture(outputTexture, index: 0)
-        
+
         var colorValue = color
         encoder.setBytes(&colorValue, length: MemoryLayout<SIMD4<Float>>.size, index: 0)
-        
+
         // Calculate threadgroup size
         let threadgroupSize = calculateThreadgroupSize(pipeline: fillPipeline)
         let threadgroupCount = MTLSize(
@@ -352,13 +413,15 @@ public final class MetalImageProcessor: @unchecked Sendable {
             height: (outputTexture.height + threadgroupSize.height - 1) / threadgroupSize.height,
             depth: 1
         )
-        
+
         encoder.dispatchThreadgroups(threadgroupCount, threadsPerThreadgroup: threadgroupSize)
         encoder.endEncoding()
-        
-        commandBuffer.commit()
-        commandBuffer.waitUntilCompleted()
-        
+
+        // Only commit if we created the command buffer (not batching)
+        if shouldCommit {
+            cmdBuffer.commit()
+        }
+
        // logger.debug("✅ Created filled texture: \(outputTexture.width)x\(outputTexture.height)")
         return outputTexture
     }
@@ -370,36 +433,41 @@ public final class MetalImageProcessor: @unchecked Sendable {
     ///   - size: The size of the region
     ///   - color: The border color (RGBA, 0.0-1.0)
     ///   - width: The border width in pixels
+    ///   - commandBuffer: Optional shared command buffer for batching operations
     public func addBorder(
         to texture: MTLTexture,
         at position: CGPoint,
         size: CGSize,
         color: SIMD4<Float>,
-        width: Float
+        width: Float,
+        commandBuffer: MTLCommandBuffer? = nil
     ) throws {
         let startTime = CFAbsoluteTimeGetCurrent()
         defer { trackPerformance(startTime: startTime) }
-        
-        // Create command buffer and encoder
-        guard let commandBuffer = commandQueue.makeCommandBuffer(),
-              let encoder = commandBuffer.makeComputeCommandEncoder() else {
+
+        // Use provided command buffer or create a new one
+        let shouldCommit = commandBuffer == nil
+        let cmdBuffer = commandBuffer ?? commandQueue.makeCommandBuffer()
+
+        guard let cmdBuffer = cmdBuffer,
+              let encoder = cmdBuffer.makeComputeCommandEncoder() else {
             logger.error("❌ Failed to create command buffer or encoder")
             throw MetalProcessorError.commandBufferCreationFailed
         }
-        
+
         encoder.setComputePipelineState(borderPipeline)
         encoder.setTexture(texture, index: 0)
-        
+
         var positionValue = uint2(UInt32(position.x), UInt32(position.y))
         var sizeValue = uint2(UInt32(size.width), UInt32(size.height))
         var colorValue = color
         var widthValue = width
-        
+
         encoder.setBytes(&positionValue, length: MemoryLayout<uint2>.size, index: 0)
         encoder.setBytes(&sizeValue, length: MemoryLayout<uint2>.size, index: 1)
         encoder.setBytes(&colorValue, length: MemoryLayout<SIMD4<Float>>.size, index: 2)
         encoder.setBytes(&widthValue, length: MemoryLayout<Float>.size, index: 3)
-        
+
         // Calculate threadgroup size
         let threadgroupSize = calculateThreadgroupSize(pipeline: borderPipeline)
         let threadgroupCount = MTLSize(
@@ -407,13 +475,15 @@ public final class MetalImageProcessor: @unchecked Sendable {
             height: (texture.height + threadgroupSize.height - 1) / threadgroupSize.height,
             depth: 1
         )
-        
+
         encoder.dispatchThreadgroups(threadgroupCount, threadsPerThreadgroup: threadgroupSize)
         encoder.endEncoding()
-        
-        commandBuffer.commit()
-        commandBuffer.waitUntilCompleted()
-        
+
+        // Only commit if we created the command buffer (not batching)
+        if shouldCommit {
+            cmdBuffer.commit()
+        }
+
     //    logger.debug("✅ Added border at position: (\(position.x), \(position.y)), size: \(size.width)x\(size.height)")
     }
 
@@ -678,6 +748,7 @@ public final class MetalImageProcessor: @unchecked Sendable {
         }
         
         // Process frames in batches to avoid GPU timeout
+        // OPTIMIZATION: Use single command buffer per batch instead of per-operation
         let batchSize = 20
         let totalBatches = (frames.count + batchSize - 1) / batchSize
          progressHandler?(0.3)
@@ -685,48 +756,67 @@ public final class MetalImageProcessor: @unchecked Sendable {
             let batchEnd = min(batchStart + batchSize, frames.count)
             let batchFrames = frames[batchStart..<batchEnd]
             let currentBatch = batchStart / batchSize
-            
+
             logger.debug("🔄 Processing batch \(currentBatch + 1)/\(totalBatches): frames \(batchStart+1)-\(batchEnd)")
-            
+
+            // Create a single command buffer for the entire batch
+            guard let batchCommandBuffer = commandQueue.makeCommandBuffer() else {
+                logger.error("❌ Failed to create batch command buffer")
+                throw MetalProcessorError.commandBufferCreationFailed
+            }
+
             for (index, frame) in batchFrames.enumerated() {
                 let actualIndex = batchStart + index
                 guard actualIndex < layout.positions.count else { break }
-                
+
                 let position = layout.positions[actualIndex]
                 let size = layout.thumbnailSizes[actualIndex]
-                
+
                 // Adjust position to account for metadata header
                 let adjustedY = position.y + (hasMetadata ? Int(metadataHeight) : 0)
-                
+
                 // Convert CGImage to Metal texture
                 let frameTexture = try createTexture(from: frame.image)
-                
-                // Scale the frame if needed
+
+                // Scale the frame if needed (using shared command buffer)
                 let scaledTexture: MTLTexture
                 if frameTexture.width != Int(size.width) || frameTexture.height != Int(size.height) {
                     scaledTexture = try scaleTexture(
                         frameTexture,
-                        to: CGSize(width: size.width, height: size.height)
+                        to: CGSize(width: size.width, height: size.height),
+                        commandBuffer: batchCommandBuffer
                     )
                 } else {
                     scaledTexture = frameTexture
                 }
-                
-                // Composite the frame onto the mosaic at adjusted position
+
+                // Composite the frame onto the mosaic at adjusted position (using shared command buffer)
                 try compositeTexture(
                     scaledTexture,
                     onto: mosaicTexture,
-                    at: CGPoint(x: position.x, y: adjustedY)
+                    at: CGPoint(x: position.x, y: adjustedY),
+                    commandBuffer: batchCommandBuffer
                 )
-                
+
                 // Update progress based on frame completion
                 let frameProgress = 0.3 + ( 0.6 * Double(actualIndex + 1) / Double(frames.count))
                 progressHandler?(frameProgress)
-                
+
                 if Task.isCancelled {
                     logger.warning("❌ Mosaic creation cancelled")
                     throw MetalProcessorError.cancelled
                 }
+            }
+
+            // Commit the entire batch at once and wait for completion
+            // OPTIMIZATION: Use await instead of waitUntilCompleted for async contexts
+            batchCommandBuffer.commit()
+            await batchCommandBuffer.completed()
+
+            // Check for errors
+            if batchCommandBuffer.status == .error {
+                logger.error("❌ Batch command buffer execution failed")
+                throw MetalProcessorError.commandBufferCreationFailed
             }
         }
         
@@ -753,14 +843,41 @@ public final class MetalImageProcessor: @unchecked Sendable {
     
     // MARK: - Private Methods
     
-    private func calculateThreadgroupSize(pipeline: MTLComputePipelineState) -> MTLSize {
-        let maxThreadsPerThreadgroup = pipeline.maxTotalThreadsPerThreadgroup
+    /// Calculate optimal threadgroup size for a given pipeline and texture dimensions
+    /// - Parameters:
+    ///   - pipeline: The compute pipeline state
+    ///   - textureWidth: Optional texture width for adaptive sizing
+    ///   - textureHeight: Optional texture height for adaptive sizing
+    /// - Returns: Optimal threadgroup size
+    private func calculateThreadgroupSize(
+        pipeline: MTLComputePipelineState,
+        textureWidth: Int? = nil,
+        textureHeight: Int? = nil
+    ) -> MTLSize {
         let threadExecutionWidth = pipeline.threadExecutionWidth
-        
-        let threadsPerThreadgroup = min(maxThreadsPerThreadgroup, threadExecutionWidth * threadExecutionWidth)
-        let width = min(threadExecutionWidth, threadsPerThreadgroup)
-        let height = threadsPerThreadgroup / width
-        
+
+        // OPTIMIZATION: Adaptive threadgroup sizing based on texture dimensions
+        // Use 16x16 as optimal for most operations, but adapt for small textures
+        var width = min(16, threadExecutionWidth)
+        var height = min(16, threadExecutionWidth)
+
+        if let texWidth = textureWidth {
+            width = min(width, texWidth)
+        }
+        if let texHeight = textureHeight {
+            height = min(height, texHeight)
+        }
+
+        // Ensure we don't exceed pipeline limits
+        let maxThreadsPerThreadgroup = pipeline.maxTotalThreadsPerThreadgroup
+        let totalThreads = width * height
+        if totalThreads > maxThreadsPerThreadgroup {
+            // Scale down proportionally
+            let scale = sqrt(Double(maxThreadsPerThreadgroup) / Double(totalThreads))
+            width = Int(Double(width) * scale)
+            height = Int(Double(height) * scale)
+        }
+
         return MTLSize(width: width, height: height, depth: 1)
     }
     

@@ -113,13 +113,16 @@ public actor MetalMosaicGenerator: MosaicGeneratorProtocol {
                 let aspectRatio = try await calculateAspectRatio(from: asset)
               //  logger.debug("📐 Video aspect ratio: \(aspectRatio)")*/
                 let duration = video.duration ?? 9999.99
-                let aspectRatio = (video.width ?? 1.0) / (video.height ?? 1.0)  
+                if duration < 5.0 {
+                    throw MosaicError.invalidVideo("video too short")
+                }
+                let aspectRatio = (video.width ?? 1.0) / (video.height ?? 1.0)
                 progressHandlers[videoID]?(MosaicGenerationProgress(
                     video: video,
                     progress: 0.2,
                     status: .countingThumbnails
                 ))
-                let frameCount = await layoutProcessor.calculateThumbnailCount(
+                let frameCount =  layoutProcessor.calculateThumbnailCount(
                     duration: duration,
                     width: config.width,
                     density: config.density,
@@ -133,7 +136,7 @@ public actor MetalMosaicGenerator: MosaicGeneratorProtocol {
                     progress: 0.3,
                     status: .computingLayout
                 ))
-                let layout = await layoutProcessor.calculateLayout(
+                let layout =  layoutProcessor.calculateLayout(
                     originalAspectRatio: aspectRatio,
                     mosaicAspectRatio: config.layout.aspectRatio,
                     thumbnailCount: frameCount,

@@ -93,7 +93,7 @@ public actor MosaicGeneratorCoordinator {
 
     public let logger = Logger(subsystem: "com.hypermovie", category: "mosaic-coordinator")
     public let mosaicGenerator: any MosaicGeneratorProtocol
-    public let concurrencyLimit: Int
+    public var concurrencyLimit: Int
     public var activeTasks: [UUID: Task<MosaicGenerationResult, Error>] = [:]
     public var progressHandlers: [UUID: (MosaicGenerationProgress) -> Void] = [:]
     public let modelContext: ModelContext
@@ -109,7 +109,7 @@ public actor MosaicGeneratorCoordinator {
     public init(
         mosaicGenerator: (any MosaicGeneratorProtocol)? = nil,
         modelContext: ModelContext,
-        concurrencyLimit: Int = 31,
+        concurrencyLimit: Int = 0,
         generatorPreference: MosaicGeneratorFactory.GeneratorPreference = .auto
     ) {
         if let generator = mosaicGenerator {
@@ -126,6 +126,9 @@ public actor MosaicGeneratorCoordinator {
         logger.debug("🎬 MosaicGeneratorCoordinator initialized with concurrency limit: \(concurrencyLimit)")
     }
     
+    public func setConcurrencyLimit(_ limit: Int) {
+        self.concurrencyLimit = limit
+    }
     // MARK: - Public Methods
     
     /// Generate a mosaic for a single video
@@ -305,22 +308,29 @@ public actor MosaicGeneratorCoordinator {
         progressHandler: @escaping @Sendable (MosaicGenerationProgress) -> Void
     ) async throws -> [MosaicGenerationResult] {
         logger.debug("🎬 Starting mosaic generation for \(videos.count) videos")
-        
-        // Dynamically adjust concurrency based on system capabilities
-        let processorCount = ProcessInfo.processInfo.activeProcessorCount
-        let systemMemory = ProcessInfo.processInfo.physicalMemory
-        let memoryGB = Double(systemMemory) / 1_073_741_824.0 // Convert to GB
+        var dynamicLimit = 0
+        if self.concurrencyLimit == 0 {
+            // Dynamically adjust concurrency based on system capabilities
+            let processorCount = ProcessInfo.processInfo.activeProcessorCount
+            let systemMemory = ProcessInfo.processInfo.physicalMemory
+            let memoryGB = Double(systemMemory) / 1_073_741_824.0 // Convert to GB
+            
+            // Calculate optimal concurrency with balanced approach:
+            // - Don't oversubscribe CPU (use half of available cores)
+            // - Account for memory-intensive operations (realistic estimate per task)
+            // - Cap at 8 to prevent thermal throttling and maintain system responsiveness
+            let cpuBasedLimit = max(2, processorCount / 2) // Use half of cores to avoid oversubscription
+            let memoryPerTask = Double(config.width) * config.density.factor / 2000.0 // More realistic memory estimate in GB
+            let memoryBasedLimit = max(2, Int(memoryGB / memoryPerTask))
+            self.concurrencyLimit = min(memoryBasedLimit, cpuBasedLimit, 8, self.concurrencyLimit) // Cap at 8 for stability
+            logger.debug("⚙️ Using dynamic concurrency limit of \(self.concurrencyLimit) (CPU cores: \(processorCount), Memory: \(Int(memoryGB))GB, Configured: \(self.concurrencyLimit))")
 
-        // Calculate optimal concurrency with balanced approach:
-        // - Don't oversubscribe CPU (use half of available cores)
-        // - Account for memory-intensive operations (realistic estimate per task)
-        // - Cap at 8 to prevent thermal throttling and maintain system responsiveness
-        let cpuBasedLimit = max(2, processorCount / 2) // Use half of cores to avoid oversubscription
-        let memoryPerTask = Double(config.width) * config.density.factor / 2000.0 // More realistic memory estimate in GB
-        let memoryBasedLimit = max(2, Int(memoryGB / memoryPerTask))
-        let dynamicLimit = min(memoryBasedLimit, cpuBasedLimit, 8, self.concurrencyLimit) // Cap at 8 for stability
+        }else
+        {
+           // self.concurrencyLimit
+            logger.debug("⚙️ Using predefinie (dynamicLimit) \(self.concurrencyLimit))")
 
-        logger.debug("⚙️ Using dynamic concurrency limit of \(dynamicLimit) (CPU cores: \(processorCount), Memory: \(Int(memoryGB))GB, Configured: \(self.concurrencyLimit))")
+        }
         
         // Prioritize videos based on various factors
         let prioritizedVideos = videos
@@ -335,7 +345,7 @@ public actor MosaicGeneratorCoordinator {
             var videoIndex = 0
             
             // Initial batch: fill up to the concurrency limit
-            while inProgress < dynamicLimit && videoIndex < prioritizedVideos.count {
+            while inProgress < self.concurrencyLimit && videoIndex < prioritizedVideos.count {
                 let video = videos[videoIndex]
                 videoIndex += 1
                 inProgress += 1
@@ -379,7 +389,7 @@ public actor MosaicGeneratorCoordinator {
                 logger.debug("🔄 Progress: \(Int(overallProgress * 100))% (\(completed)/\(videos.count) complete)")
                 
                 // Start new tasks as slots become available
-                while inProgress < dynamicLimit && videoIndex < prioritizedVideos.count {
+                while inProgress < self.concurrencyLimit && videoIndex < prioritizedVideos.count {
                     let video = videos[videoIndex]
                     videoIndex += 1
                     inProgress += 1

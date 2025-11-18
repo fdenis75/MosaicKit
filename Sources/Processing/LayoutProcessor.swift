@@ -478,6 +478,10 @@ public final class LayoutProcessor {
     {
         logger.debug("Staring another round")
         let newThumbCount = Int(Double(thumbnailCount) * 0.8)
+        if newThumbCount <= 4
+        {
+            return calculateClassicLayout(originalAspectRatio: originalAspectRatio, thumbnailCount: 4, mosaicWidth: mosaicWidth)
+        }
         return calculateCustomLayout(originalAspectRatio: originalAspectRatio, thumbnailCount: newThumbCount, mosaicWidth: mosaicWidth, mosaicAspectRatio: mosaicAspectRatio, density:density)
     }
     return bestLayout!
