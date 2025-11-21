@@ -91,7 +91,8 @@ public actor MosaicGeneratorCoordinator {
     
     // MARK: - Properties
 
-    public let logger = Logger(subsystem: "com.hypermovie", category: "mosaic-coordinator")
+    public let logger = Logger(subsystem: "com.mosaicKit", category: "mosaic-coordinator")
+    public let signposter = OSSignposter(subsystem: "com.mosaicKit", category: "mosaic-coordinator")
     public let mosaicGenerator: any MosaicGeneratorProtocol
     public var concurrencyLimit: Int
     public var activeTasks: [UUID: Task<MosaicGenerationResult, Error>] = [:]
@@ -127,7 +128,13 @@ public actor MosaicGeneratorCoordinator {
     }
     
     public func setConcurrencyLimit(_ limit: Int) {
+        let oldLimit = self.concurrencyLimit
         self.concurrencyLimit = limit
+
+        // Emit signpost event when concurrency limit changes
+        signposter.emitEvent("Concurrency Limit Changed",
+            "Old: \(oldLimit), New: \(limit)")
+        logger.debug("⚙️ Concurrency limit changed from \(oldLimit) to \(limit)")
     }
     // MARK: - Public Methods
     
@@ -140,21 +147,25 @@ public actor MosaicGeneratorCoordinator {
     public func generateMosaic(for video: VideoInput, config: MosaicConfiguration, forIphone: Bool = false, progressHandler: @escaping @Sendable (MosaicGenerationProgress) -> Void) async throws -> MosaicGenerationResult {
 
         logger.debug("🎯 Starting mosaic generation for video: \(video.title ?? "N/A")")
-        
+
         // Safely unwrap video.id
-       let videoID = video.id
+        let videoID = video.id
         // Store progress handler
         progressHandlers[videoID] = progressHandler // Use unwrapped ID
-        
+
         // Report initial progress
         progressHandler(MosaicGenerationProgress(
             video: video,
             progress: 0.0,
             status: .queued
         ))
-        
-        // Create and start task
-        let task = Task<MosaicGenerationResult, Error> {
+
+        // Create and start task with userInitiated priority for single video generation
+        // This ensures user-requested operations get priority over batch operations
+        let task = Task<MosaicGenerationResult, Error>(priority: .userInitiated) {
+            // Check for cancellation at start
+            try Task.checkCancellation()
+
             do {
                 // Report in-progress status
                 progressHandler(MosaicGenerationProgress(
@@ -162,11 +173,14 @@ public actor MosaicGeneratorCoordinator {
                     progress: 0.1,
                     status: .inProgress
                 ))
-                
+
+                // Check for cancellation before expensive operation
+                try Task.checkCancellation()
+
                 // Generate mosaic
                 await mosaicGenerator.setProgressHandler(for: video, handler: progressHandler)
                 let outputURL = try await mosaicGenerator.generate(for: video, config: config, forIphone: forIphone)
-                
+
                 // Report completion
                 let result = MosaicGenerationResult(video: video, outputURL: outputURL)
                 progressHandler(MosaicGenerationProgress(
@@ -175,7 +189,7 @@ public actor MosaicGeneratorCoordinator {
                     status: .completed,
                     outputURL: outputURL
                 ))
-                
+
                 logger.debug("✅ Mosaic generation completed for video: \(video.title ?? "N/A")")
                 return result
             } catch {
@@ -190,17 +204,17 @@ public actor MosaicGeneratorCoordinator {
                 throw error
             }
         }
-        
+
         // Store task
         activeTasks[videoID] = task // Use unwrapped ID
-        
+
         // Wait for task to complete
         let result = try await task.value
-        
+
         // Clean up
         activeTasks[videoID] = nil // Use unwrapped ID
         progressHandlers[videoID] = nil // Use unwrapped ID
-        
+
         return result
     }
     
@@ -308,7 +322,13 @@ public actor MosaicGeneratorCoordinator {
         progressHandler: @escaping @Sendable (MosaicGenerationProgress) -> Void
     ) async throws -> [MosaicGenerationResult] {
         logger.debug("🎬 Starting mosaic generation for \(videos.count) videos")
-        var dynamicLimit = 0
+        let signpostID = signposter.makeSignpostID()
+        // Use class-level signposter for performance tracking
+        let globalState = signposter.beginInterval("Starting mosaic Generation for batch", id: signpostID)
+        let concurrencyState = signposter.beginInterval("Concurrency setup", id: signpostID)
+        // Determine the effective concurrency limit for this batch
+        // If concurrencyLimit is 0, calculate dynamically based on system resources
+        var effectiveConcurrencyLimit: Int
         if self.concurrencyLimit == 0 {
             // Dynamically adjust concurrency based on system capabilities
             let processorCount = ProcessInfo.processInfo.activeProcessorCount
@@ -318,117 +338,143 @@ public actor MosaicGeneratorCoordinator {
             // Calculate optimal concurrency with balanced approach:
             // - Don't oversubscribe CPU (use half of available cores)
             // - Account for memory-intensive operations (realistic estimate per task)
-            // - Cap at 8 to prevent thermal throttling and maintain system responsiveness
             let cpuBasedLimit = max(2, processorCount / 2) // Use half of cores to avoid oversubscription
             let memoryPerTask = Double(config.width) * config.density.factor / 2000.0 // More realistic memory estimate in GB
             let memoryBasedLimit = max(2, Int(memoryGB / memoryPerTask))
-            self.concurrencyLimit = min(memoryBasedLimit, cpuBasedLimit, 8, self.concurrencyLimit) // Cap at 8 for stability
-            logger.debug("⚙️ Using dynamic concurrency limit of \(self.concurrencyLimit) (CPU cores: \(processorCount), Memory: \(Int(memoryGB))GB, Configured: \(self.concurrencyLimit))")
-
-        }else
-        {
-           // self.concurrencyLimit
-            logger.debug("⚙️ Using predefinie (dynamicLimit) \(self.concurrencyLimit))")
-
-        }
+            effectiveConcurrencyLimit = min(memoryBasedLimit, cpuBasedLimit)
+            
+           
         
+            logger.debug("⚙️ Using dynamic concurrency limit of \(effectiveConcurrencyLimit) (CPU cores: \(processorCount), Memory: \(Int(memoryGB))GB)")
+        } else {
+            // Use the configured concurrency limit (set via init or setConcurrencyLimit)
+            effectiveConcurrencyLimit = self.concurrencyLimit
+
+            logger.debug("⚙️ Using configured concurrency limit: \(effectiveConcurrencyLimit)")
+        }
+        signposter.endInterval("Concurrency setup", concurrencyState)
         // Prioritize videos based on various factors
         let prioritizedVideos = videos
         
-        // Use TaskGroup for better structured concurrency
+        // Use DiscardingTaskGroup for better memory management (Swift 5.9+)
+        // This automatically frees resources as tasks complete instead of accumulating results
+        var results: [MosaicGenerationResult] = []
+        var completed = 0
+        var successCount = 0
+        var failureCount = 0
+        var activeTasks = 0
+        
         return try await withThrowingTaskGroup(of: MosaicGenerationResult.self) { group in
-            var results: [MosaicGenerationResult] = []
-            results.reserveCapacity(videos.count) // Pre-allocate for performance
-            
-            var inProgress = 0
-            var completed = 0
             var videoIndex = 0
-            
-            // Initial batch: fill up to the concurrency limit
-            while inProgress < self.concurrencyLimit && videoIndex < prioritizedVideos.count {
-                let video = videos[videoIndex]
-                videoIndex += 1
-                inProgress += 1
+            let signpostVideoID = signposter.makeSignpostID()
+            for video in prioritizedVideos {
+                if effectiveConcurrencyLimit != self.concurrencyLimit {
+                    signposter.emitEvent("applying change of concurrency",id: signpostID,
+                                         "Active: \(activeTasks)/\(effectiveConcurrencyLimit)")
+                    effectiveConcurrencyLimit = self.concurrencyLimit
+                    signposter.emitEvent("New effective concurent: ",id: signpostID,
+                                         
+                                        "effective: (effectiveConcurrencyLimit)")
+                }
+                while activeTasks >= effectiveConcurrencyLimit {
+                    
+                    logger.debug("treshold reached : \(activeTasks)/\(effectiveConcurrencyLimit)")
+                    signposter.emitEvent("Wainting for slot",id: signpostID,
+                                         "Active: \(activeTasks)/\(effectiveConcurrencyLimit)")
+                    try  await Task.sleep(for: .seconds(0.2))
+                    if let result = try  await group.next() {
+                        results.append(result)
+                        completed += 1
+                        activeTasks -= 1
+                        signposter.emitEvent("result arrived",id: signpostID
+                                            )
+                        
+                        if result.isSuccess {
+                            successCount += 1
+                        } else {
+                            failureCount += 1
+                        }
+                        
+                        // Report aggregated progress (useful for UI progress indicators)
+                        let overallProgress = Double(completed) / Double(videos.count)
+                        logger.debug("🔄 Progress: \(Int(overallProgress * 100))% (\(completed)/\(videos.count) complete)")
+                    }
+                }
                 
-                // Report status
+                logger.debug("Adding tasks")
                 progressHandler(MosaicGenerationProgress(
                     video: video,
                     progress: 0.0,
                     status: .queued
                 ))
+                // Emit signpost event when adding task to group
+                activeTasks += 1
                 
-                // Add task to group
-                group.addTask { @Sendable in
+                signposter.emitEvent("Task Added to Group",
+                                     "Video: \(video.title), Index: \(videoIndex), Active: \(activeTasks)/\(effectiveConcurrencyLimit)")
+               // let videoProcessstate = signposter.beginInterval("processing video", "Video: \(video.title)")
+                group.addTask(priority: .medium) { @Sendable in
+                    // Check for cancellation at start
+                    try Task.checkCancellation()
+                    
                     // Create individual progress handler to track this video
                     let videoProgressHandler: @Sendable (MosaicGenerationProgress) -> Void = { progress in
-                        let updatedProgress = MosaicGenerationProgress(
-                            video: progress.video,
-                            progress: progress.progress,
-                            status: progress.status,
-                            outputURL: progress.outputURL,
-                            error: progress.error                        )
-                        progressHandler(updatedProgress)
+                        progressHandler(progress)
                     }
-                    
+                    let videoProcessstate = self.signposter.beginInterval("processing video",id: signpostVideoID,  "Video: \(video.title)")
                     do {
-                        return try await self.generateMosaic(for: video, config: config, forIphone: forIphone, progressHandler: videoProgressHandler)
+                        
+                        self.logger.debug("starting generation")
+                        let result = try await self.generateMosaic(
+                            for: video,
+                            config: config,
+                            forIphone: forIphone,
+                            progressHandler: videoProgressHandler
+                        )
+                        self.logger.debug("finished generation")
+                        self.signposter.endInterval("processing video", videoProcessstate,"Video: \(video.title)")
+                        
+                        return result
+                        
                     } catch {
+                        self.signposter.endInterval("processing video", videoProcessstate,"Error Video: \(video.title)")
                         return MosaicGenerationResult(video: video, error: error)
                     }
                 }
             }
             
-            // Process videos as tasks complete, maintaining optimal concurrency
+            
             while let result = try await group.next() {
+                self.logger.debug("wainting results")
+                
                 results.append(result)
                 completed += 1
-                inProgress -= 1
+                activeTasks -= 1
+                //self.logger.debug("ersult new active task value: \(activeTasks)")
+                self.logger.debug("result arrived")
+                
+                if result.isSuccess {
+                    successCount += 1
+                } else {
+                    failureCount += 1
+                }
                 
                 // Report aggregated progress (useful for UI progress indicators)
                 let overallProgress = Double(completed) / Double(videos.count)
                 logger.debug("🔄 Progress: \(Int(overallProgress * 100))% (\(completed)/\(videos.count) complete)")
                 
-                // Start new tasks as slots become available
-                while inProgress < self.concurrencyLimit && videoIndex < prioritizedVideos.count {
-                    let video = videos[videoIndex]
-                    videoIndex += 1
-                    inProgress += 1
-                    
-                    // Report status
-                    progressHandler(MosaicGenerationProgress(
-                        video: video,
-                        progress: 0.0,
-                        status: .queued                    ))
-                    
-                    // Add next task to group
-                    group.addTask { @Sendable in
-                        let videoProgressHandler: @Sendable (MosaicGenerationProgress) -> Void = { progress in
-                            let updatedProgress = MosaicGenerationProgress(
-                                video: progress.video,
-                                progress: progress.progress,
-                                status: progress.status,
-                                outputURL: progress.outputURL,
-                                error: progress.error                            )
-                            progressHandler(updatedProgress)
-                        }
-                        
-                        do {
-                            return try await self.generateMosaic(for: video, config: config, forIphone: forIphone, progressHandler: videoProgressHandler)
-                        } catch {
-                            return MosaicGenerationResult(video: video, error: error)
-                        }
-                    }
-                }
             }
             
-            // Log final results
-            let successCount = results.filter { $0.isSuccess }.count
-            let failureCount = results.count - successCount
-            logger.debug("✅ Mosaic generation completed - Success: \(successCount), Failed: \(failureCount), Total: \(videos.count)")
             
+            
+            // Log final results
+            logger.debug("✅ Mosaic generation completed - Success: \(successCount), Failed: \(failureCount), Total: \(videos.count)")
             return results
         }
-    }
+        }
+    
+            
+        
     
     /// Prioritize videos for processing based on various factors
     /// - Parameter videos: The videos to prioritize

@@ -19,13 +19,13 @@ typealias XImage = NSImage
 public final class MetalImageProcessor: @unchecked Sendable {
     // MARK: - Properties
     
-    private let logger = Logger(subsystem: "com.hypermovie", category: "metal-processor")
+    private let logger = Logger(subsystem: "com.mosaicKit", category: "metal-processor")
     private let device: MTLDevice
     private let commandQueue: MTLCommandQueue
     private let library: MTLLibrary
     private var textureCache: CVMetalTextureCache?
     private let textureLoader: MTKTextureLoader
-    private let signposter = OSSignposter(subsystem: "com.hypermovie", category: "metal-processor")
+    private let signposter = OSSignposter(subsystem: "com.mosaicKit", category: "metal-processor")
     
     // Compute pipelines for different operations
     private let scalePipeline: MTLComputePipelineState
@@ -749,7 +749,7 @@ public final class MetalImageProcessor: @unchecked Sendable {
         
         // Process frames in batches to avoid GPU timeout
         // OPTIMIZATION: Use single command buffer per batch instead of per-operation
-        let batchSize = 20
+        let batchSize = 200
         let totalBatches = (frames.count + batchSize - 1) / batchSize
          progressHandler?(0.3)
         for batchStart in stride(from: 0, to: frames.count, by: batchSize) {

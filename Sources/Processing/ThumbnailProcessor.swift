@@ -14,10 +14,10 @@ import UIKit
 /// A processor for extracting and managing video thumbnails
 @available(macOS 15, iOS 18, *)
 public final class ThumbnailProcessor: @unchecked Sendable {
-    private let logger = Logger(subsystem: "com.hypermovie", category: "thumbnail-processor")
+    private let logger = Logger(subsystem: "com.mosaicKit", category: "thumbnail-processor")
     private let config: MosaicConfiguration
-    private let signposter = OSSignposter()
-    
+    public let signposter = OSSignposter(subsystem: "com.mosaicKit", category: "thumbnail-processor")
+
     /// Initialize a new thumbnail processor
     /// - Parameter config: Configuration for thumbnail processing
     public init(config: MosaicConfiguration) {
@@ -156,7 +156,7 @@ public final class ThumbnailProcessor: @unchecked Sendable {
         if thumbnails.isEmpty {
             logger.error("❌ All extractions failed")
             throw MosaicError.generationFailed(NSError(
-                domain: "com.hypermovie",
+                domain: "com.mosaicKit",
                 code: -1,
                 userInfo: [NSLocalizedDescriptionKey: "Failed to extract any thumbnails"]
             ))

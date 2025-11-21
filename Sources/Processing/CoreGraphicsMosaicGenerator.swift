@@ -15,10 +15,10 @@ import AppKit
 public actor CoreGraphicsMosaicGenerator: MosaicGeneratorProtocol {
     // MARK: - Properties
 
-    private let logger = Logger(subsystem: "com.hypermovie", category: "cg-mosaic-generator")
+    private let logger = Logger(subsystem: "com.mosaicKit", category: "cg-mosaic-generator")
     private let cgProcessor: CoreGraphicsImageProcessor
     private let layoutProcessor: LayoutProcessor
-    private let signposter = OSSignposter()
+    private let signposter = OSSignposter(subsystem: "com.mosaicKit", category: "cg-mosaic-generator")
 
     private var generationTasks: [UUID: Task<URL, Error>] = [:]
     private var frameCache: [UUID: [CMTime: CGImage]] = [:]
@@ -351,7 +351,7 @@ public actor CoreGraphicsMosaicGenerator: MosaicGeneratorProtocol {
             data = getJpegData(from: platformImage, quality: config.compressionQuality)
             guard let imageData = data else {
                 logger.error("❌ Failed to create image data")
-                throw MosaicError.saveFailed(mosaicURL, NSError(domain: "com.hypermovie", code: -1))
+                throw MosaicError.saveFailed(mosaicURL, NSError(domain: "com.mosaicKit", code: -1))
             }
 
             try imageData.write(to: mosaicURL)
@@ -362,7 +362,7 @@ public actor CoreGraphicsMosaicGenerator: MosaicGeneratorProtocol {
             data = getPngData(from: platformImage)
             guard let imageData = data else {
                 logger.error("❌ Failed to create image data")
-                throw MosaicError.saveFailed(mosaicURL, NSError(domain: "com.hypermovie", code: -1))
+                throw MosaicError.saveFailed(mosaicURL, NSError(domain: "com.mosaicKit", code: -1))
             }
 
             try imageData.write(to: mosaicURL)
@@ -397,7 +397,7 @@ public actor CoreGraphicsMosaicGenerator: MosaicGeneratorProtocol {
             1,
             nil
         ) else {
-            throw MosaicError.saveFailed(url, NSError(domain: "com.hypermovie", code: -1))
+            throw MosaicError.saveFailed(url, NSError(domain: "com.mosaicKit", code: -1))
         }
 
         let options: [String: Any] = [
@@ -409,7 +409,7 @@ public actor CoreGraphicsMosaicGenerator: MosaicGeneratorProtocol {
         CGImageDestinationAddImage(destination, image, options as CFDictionary?)
 
         if !CGImageDestinationFinalize(destination) {
-            throw MosaicError.saveFailed(url, NSError(domain: "com.hypermovie", code: -1))
+            throw MosaicError.saveFailed(url, NSError(domain: "com.mosaicKit", code: -1))
         }
     }
 }

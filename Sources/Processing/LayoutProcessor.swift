@@ -10,8 +10,8 @@ import UIKit
 /// Handles mosaic layout calculations and optimization
 @available(macOS 15, iOS 18, *)
 public final class LayoutProcessor {
-    private let logger = Logger(subsystem: "com.hypermovie", category: "layout-processing")
-    private let signposter = OSSignposter(subsystem: "com.hypermovie", category: "layout-processor")
+    private let logger = Logger(subsystem: "com.mosaicKit", category: "layout-processing")
+    private let signposter = OSSignposter(subsystem: "com.mosaicKit", category: "layout-processor")
     public var mosaicAspectRatio: CGFloat
     private var layoutCache: [String: MosaicLayout] = [:]
     

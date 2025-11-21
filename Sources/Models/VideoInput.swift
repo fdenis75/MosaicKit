@@ -111,7 +111,7 @@ public struct VideoInput: Codable, Hashable, Sendable {
     /// - Throws: Error if video cannot be accessed or metadata cannot be extracted
     public init(from url: URL, serviceName: String? = nil, creatorName: String? = nil, postID: String? = nil) async throws {
         let asset = AVURLAsset(url: url)
-
+        
         // Load all tracks
         let tracks = try await asset.loadTracks(withMediaType: .video)
         guard let videoTrack = tracks.first else {

@@ -17,8 +17,8 @@ import AppKit
 public final class CoreGraphicsImageProcessor: @unchecked Sendable {
     // MARK: - Properties
 
-    private let logger = Logger(subsystem: "com.hypermovie", category: "cg-processor")
-    private let signposter = OSSignposter(subsystem: "com.hypermovie", category: "cg-processor")
+    private let logger = Logger(subsystem: "com.mosaicKit", category: "cg-processor")
+    private let signposter = OSSignposter(subsystem: "com.mosaicKit", category: "cg-processor")
 
     // Buffer pool for reusable vImage buffers
     private var bufferPool: [vImage_Buffer] = []

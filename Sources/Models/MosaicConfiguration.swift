@@ -28,6 +28,9 @@ public struct MosaicConfiguration: Codable, Sendable {
 
     public var outputdirectory:  URL? = nil
 
+    /// Whether to include the full directory path in the filename.
+    public var fullPathInName: Bool
+
     // MARK: - Initialization
 
     /// Creates a new MosaicConfiguration instance.
@@ -39,7 +42,8 @@ public struct MosaicConfiguration: Codable, Sendable {
         includeMetadata: Bool = true,
         useAccurateTimestamps: Bool = false,
         compressionQuality: Double = 0.4,
-        ourputdirectory: URL? = nil
+        ourputdirectory: URL? = nil,
+        fullPathInName: Bool = false
     ) {
         self.width = width
         self.density = density
@@ -49,6 +53,7 @@ public struct MosaicConfiguration: Codable, Sendable {
         self.useAccurateTimestamps = useAccurateTimestamps
         self.compressionQuality = compressionQuality
         self.outputdirectory = ourputdirectory
+        self.fullPathInName = fullPathInName
     }
 
     /// Default configuration for mosaic generation
@@ -106,6 +111,7 @@ public struct MosaicConfiguration: Codable, Sendable {
 
     /// Generate filename with post ID prefix
     /// Format: {postID}_{originalFilename}_{configHash}.{extension}
+    /// Or with fullPathInName: _volumes_ext-3_dir1_dir2_{originalFilename}_{configHash}.{extension}
     /// - Parameters:
     ///   - originalFilename: The original video filename
     ///   - videoInput: The video input containing organizational metadata
@@ -118,18 +124,28 @@ public struct MosaicConfiguration: Codable, Sendable {
             sanitizedName = String(sanitizedName[..<lastDot])
         }
 
-        // Truncate if too long (reserve space for postID and suffix)
-        let maxBaseLength = 150
-        if sanitizedName.count > maxBaseLength {
-            sanitizedName = String(sanitizedName.prefix(maxBaseLength))
+        // Build base filename
+        var filename: String
+
+        if fullPathInName {
+            // Include full path: _volumes_ext-3_dir1_dir2_movie
+            let fullPath = videoInput.url.deletingLastPathComponent().path
+            let pathComponents = fullPath.components(separatedBy: "/").filter { !$0.isEmpty }
+            let sanitizedPath = pathComponents.map { Self.sanitizeForFilePath($0) }.joined(separator: "_")
+            filename = "_\(sanitizedPath)_\(sanitizedName)"
+        } else {
+            // Original behavior: optional post ID prefix
+            if let postID = videoInput.postID {
+                filename = "\(Self.sanitizeForFilePath(postID))_\(sanitizedName)"
+            } else {
+                filename = sanitizedName
+            }
         }
 
-        // Build filename with optional post ID prefix
-        var filename: String
-        if let postID = videoInput.postID {
-            filename = "\(Self.sanitizeForFilePath(postID))_\(sanitizedName)"
-        } else {
-            filename = sanitizedName
+        // Truncate if too long (reserve space for suffix)
+        let maxBaseLength = 200
+        if filename.count > maxBaseLength {
+            filename = String(filename.prefix(maxBaseLength))
         }
 
         // Add config hash and extension

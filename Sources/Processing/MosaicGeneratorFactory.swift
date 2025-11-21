@@ -34,7 +34,7 @@ public enum MosaicGeneratorFactory {
         case preferCoreGraphics
     }
 
-    private static let logger = Logger(subsystem: "com.hypermovie", category: "mosaic-factory")
+    private static let logger = Logger(subsystem: "com.mosaicKit", category: "mosaic-factory")
 
     /// Create a mosaic generator with default platform preference
     /// - Returns: A platform-appropriate mosaic generator
