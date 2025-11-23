@@ -4,15 +4,17 @@ import Logging
 import Metal
 #endif
 */
-/// Main entry point for MosaicKit - Video Mosaic Generation Library
+/// Main entry point for MosaicKit - Video Mosaic and Preview Generation Library
 ///
-/// MosaicKit provides high-performance video mosaic generation with platform-specific optimizations:
-/// - **macOS**: Metal-accelerated GPU processing (default) or Core Graphics
-/// - **iOS**: Core Graphics with vImage/Accelerate optimization (default)
+/// MosaicKit provides:
+/// - **Mosaic Generation**: High-performance video mosaic generation with platform-specific optimizations
+///   - macOS: Metal-accelerated GPU processing (default) or Core Graphics
+///   - iOS: Core Graphics with vImage/Accelerate optimization (default)
+/// - **Preview Generation**: Create condensed video previews from full-length videos
 ///
 /// ## Usage
 ///
-/// ### Single Video (Default Generator)
+/// ### Mosaic Generation - Single Video (Default Generator)
 /// ```swift
 /// // Auto-selects Metal on macOS, Core Graphics on iOS
 /// let generator = try MosaicGenerator()
@@ -27,7 +29,7 @@ import Metal
 /// )
 /// ```
 ///
-/// ### Choosing a Specific Generator
+/// ### Mosaic Generation - Choosing a Specific Generator
 /// ```swift
 /// // Use Core Graphics on macOS (instead of Metal)
 /// let cgGenerator = try MosaicGenerator(preference: .preferCoreGraphics)
@@ -36,7 +38,7 @@ import Metal
 /// let metalGenerator = try MosaicGenerator(preference: .preferMetal)
 /// ```
 ///
-/// ### Multiple Videos (Batch)
+/// ### Mosaic Generation - Multiple Videos (Batch)
 /// ```swift
 /// let videoURLs = [url1, url2, url3]
 /// let mosaicURLs = try await generator.generateBatch(
@@ -45,6 +47,39 @@ import Metal
 ///     outputDirectory: outputDir
 /// ) { completed, total in
 ///     print("Progress: \(completed)/\(total)")
+/// }
+/// ```
+///
+/// ### Preview Generation - Single Video
+/// ```swift
+/// let coordinator = PreviewGeneratorCoordinator()
+/// let video = try await VideoInput(from: videoURL)
+///
+/// let config = PreviewConfiguration(
+///     targetDuration: 60,  // 1 minute
+///     density: .M,
+///     format: .mp4,
+///     includeAudio: true
+/// )
+///
+/// let previewURL = try await coordinator.generatePreview(
+///     for: video,
+///     config: config
+/// ) { progress in
+///     print("\(progress.status.displayLabel): \(progress.progress * 100)%")
+/// }
+/// ```
+///
+/// ### Preview Generation - Batch Processing
+/// ```swift
+/// let coordinator = PreviewGeneratorCoordinator(concurrencyLimit: 4)
+/// let videos = try await videoURLs.asyncMap { try await VideoInput(from: $0) }
+///
+/// let results = try await coordinator.generatePreviewsForBatch(
+///     videos: videos,
+///     config: config
+/// ) { progress in
+///     print("\(progress.video.filename): \(progress.status.displayLabel)")
 /// }
 /// ```
 @available(iOS 18, *)
