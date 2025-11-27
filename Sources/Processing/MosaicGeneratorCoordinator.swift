@@ -170,7 +170,7 @@ public actor MosaicGeneratorCoordinator {
                 // Report in-progress status
                 progressHandler(MosaicGenerationProgress(
                     video: video,
-                    progress: 0.1,
+                    progress: 0.0,
                     status: .inProgress
                 ))
 

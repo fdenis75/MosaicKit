@@ -14,14 +14,16 @@ let package = Package(
     ],
     dependencies: [
         .package(url: "https://github.com/apple/swift-log.git", from: "1.5.0"),
-        .package(url: "https://github.com/DenDmitriev/DominantColors.git", .upToNextMajor(from: "1.2.0"))
+        .package(url: "https://github.com/DenDmitriev/DominantColors.git", .upToNextMajor(from: "1.2.0")),
+        .package(url: "https://github.com/samsonjs/SJSAssetExportSession.git", .upToNextMajor(from: "0.4.0"))
     ],
     targets: [
         .target(
             name: "MosaicKit",
             dependencies: [
                 .product(name: "Logging", package: "swift-log"),
-                .product(name: "DominantColors", package: "DominantColors")
+                .product(name: "DominantColors", package: "DominantColors"),
+                .product(name: "SJSAssetExportSession", package: "SJSAssetExportSession")
             ],
             path: "Sources",
             resources: [

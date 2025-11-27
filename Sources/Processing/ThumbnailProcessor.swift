@@ -66,7 +66,7 @@ public final class ThumbnailProcessor: @unchecked Sendable {
         for await result in generator.images(for: times) {
             let index = currentIndex
             currentIndex += 1
-
+            progressHandler?(Double(currentIndex) / Double(times.count) * 0.6)
             switch result {
             case .success(requestedTime: _, image: let image, actualTime: let actual):
                 let timestamp = self.formatTimestamp(seconds: actual.seconds)
@@ -77,7 +77,7 @@ public final class ThumbnailProcessor: @unchecked Sendable {
             }
 
             // Report progress
-            progressHandler?(Double(currentIndex) / Double(times.count) * 0.6)
+           
         }
 
         // Process extracted frames in parallel (add timestamps)
@@ -93,7 +93,9 @@ public final class ThumbnailProcessor: @unchecked Sendable {
             for await (index, image, timestamp) in group {
                 thumbnails[index] = (image, timestamp)
                 // Report progress
-                progressHandler?(0.6 + Double(thumbnails.count) / Double(times.count) * 0.2)
+                let calculatedProgress = 0.6 + (Double(thumbnails.count) / Double(times.count)) * 0.4
+                print("prpgress of timestamp  : \(calculatedProgress)")
+                progressHandler?(calculatedProgress)
             }
         }
 
@@ -165,7 +167,7 @@ public final class ThumbnailProcessor: @unchecked Sendable {
         let successCount = thumbnails.count
         let totalExpected = times.count
         logger.debug("✅ \(file.lastPathComponent) - Thumbnail extraction complete - Success: \(successCount)/\(totalExpected)")
-
+        progressHandler?(1.0)
         // Convert dictionary back to sorted array
         return (0..<totalExpected).compactMap { index in
             thumbnails[index]

@@ -32,7 +32,7 @@ public actor MetalMosaicGenerator: MosaicGeneratorProtocol {
 
     private var generationTasks: [UUID: Task<URL, Error>] = [:]
     private var frameCache: [UUID: [CMTime: CGImage]] = [:]
-    private var progressHandlers: [UUID: (MosaicGenerationProgress) -> Void] = [:]
+    private var progressHandlers: [UUID: @Sendable (MosaicGenerationProgress) -> Void] = [:]
     
     // Performance metrics
     private var lastGenerationTime: CFAbsoluteTime = 0
@@ -119,7 +119,7 @@ public actor MetalMosaicGenerator: MosaicGeneratorProtocol {
                 let aspectRatio = (video.width ?? 1.0) / (video.height ?? 1.0)
                 progressHandlers[videoID]?(MosaicGenerationProgress(
                     video: video,
-                    progress: 0.2,
+                    progress: 0.00,
                     status: .countingThumbnails
                 ))
                 let frameCount =  layoutProcessor.calculateThumbnailCount(
@@ -133,7 +133,7 @@ public actor MetalMosaicGenerator: MosaicGeneratorProtocol {
                 // Calculate layout
                 progressHandlers[videoID]?(MosaicGenerationProgress(
                     video: video,
-                    progress: 0.3,
+                    progress: 0.00,
                     status: .computingLayout
                 ))
                 let layout =  layoutProcessor.calculateLayout(
@@ -147,6 +147,9 @@ public actor MetalMosaicGenerator: MosaicGeneratorProtocol {
                     useDynamicLayout: false,
                     forIphone: forIphone
                 )
+                let layoutTime = CFAbsoluteTimeGetCurrent()
+                let executionTime = layoutTime - startTime
+                print("layout process in \(executionTime) seconds")
                 // logger.debug("📏 \(video.title ?? "N/A") Layout calculated - Size: \(layout.mosaicSize.width)x\(layout.mosaicSize.height), Thumbnails: \(layout.thumbCount)")
                 
                 // Extract frames using VideoToolbox for hardware acceleration
@@ -170,14 +173,17 @@ public actor MetalMosaicGenerator: MosaicGeneratorProtocol {
                     accurate: config.useAccurateTimestamps,
                     progressHandler: { @Sendable progress in
                         // Scale the progress to fit within the overall progress range (0.5-0.8)
-                        let scaledProgress = 0.4 + (0.3 * progress)
-                        (MosaicGenerationProgress(
+                        let scaledProgress = progress * 0.7
+                        currentProgressHandler1?(MosaicGenerationProgress(
                             video: video,
                             progress: scaledProgress,
                             status: .extractingThumbnails
                         ))
                     }
                 )
+                let ExtractTime = CFAbsoluteTimeGetCurrent()
+                let extradur = ExtractTime - layoutTime
+                print("extra process in \(extradur) seconds")
               //  // logger.debug("🎞️ Extracted \(frames.count) frames")
                 
             //    // logger.debug("🎞️ Extracted \(frames.count) frames using VideoToolbox")
@@ -217,8 +223,8 @@ public actor MetalMosaicGenerator: MosaicGeneratorProtocol {
                     forIphone: forIphone,
                     progressHandler: { @Sendable progress in
                         // Scale the progress to fit within the overall progress range (0.5-0.8)
-                        let scaledProgress = 0.7 + (0.2 * progress)
-                        (MosaicGenerationProgress(
+                        let scaledProgress = 0.7 + (0.299 * progress)
+                        currentProgressHandler?(MosaicGenerationProgress(
                             video: video,
                             progress: scaledProgress,
                             status: .creatingMosaic

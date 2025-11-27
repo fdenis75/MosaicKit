@@ -96,42 +96,128 @@ public actor PreviewGeneratorCoordinator {
         config: PreviewConfiguration,
         progressHandler: (@Sendable (PreviewGenerationProgress) -> Void)? = nil
     ) async throws -> [PreviewGenerationResult] {
-        logger.info("Starting batch preview generation for \(videos.count) videos")
+        logger.info("🎬 Starting batch preview generation for \(videos.count) videos")
 
-        var results: [PreviewGenerationResult] = []
-        let limit = effectiveConcurrencyLimit
+        // Determine the effective concurrency limit for this batch
+        var effectiveConcurrencyLimit: Int
+        if self.concurrencyLimit == 0 {
+            // Dynamically adjust concurrency based on system capabilities
+            let processorCount = ProcessInfo.processInfo.activeProcessorCount
+            let systemMemory = ProcessInfo.processInfo.physicalMemory
+            let memoryGB = Double(systemMemory) / 1_073_741_824.0 // Convert to GB
 
-        logger.info("Using concurrency limit: \(limit)")
+            // Calculate optimal concurrency with balanced approach
+            let cpuBasedLimit = max(2, processorCount / 2) // Use half of cores to avoid oversubscription
+            let memoryPerTask = 0.5 // Estimate 500MB per preview generation task
+            let memoryBasedLimit = max(2, Int(memoryGB / memoryPerTask))
+            effectiveConcurrencyLimit = min(memoryBasedLimit, cpuBasedLimit, 8) // Cap at 8
 
-        // Process videos with concurrency control
-        try await withThrowingTaskGroup(of: PreviewGenerationResult.self) { group in
-            var pendingVideos = videos
-            var activeCount = 0
-
-            // Queue initial batch
-            while activeCount < limit && !pendingVideos.isEmpty {
-                let video = pendingVideos.removeFirst()
-                addGenerationTask(for: video, config: config, to: &group, progressHandler: progressHandler)
-                activeCount += 1
-            }
-
-            // Process results and queue remaining videos
-            while let result = try await group.next() {
-                results.append(result)
-                activeCount -= 1
-
-                // Queue next video if available
-                if !pendingVideos.isEmpty {
-                    let video = pendingVideos.removeFirst()
-                    addGenerationTask(for: video, config: config, to: &group, progressHandler: progressHandler)
-                    activeCount += 1
-                }
-            }
+            logger.info("⚙️ Using dynamic concurrency limit of \(effectiveConcurrencyLimit) (CPU cores: \(processorCount), Memory: \(Int(memoryGB))GB)")
+        } else {
+            // Use the configured concurrency limit
+            effectiveConcurrencyLimit = self.concurrencyLimit
+            logger.info("⚙️ Using configured concurrency limit: \(effectiveConcurrencyLimit)")
         }
 
-        logger.info("Batch preview generation completed: \(results.filter { $0.isSuccess }.count)/\(videos.count) successful")
+        var results: [PreviewGenerationResult] = []
+        var completed = 0
+        var successCount = 0
+        var failureCount = 0
+        var activeTasks = 0
 
-        return results
+        return try await withThrowingTaskGroup(of: PreviewGenerationResult.self) { group in
+            var videoIndex = 0
+
+            for video in videos {
+                // Check for concurrency limit changes
+                if effectiveConcurrencyLimit != self.concurrencyLimit && self.concurrencyLimit > 0 {
+                    effectiveConcurrencyLimit = self.concurrencyLimit
+                    logger.info("⚙️ Updated effective concurrency to: \(effectiveConcurrencyLimit)")
+                }
+
+                // Wait for available slot
+                while activeTasks >= effectiveConcurrencyLimit {
+                    logger.debug("Threshold reached: \(activeTasks)/\(effectiveConcurrencyLimit)")
+                    try await Task.sleep(for: .seconds(0.2))
+
+                    if let result = try await group.next() {
+                        results.append(result)
+                        completed += 1
+                        activeTasks -= 1
+
+                        if result.isSuccess {
+                            successCount += 1
+                        } else {
+                            failureCount += 1
+                        }
+
+                        // Report aggregated progress
+                        let overallProgress = Double(completed) / Double(videos.count)
+                        logger.debug("🔄 Progress: \(Int(overallProgress * 100))% (\(completed)/\(videos.count) complete)")
+                    }
+                }
+
+                // Queue video for processing
+                logger.debug("Adding task for video: \(video.title)")
+                progressHandler?(.queued(for: video))
+
+                activeTasks += 1
+                videoIndex += 1
+
+                group.addTask(priority: .medium) { @Sendable in
+                    // Check for cancellation at start
+                    try Task.checkCancellation()
+
+                    // Create individual progress handler to track this video
+                    let videoProgressHandler: @Sendable (PreviewGenerationProgress) -> Void = { progress in
+                        progressHandler?(progress)
+                    }
+
+                    do {
+                        self.logger.debug("Starting generation for: \(video.title)")
+
+                        // Set progress handler
+                        if let handler = progressHandler {
+                            await self.previewGenerator.setProgressHandler(for: video, handler: handler)
+                        }
+
+                        // Generate preview
+                        let outputURL = try await self.previewGenerator.generate(for: video, config: config)
+                        let result = PreviewGenerationResult.success(video: video, outputURL: outputURL)
+
+                        self.logger.debug("Finished generation for: \(video.title)")
+                        return result
+
+                    } catch {
+                        self.logger.error("Generation failed for: \(video.title) - \(error.localizedDescription)")
+                        return PreviewGenerationResult.failure(video: video, error: error)
+                    }
+                }
+            }
+
+            // Collect remaining results
+            while let result = try await group.next() {
+                logger.debug("Waiting for results")
+
+                results.append(result)
+                completed += 1
+                activeTasks -= 1
+
+                if result.isSuccess {
+                    successCount += 1
+                } else {
+                    failureCount += 1
+                }
+
+                // Report aggregated progress
+                let overallProgress = Double(completed) / Double(videos.count)
+                logger.debug("🔄 Progress: \(Int(overallProgress * 100))% (\(completed)/\(videos.count) complete)")
+            }
+
+            // Log final results
+            logger.info("✅ Preview generation completed - Success: \(successCount), Failed: \(failureCount), Total: \(videos.count)")
+            return results
+        }
     }
 
     /// Cancel generation for a specific video
@@ -199,59 +285,6 @@ public actor PreviewGeneratorCoordinator {
     }
 
     // MARK: - Private Methods
-
-    private func addGenerationTask(
-        for video: VideoInput,
-        config: PreviewConfiguration,
-        to group: inout ThrowingTaskGroup<PreviewGenerationResult, Error>,
-        progressHandler: (@Sendable (PreviewGenerationProgress) -> Void)?
-    ) {
-        // Set progress handler
-        if let handler = progressHandler {
-            progressHandlers[video.id] = handler
-            Task {
-                await previewGenerator.setProgressHandler(for: video, handler: handler)
-            }
-        }
-
-        // Report queued status
-        progressHandlers[video.id]?(.queued(for: video))
-
-        // Create and store task
-        let task = Task<PreviewGenerationResult, Error> {
-            do {
-                let outputURL = try await previewGenerator.generate(for: video, config: config)
-                let result = PreviewGenerationResult.success(video: video, outputURL: outputURL)
-
-                // Cleanup
-                await self.cleanupAfterGeneration(for: video)
-
-                return result
-            } catch {
-                let result = PreviewGenerationResult.failure(video: video, error: error)
-
-                // Report failure
-                await self.reportFailure(for: video, error: error)
-
-                // Cleanup
-                await self.cleanupAfterGeneration(for: video)
-
-                return result
-            }
-        }
-
-        activeTasks[video.id] = task
-        group.addTask { try await task.value }
-    }
-
-    private func cleanupAfterGeneration(for video: VideoInput) {
-        activeTasks.removeValue(forKey: video.id)
-        progressHandlers.removeValue(forKey: video.id)
-    }
-
-    private func reportFailure(for video: VideoInput, error: Error) {
-        progressHandlers[video.id]?(.failed(for: video, error: error))
-    }
 
     private func calculateOptimalConcurrency() -> Int {
         let processorCount = ProcessInfo.processInfo.processorCount

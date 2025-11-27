@@ -8,6 +8,8 @@
 import Foundation
 import AVFoundation
 import OSLog
+import UniformTypeIdentifiers
+import SJSAssetExportSession
 
 /// Actor responsible for generating preview videos from source videos
 @available(macOS 15, iOS 18, *)
@@ -85,7 +87,7 @@ public actor PreviewVideoGenerator {
         }
 
         // Export the composition
-        reportProgress(for: video, progress: 0.7, status: .encoding, message: "Encoding preview video...")
+        reportProgress(for: video, progress: 0.3, status: .encoding, message: "Encoding preview video...")
         let outputURL = try await exportComposition(
             composition: videoComposition.composition,
             audioMix: videoComposition.audioMix,
@@ -417,6 +419,17 @@ public actor PreviewVideoGenerator {
         logger.info("  - Video tracks: \(videoTracks)")
         logger.info("  - Audio tracks: \(audioTracks)")
 
+        // Get original video dimensions from composition
+        guard let compositionVideoTrack = composition.tracks(withMediaType: .video).first else {
+            logger.error("❌ No video tracks in composition")
+            throw PreviewError.noVideoTracks
+        }
+
+        let naturalSize = try await compositionVideoTrack.load(.naturalSize)
+        let originalWidth = Int(naturalSize.width)
+        let originalHeight = Int(naturalSize.height)
+        logger.info("📐 Original dimensions: \(originalWidth)x\(originalHeight)")
+
         // Create output directory
         let outputDirectory = config.generateOutputDirectory(for: video)
         logger.info("📁 Output directory: \(outputDirectory.path)")
@@ -450,111 +463,185 @@ public actor PreviewVideoGenerator {
             try? FileManager.default.removeItem(at: outputURL)
         }
 
-        // Create export session
-        let preset = config.format.exportPreset(quality: config.compressionQuality)
+        // Create export session with SJSAssetExportSession
+        let exporter = ExportSession()
+
+        // Determine video settings based on quality, using original dimensions
+        let (videoConfig, audioBitrate) = videoSettings(
+            for: config.compressionQuality,
+            format: config.format,
+            width: originalWidth,
+            height: originalHeight
+        )
+
         logger.info("⚙️ Export configuration:")
-        logger.info("  - Preset: \(preset)")
         logger.info("  - Format: \(config.format.rawValue)")
-        logger.info("  - File type: \(config.format.avFileType.rawValue)")
         logger.info("  - Quality: \(config.compressionQuality)")
+        logger.info("  - Audio bitrate: \(audioBitrate) bps")
         logger.info("  - Audio mix: \(audioMix != nil ? "enabled" : "disabled")")
 
-        // Check compatible presets for this composition
-        let compatiblePresets = AVAssetExportSession.exportPresets(compatibleWith: composition)
-        logger.info("✅ Compatible presets for this composition: \(compatiblePresets.count)")
-        logger.debug("  Presets: \(compatiblePresets.joined(separator: ", "))")
+        logger.info("🎬 Starting export with progress tracking...")
 
-        if !compatiblePresets.contains(preset) {
-            logger.warning("⚠️ Selected preset '\(preset)' is NOT in compatible presets list")
-            logger.info("  Attempting anyway as AVFoundation may still support it...")
-        } else {
-            logger.info("✅ Selected preset '\(preset)' is compatible")
+        // Start progress monitoring task
+        let progressTask = Task {
+            for await progress in exporter.progressStream {
+                // Check for cancellation
+                if cancellationFlags[video.id] == true {
+                    break
+                }
+
+                // Map export progress from 0.7-1.0 range
+                // Export progress goes from 0-1, we map it to 0.7-1.0
+                let progressValue = Double(progress)
+                let exportProgress = 0.3 + (progressValue * 0.7)
+                reportProgress(
+                    for: video,
+                    progress: exportProgress,
+                    status: .encoding,
+                    message: "Encoding: \(Int(progressValue * 100))%"
+                )
+                logger.debug("Export progress: \(Int(progressValue * 100))%")
+                if progressValue == 1.0 {
+                    return true
+                }
+              //  return true
+            }
+            return true
         }
 
-        guard let exportSession = AVAssetExportSession(
-            asset: composition,
-            presetName: preset
-        ) else {
-            logger.error("❌ Failed to create AVAssetExportSession")
-            logger.error("  - Preset: \(preset)")
-            logger.error("  - Composition duration: \(compositionDuration)s")
-            logger.error("  - Composition tracks: \(videoTracks) video, \(audioTracks) audio")
-            throw PreviewError.encodingFailed("Failed to create export session with preset '\(preset)'", nil)
-        }
-        logger.info("✅ Export session created successfully")
+        // Perform the export
+        do {
+            // Note: AVMutableComposition is not Sendable in Swift 6, but it's safe to use here
+            // because it's created locally in this actor and won't be accessed concurrently
+            // We use nonisolated(unsafe) to bypass the Sendable check
+            nonisolated(unsafe) let compositionAsset = composition as AVAsset
 
-        exportSession.outputURL = outputURL
-        exportSession.outputFileType = config.format.avFileType
-        exportSession.audioMix = audioMix
+            try await exporter.export(
+                asset: compositionAsset,
+                audio: .format(.aac),
+                video: videoConfig,
+                to: outputURL,
+                as: config.format.avFileType
+            )
 
-        logger.info("🎬 Starting export...")
+            // Wait for progress task to complete
+            await progressTask.value
 
-        // Export with progress tracking
-        await exportSession.export()
+            // Check for cancellation
+            if cancellationFlags[video.id] == true {
+                throw PreviewError.cancelled
+            }
 
-        // Capture status and error to avoid data races
-        let finalStatus = exportSession.status
-        let finalError = exportSession.error
+            logger.info("🎬 Export completed successfully")
 
-        logger.info("🎬 Export completed, checking status...")
-        logger.info("  - Status: \(finalStatus.rawValue) (\(self.statusDescription(finalStatus)))")
+            // Report final completion status
+            reportProgress(
+                for: video,
+                progress: 0.9,
+                status: .saving,
+                message: "Export complete"
+            )
 
-        // Check for errors
-        if let error = finalError {
-            let nsError = error as NSError
-            let errorDetails = """
-            ❌ Export failed with error:
-               Status: \(finalStatus.rawValue) (\(self.statusDescription(finalStatus)))
-               Error domain: \(nsError.domain)
-               Error code: \(nsError.code)
-               Error description: \(nsError.localizedDescription)
-               User info: \(nsError.userInfo)
-               Output URL: \(outputURL.path)
-               Preset: \(preset)
-               File type: \(config.format.avFileType.rawValue)
-            """
-            logger.error("\(errorDetails)")
+            // Verify output file exists
+            if FileManager.default.fileExists(atPath: outputURL.path) {
+                let fileSize = (try? FileManager.default.attributesOfItem(atPath: outputURL.path)[.size] as? Int64) ?? 0
+                let fileSizeMB = Double(fileSize) / 1_048_576.0
+                logger.info("  - Output: \(outputURL.lastPathComponent)")
+                logger.info("  - Size: \(String(format: "%.2f", fileSizeMB)) MB")
+            } else {
+                reportProgress(
+                    for: video,
+                    progress: 1.0,
+                    status: .failed,
+                    message: "Could not saved"
+                )
+                logger.error("❌ Export completed but file does not exist at: \(outputURL.path)")
+            }
 
             if didStartAccessing {
                 outputURL.stopAccessingSecurityScopedResource()
             }
+            reportProgress(
+                for: video,
+                progress: 1.0,
+                status: .completed,
+                outputURL: outputURL,
+                message: "Export saved"
+            )
+            return outputURL
+
+        } catch {
+            // Cancel progress monitoring
+            progressTask.cancel()
+
+            logger.error("❌ Export failed with error: \(error.localizedDescription)")
+
+            if didStartAccessing {
+                outputURL.stopAccessingSecurityScopedResource()
+            }
+            reportProgress(
+                for: video,
+                progress: 1.0,
+                status: .failed,
+                message: error.localizedDescription
+            )
             throw PreviewError.encodingFailed("Export failed", error)
         }
+    }
 
-        guard finalStatus == .completed else {
-            let errorDetails = """
-            ❌ Export finished with non-completed status:
-               Status: \(finalStatus.rawValue) (\(self.statusDescription(finalStatus)))
-               Output URL: \(outputURL.path)
-               Preset: \(preset)
-               File type: \(config.format.avFileType.rawValue)
-            """
-            logger.error("\(errorDetails)")
+    /// Determine video and audio settings based on quality level and original dimensions
+    private func videoSettings(
+        for quality: Double,
+        format: VideoFormat,
+        width: Int,
+        height: Int
+    ) -> (video: VideoOutputSettings, audioBitrate: Int) {
+        // Use original dimensions and adjust codec/bitrate based on quality
+        // Quality ranges determine codec and bitrate, but dimensions stay original
 
-            if didStartAccessing {
-                outputURL.stopAccessingSecurityScopedResource()
-            }
-            throw PreviewError.encodingFailed(
-                "Export finished with status: \(self.statusDescription(finalStatus))",
-                nil
-            )
-        }
+        let videoConfig: VideoOutputSettings
+        let audioBitrate: Int
 
-        // Verify output file exists
-        if FileManager.default.fileExists(atPath: outputURL.path) {
-            let fileSize = (try? FileManager.default.attributesOfItem(atPath: outputURL.path)[.size] as? Int64) ?? 0
-            let fileSizeMB = Double(fileSize) / 1_048_576.0
-            logger.info("✅ Export completed successfully")
-            logger.info("  - Output: \(outputURL.lastPathComponent)")
-            logger.info("  - Size: \(String(format: "%.2f", fileSizeMB)) MB")
+        // Calculate bitrate based on resolution and quality
+        // Base formula: pixels * quality_multiplier
+        let totalPixels = width * height
+        let pixelMultiplier: Double
+
+        if quality >= 0.9 {
+            // Highest quality - HEVC with high bitrate
+            pixelMultiplier = 0.15 // ~35 Mbps for 4K
+            videoConfig = .codec(.hevc, width: width, height: height)
+                .fps(30)
+                .bitrate(Int(Double(totalPixels) * pixelMultiplier))
+                .color(.sdr)
+            audioBitrate = 256_000 // 256 kbps
+        } else if quality >= 0.75 {
+            // High quality - HEVC with medium-high bitrate
+            pixelMultiplier = 0.08 // ~10 Mbps for 1080p
+            videoConfig = .codec(.hevc, width: width, height: height)
+                .fps(30)
+                .bitrate(Int(Double(totalPixels) * pixelMultiplier))
+                .color(.sdr)
+            audioBitrate = 192_000 // 192 kbps
+        } else if quality >= 0.5 {
+            // Medium quality - H.264 with medium bitrate
+            pixelMultiplier = 0.06 // ~8 Mbps for 1080p
+            videoConfig = .codec(.h264, width: width, height: height)
+                .fps(30)
+                .bitrate(Int(Double(totalPixels) * pixelMultiplier))
+                .color(.sdr)
+            audioBitrate = 160_000 // 160 kbps
         } else {
-            logger.error("❌ Export reported success but file does not exist at: \(outputURL.path)")
+            // Lower quality - H.264 with lower bitrate
+            pixelMultiplier = 0.04 // ~5 Mbps for 1080p
+            videoConfig = .codec(.h264, width: width, height: height)
+                .fps(30)
+                .bitrate(Int(Double(totalPixels) * pixelMultiplier))
+                .color(.sdr)
+            audioBitrate = 128_000 // 128 kbps
         }
 
-        if didStartAccessing {
-            outputURL.stopAccessingSecurityScopedResource()
-        }
-        return outputURL
+        return (videoConfig, audioBitrate)
     }
 
     private func statusDescription(_ status: AVAssetExportSession.Status) -> String {
@@ -573,12 +660,14 @@ public actor PreviewVideoGenerator {
         for video: VideoInput,
         progress: Double,
         status: PreviewGenerationStatus,
+        outputURL: URL? = nil,
         message: String? = nil
     ) {
         let progressInfo = PreviewGenerationProgress(
             video: video,
             progress: progress,
             status: status,
+            outputURL: outputURL,
             message: message
         )
         progressHandlers[video.id]?(progressInfo)

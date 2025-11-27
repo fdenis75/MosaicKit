@@ -1,5 +1,5 @@
 {
-  "originHash" : "7617e2aaa40892a02cdd602793c80d639842c2200869abc68bcfbeb02fe1792b",
+  "originHash" : "577f48005bd8ef7d6864f9933d3e24ea969253a39a0a2f4c691a325aceb220c6",
   "pins" : [
     {
       "identity" : "dominantcolors",
@@ -8,6 +8,15 @@
       "state" : {
         "revision" : "a05327d36092c47e9ddc77ce565eb35a5b4a4a6e",
         "version" : "1.2.2"
+      }
+    },
+    {
+      "identity" : "sjsassetexportsession",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/samsonjs/SJSAssetExportSession.git",
+      "state" : {
+        "revision" : "c77c3cacd7373704dc0e69927ac2aac023904418",
+        "version" : "0.4.0"
       }
     },
     {
