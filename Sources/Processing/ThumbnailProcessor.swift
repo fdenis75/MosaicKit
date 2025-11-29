@@ -12,7 +12,7 @@ import UIKit
 
 
 /// A processor for extracting and managing video thumbnails
-@available(macOS 15, iOS 18, *)
+@available(macOS 14, iOS 17, *)
 public final class ThumbnailProcessor: @unchecked Sendable {
     private let logger = Logger(subsystem: "com.mosaicKit", category: "thumbnail-processor")
     private let config: MosaicConfiguration
@@ -171,6 +171,49 @@ public final class ThumbnailProcessor: @unchecked Sendable {
         // Convert dictionary back to sorted array
         return (0..<totalExpected).compactMap { index in
             thumbnails[index]
+        }
+    }
+    
+    /// Extract thumbnails from video with timestamps as an async stream
+    /// - Parameters:
+    ///   - file: Video file URL
+    ///   - layout: Layout information for the mosaic
+    ///   - asset: Video asset to extract thumbnails from
+    ///   - accurate: Whether to use accurate timestamp extraction
+    /// - Returns: Async stream of tuples containing index, thumbnail image and timestamp
+    public func extractFramesStream(
+        from file: URL,
+        layout: MosaicLayout,
+        asset: AVAsset,
+        accurate: Bool = false
+    ) -> AsyncThrowingStream<(index: Int, image: CGImage, timestamp: String), Error> {
+        return AsyncThrowingStream { continuation in
+            Task {
+                do {
+                    // Create local asset to avoid capturing non-Sendable AVAsset
+                    let localAsset = AVURLAsset(url: file)
+                    let duration = try await localAsset.load(.duration).seconds
+                    let generator = configureGenerator(for: localAsset, accurate: accurate, preview: false, layout: layout)
+                    let times = calculateExtractionTimes(duration: duration, count: layout.positions.count)
+                    
+                    var currentIndex = 0
+                    for await result in generator.images(for: times) {
+                        let index = currentIndex
+                        currentIndex += 1
+                        
+                        switch result {
+                        case .success(_, let image, let actualTime):
+                             let timestamp = formatTimestamp(seconds: actualTime.seconds)
+                             continuation.yield((index, image, timestamp))
+                        case .failure(let requestedTime, let error):
+                            logger.warning("⚠️ Frame extraction failed at \(requestedTime.seconds): \(error.localizedDescription)")
+                        }
+                    }
+                    continuation.finish()
+                } catch {
+                    continuation.finish(throwing: error)
+                }
+            }
         }
     }
     
@@ -880,7 +923,7 @@ public final class ThumbnailProcessor: @unchecked Sendable {
     ///   - timestamp: The timestamp string to add
     ///   - size: The size of the thumbnail
     /// - Returns: CGImage with timestamp overlay and enhanced visual design
-    private func addTimestampToImage(image: CGImage, timestamp: String, size: CGSize) -> CGImage {
+    internal func addTimestampToImage(image: CGImage, timestamp: String, size: CGSize) -> CGImage {
         // Create a context for the image with appropriate scale
         let scale = max(1.0, min(1.2,Double(image.width) / size.width)) // Handle high-resolution images
         // Preserve source color space for accurate color representation

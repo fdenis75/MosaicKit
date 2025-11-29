@@ -21,7 +21,7 @@ typealias PlatformImage = UIImage
 #endif
 
 /// A Metal-accelerated implementation of the MosaicGeneratorProtocol
-@available(macOS 15, iOS 18, *)
+@available(macOS 14, iOS 17, *)
 public actor MetalMosaicGenerator: MosaicGeneratorProtocol {
     // MARK: - Properties
     
@@ -164,36 +164,9 @@ public actor MetalMosaicGenerator: MosaicGeneratorProtocol {
                     count: layout.thumbCount,
                     accurate: config.useAccurateTimestamps
                 )*/*/
-                let currentProgressHandler1 = progressHandlers[videoID]
-                let frames = try await thumbnailProcessor.extractThumbnails(
-                    from: videoURL, // Use unwrapped URL
-                    layout: layout,
-                    asset: asset,
-                    preview: false,
-                    accurate: config.useAccurateTimestamps,
-                    progressHandler: { @Sendable progress in
-                        // Scale the progress to fit within the overall progress range (0.5-0.8)
-                        let scaledProgress = progress * 0.7
-                        currentProgressHandler1?(MosaicGenerationProgress(
-                            video: video,
-                            progress: scaledProgress,
-                            status: .extractingThumbnails
-                        ))
-                    }
-                )
-                let ExtractTime = CFAbsoluteTimeGetCurrent()
-                let extradur = ExtractTime - layoutTime
-                print("extra process in \(extradur) seconds")
-              //  // logger.debug("🎞️ Extracted \(frames.count) frames")
-                
-            //    // logger.debug("🎞️ Extracted \(frames.count) frames using VideoToolbox")
-                
-           /*     progressHandlers[videoID]?(MosaicGenerationProgress(
-                    video: video,
-                    progress: 0.5,
-                    status: .extractingThumbnails
-                ))
-                */
+                // Capture progress handler before passing to async context
+                let currentProgressHandler = progressHandlers[videoID]
+
                 // If metadata is enabled, create a header image with enhanced information
                 var metadataHeader: CGImage? = nil
                 if config.includeMetadata {
@@ -206,12 +179,45 @@ public actor MetalMosaicGenerator: MosaicGeneratorProtocol {
                     ) as CGImage? // Use as? for safe casting
                 }
 
-                // Capture progress handler before passing to async context
-                let currentProgressHandler = progressHandlers[videoID]
+                // Create a stream for processed images (with timestamps)
+                let (processedStream, continuation) = AsyncThrowingStream<(Int, CGImage), Error>.makeStream()
+                
+                // Capture dependencies for the producer task
+                let processor = self.thumbnailProcessor
+                let thumbnailSizes = layout.thumbnailSizes
+                
+                // Start producer task to burn timestamps in parallel
+                Task {
+                    do {
+                        let rawStream = processor.extractFramesStream(
+                            from: videoURL,
+                            layout: layout,
+                            asset: asset,
+                            accurate: config.useAccurateTimestamps
+                        )
+                        
+                        try await withThrowingTaskGroup(of: Void.self) { group in
+                            for try await (index, rawImage, timestamp) in rawStream {
+                                group.addTask {
+                                    let size = thumbnailSizes[index]
+                                    let processedImage = processor.addTimestampToImage(
+                                        image: rawImage,
+                                        timestamp: timestamp,
+                                        size: size
+                                    )
+                                    continuation.yield((index, processedImage))
+                                }
+                            }
+                        }
+                        continuation.finish()
+                    } catch {
+                        continuation.finish(throwing: error)
+                    }
+                }
 
-                // Generate mosaic using Metal
-                let mosaic = try await metalProcessor.generateMosaic(
-                    from: frames,
+                // Generate mosaic using Metal with streaming input
+                let mosaic = try await metalProcessor.generateMosaicStream(
+                    stream: processedStream,
                     layout: layout,
                     metadata: VideoMetadata(
                         codec: video.metadata.codec,

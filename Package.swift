@@ -5,7 +5,7 @@ import PackageDescription
 
 let package = Package(
     name: "MosaicKit",
-    platforms: [.macOS(.v15), .iOS(.v18), .macCatalyst(.v17)],
+    platforms: [.macOS(.v14), .iOS(.v17), .macCatalyst(.v17)],
     products: [
         .library(
             name: "MosaicKit",
@@ -37,6 +37,12 @@ let package = Package(
             name: "MetalPerformance",
             dependencies: ["MosaicKit"],
             path: "Tests/MetalPerformance"
+        ),
+        .testTarget(
+            name: "MosaicKitTests",
+            dependencies: ["MosaicKit"],
+            path: "Tests",
+            exclude: ["MetalPerformance", "README_COMPARISON_TEST.md", "TestPlan.xctestplan"]
         )
     ]
 )

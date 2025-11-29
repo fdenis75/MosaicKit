@@ -3,12 +3,12 @@ import XCTest
 import Foundation
 
 /// Performance comparison tests between Metal and Core Graphics implementations
-@available(macOS 15, iOS 18, *)
+@available(macOS 14, iOS 17, *)
 final class GeneratorComparisonTests: XCTestCase {
 
     // MARK: - Properties
 
-    let videoPath = "/Volumes/Ext-6TB-2/0002025/11/04/Kristy Black.mp4"
+    let videoPath = "/Users/francois/gravity/MosaicKit/test_video.mp4"
     let baseOutputDirectory = FileManager.default.temporaryDirectory.appendingPathComponent("MosaicKitTests", isDirectory: true)
     let metalOutputDirectory = FileManager.default.temporaryDirectory.appendingPathComponent("MosaicKitTests/Metal", isDirectory: true)
     let coreGraphicsOutputDirectory = FileManager.default.temporaryDirectory.appendingPathComponent("MosaicKitTests/CoreGraphics", isDirectory: true)

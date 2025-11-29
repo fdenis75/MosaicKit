@@ -11,7 +11,7 @@ import AppKit
 
 /// A Core Graphics-accelerated implementation for iOS mosaic generation
 /// This implementation mirrors MetalMosaicGenerator but uses CoreGraphicsImageProcessor
-@available(macOS 15, iOS 18, *)
+@available(macOS 14, iOS 17, *)
 public actor CoreGraphicsMosaicGenerator: MosaicGeneratorProtocol {
     // MARK: - Properties
 

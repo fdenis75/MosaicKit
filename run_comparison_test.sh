@@ -16,7 +16,7 @@ YELLOW='\033[1;33m'
 NC='\033[0m' # No Color
 
 # Check if video file exists
-VIDEO_PATH="/Volumes/Ext-6TB-2/0002025/11/04/Kristy Black.mp4"
+VIDEO_PATH="/Users/francois/gravity/MosaicKit/test_video.mp4"
 if [ ! -f "$VIDEO_PATH" ]; then
     echo "❌ Error: Video file not found at: $VIDEO_PATH"
     echo "Please update the video path in the test file."

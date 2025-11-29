@@ -15,7 +15,7 @@ typealias XImage = NSImage
 #endif
 
 /// A Metal-based image processor for high-performance mosaic generation
-@available(macOS 15, iOS 18, *)
+@available(macOS 14, iOS 17, *)
 public final class MetalImageProcessor: @unchecked Sendable {
     // MARK: - Properties
     
@@ -65,10 +65,25 @@ public final class MetalImageProcessor: @unchecked Sendable {
         
         // Load Metal shader library
         do {
-            self.library = try device.makeDefaultLibrary(bundle: Bundle.module)
+            logger.debug("📦 Bundle.module path: \(Bundle.module.bundlePath)")
+            
+            // Try to load default library first
+            if let defaultLib = try? device.makeDefaultLibrary() {
+                self.library = defaultLib
+            } else {
+                // Fallback: Try to compile from source if available in bundle
+                logger.debug("🔄 Attempting to compile from source in bundle")
+                if let shaderPath = Bundle.module.path(forResource: "MetalShaders", ofType: "metal") {
+                    let source = try String(contentsOfFile: shaderPath, encoding: .utf8)
+                    self.library = try device.makeLibrary(source: source, options: nil)
+                    logger.debug("✅ Compiled Metal library from source")
+                } else {
+                     throw MetalProcessorError.libraryCreationFailed
+                }
+            }
         } catch {
-            logger.error("❌ Failed to load default Metal library: \(error.localizedDescription)")
-            throw MetalProcessorError.libraryCreationFailed
+             logger.error("❌ Failed to load Metal library: \(error.localizedDescription)")
+             throw MetalProcessorError.libraryCreationFailed
         }
         
         // Create texture cache for efficient conversion between CVPixelBuffer and MTLTexture
@@ -344,8 +359,8 @@ public final class MetalImageProcessor: @unchecked Sendable {
         encoder.setTexture(sourceTexture, index: 0)
         encoder.setTexture(destinationTexture, index: 1)
 
-        var positionValue = uint2(UInt32(position.x), UInt32(position.y))
-        encoder.setBytes(&positionValue, length: MemoryLayout<uint2>.size, index: 0)
+        var positionValue = SIMD2<UInt32>(UInt32(position.x), UInt32(position.y))
+        encoder.setBytes(&positionValue, length: MemoryLayout<SIMD2<UInt32>>.size, index: 0)
 
         // Calculate threadgroup size
         let threadgroupSize = calculateThreadgroupSize(pipeline: compositePipeline)
@@ -458,13 +473,13 @@ public final class MetalImageProcessor: @unchecked Sendable {
         encoder.setComputePipelineState(borderPipeline)
         encoder.setTexture(texture, index: 0)
 
-        var positionValue = uint2(UInt32(position.x), UInt32(position.y))
-        var sizeValue = uint2(UInt32(size.width), UInt32(size.height))
+        var positionValue = SIMD2<UInt32>(UInt32(position.x), UInt32(position.y))
+        var sizeValue = SIMD2<UInt32>(UInt32(size.width), UInt32(size.height))
         var colorValue = color
         var widthValue = width
 
-        encoder.setBytes(&positionValue, length: MemoryLayout<uint2>.size, index: 0)
-        encoder.setBytes(&sizeValue, length: MemoryLayout<uint2>.size, index: 1)
+        encoder.setBytes(&positionValue, length: MemoryLayout<SIMD2<UInt32>>.size, index: 0)
+        encoder.setBytes(&sizeValue, length: MemoryLayout<SIMD2<UInt32>>.size, index: 1)
         encoder.setBytes(&colorValue, length: MemoryLayout<SIMD4<Float>>.size, index: 2)
         encoder.setBytes(&widthValue, length: MemoryLayout<Float>.size, index: 3)
 
@@ -490,7 +505,7 @@ public final class MetalImageProcessor: @unchecked Sendable {
     private func saveDebugImage(_ image: CGImage, step: Int, description: String) {
         let timestamp = Int(Date().timeIntervalSince1970)
         let filename = "step\(step)_\(timestamp)_\(description).jpg"
-        let url = URL("/Users/francois/Desktop/Test2")!.appendingPathComponent(filename)
+        let url = URL(filePath: "/Users/francois/Desktop/Test2").appendingPathComponent(filename)
         
         #if canImport(AppKit)
         let nsImage = NSImage(cgImage: image, size: .zero)
@@ -514,7 +529,7 @@ public final class MetalImageProcessor: @unchecked Sendable {
         let sampledImages = stride(from: 0, to: images.count, by: step).prefix(sampleCount).map { images[$0] }
         
         // Save sampled images
-        for (index, image) in sampledImages.enumerated() {
+        for (_, image) in sampledImages.enumerated() {
           //  saveDebugImage(image, step: 1, description: "sampled_\(index)")
         }
         
@@ -584,7 +599,7 @@ public final class MetalImageProcessor: @unchecked Sendable {
         if top3LightColors.isEmpty {
             let colorsArray: [CGColor] = [CGColor(red: 0.5, green: 0.5, blue: 0.5, alpha: 1.0), CGColor(red: 0.2, green: 0.2, blue: 0.2, alpha: 1.0)]
             let cgColors = colorsArray as CFArray
-            let gradient = CGGradient(colorsSpace: CGColorSpaceCreateDeviceRGB(), colors: cgColors, locations: nil)!
+            _ = CGGradient(colorsSpace: CGColorSpaceCreateDeviceRGB(), colors: cgColors, locations: nil)!
         } else {
             let colorsArray: [CGColor] = top3LightColors.map { $0 }
             let cgColors = colorsArray as CFArray
@@ -828,6 +843,142 @@ public final class MetalImageProcessor: @unchecked Sendable {
         logger.debug("✅ Metal-accelerated mosaic generation complete - Size: \(cgImage.width)x\(cgImage.height) in \(generationTime) seconds")
         progressHandler?(1.0)
         return cgImage
+    }
+
+    /// Generate a mosaic image using Metal acceleration with streaming input
+    /// - Parameters:
+    ///   - stream: Async stream of frames (index, image)
+    ///   - layout: Layout information
+    ///   - metadata: Video metadata
+    ///   - config: Mosaic configuration
+    ///   - metadataHeader: Optional pre-generated metadata header image
+    ///   - forIphone: Whether to optimize for iPhone
+    ///   - progressHandler: Optional progress handler
+    /// - Returns: Generated mosaic image
+    public func generateMosaicStream(
+        stream: AsyncThrowingStream<(Int, CGImage), Error>,
+        layout: MosaicLayout,
+        metadata: VideoMetadata,
+        config: MosaicConfiguration,
+        metadataHeader: CGImage? = nil,
+        forIphone: Bool = false,
+        progressHandler: (@Sendable (Double) -> Void)? = nil
+    ) async throws -> CGImage {
+        let startTime = CFAbsoluteTimeGetCurrent()
+        defer { trackPerformance(startTime: startTime) }
+      
+        logger.debug("🎨 Starting Streaming Metal-accelerated mosaic generation")
+        logger.debug("📐 Layout size: \(layout.mosaicSize.width)x\(layout.mosaicSize.height)")
+        
+        // Determine if we need space for the metadata header
+        let hasMetadata = config.includeMetadata && metadataHeader != nil
+        let metadataHeight = hasMetadata ? metadataHeader!.height : 0
+        
+        // Calculate adjusted mosaic size to accommodate metadata header
+        var mosaicSize = layout.mosaicSize
+        if hasMetadata {
+            mosaicSize.height += CGFloat(metadataHeight)
+        }
+        
+        // Create mosaic texture
+        var mosaicTexture: MTLTexture
+        progressHandler?(0.1)
+        if forIphone {
+            let color = SIMD4<Float>(0.5, 0.5, 0.5, 1.0)
+            mosaicTexture = try createFilledTexture(size: mosaicSize, color: color)
+        } else {
+             let color = SIMD4<Float>(0.1, 0.1, 0.1, 1.0)
+             mosaicTexture = try createFilledTexture(size: mosaicSize, color: color)
+        }
+        
+        progressHandler?(0.2)
+        // If we have a metadata header, composite it at the top of the mosaic
+        if hasMetadata, let headerImage = metadataHeader {
+            logger.debug("🏷️ Adding metadata header - Size: \(headerImage.width)×\(headerImage.height)")
+            let headerTexture = try createTexture(from: headerImage)
+            try compositeTexture(
+                headerTexture,
+                onto: mosaicTexture,
+                at: CGPoint(x: 0, y: 0)
+            )
+        }
+        
+        // Process frames in batches
+        let batchSize = 20
+        var batch: [(Int, CGImage)] = []
+        var processedCount = 0
+        let totalExpected = layout.positions.count
+        
+        for try await (index, image) in stream {
+            batch.append((index, image))
+            
+            if batch.count >= batchSize {
+                try processBatch(batch, into: mosaicTexture, layout: layout, hasMetadata: hasMetadata, metadataHeight: CGFloat(metadataHeight))
+                processedCount += batch.count
+                batch.removeAll()
+                
+                let progress = 0.2 + (0.7 * Double(processedCount) / Double(totalExpected))
+                progressHandler?(progress)
+            }
+        }
+        
+        // Process remaining frames
+        if !batch.isEmpty {
+            try processBatch(batch, into: mosaicTexture, layout: layout, hasMetadata: hasMetadata, metadataHeight: CGFloat(metadataHeight))
+            processedCount += batch.count
+        }
+        
+        // Create CGImage from the final mosaic texture
+        progressHandler?(0.95)
+        let finalImage = try createCGImage(from: mosaicTexture)
+        
+        let generationTime = CFAbsoluteTimeGetCurrent() - startTime
+        logger.debug("✅ Metal mosaic generation complete - Size: \(finalImage.width)x\(finalImage.height) in \(generationTime) seconds")
+        progressHandler?(1.0)
+        
+        return finalImage
+    }
+    
+    private func processBatch(
+        _ batch: [(Int, CGImage)],
+        into mosaicTexture: MTLTexture,
+        layout: MosaicLayout,
+        hasMetadata: Bool,
+        metadataHeight: CGFloat
+    ) throws {
+        guard let batchCommandBuffer = commandQueue.makeCommandBuffer() else {
+            throw MetalProcessorError.commandBufferCreationFailed
+        }
+        
+        for (index, image) in batch {
+            guard index < layout.positions.count else { continue }
+            
+            let position = layout.positions[index]
+            let size = layout.thumbnailSizes[index]
+            let adjustedY = position.y + (hasMetadata ? Int(metadataHeight) : 0)
+            
+            let frameTexture = try createTexture(from: image)
+            
+            let scaledTexture: MTLTexture
+            if frameTexture.width != Int(size.width) || frameTexture.height != Int(size.height) {
+                scaledTexture = try scaleTexture(
+                    frameTexture,
+                    to: CGSize(width: size.width, height: size.height),
+                    commandBuffer: batchCommandBuffer
+                )
+            } else {
+                scaledTexture = frameTexture
+            }
+            
+            try compositeTexture(
+                scaledTexture,
+                onto: mosaicTexture,
+                at: CGPoint(x: position.x, y: adjustedY),
+                commandBuffer: batchCommandBuffer
+            )
+        }
+        
+        batchCommandBuffer.commit()
     }
     
     /// Get performance metrics for the Metal processor

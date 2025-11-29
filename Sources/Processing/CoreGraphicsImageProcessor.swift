@@ -13,7 +13,7 @@ import AppKit
 
 /// A Core Graphics and vImage-based image processor for high-performance mosaic generation on iOS
 /// This implementation mirrors MetalImageProcessor but uses vImage/Accelerate for performance
-@available(macOS 15, iOS 18, *)
+@available(macOS 14, iOS 17, *)
 public final class CoreGraphicsImageProcessor: @unchecked Sendable {
     // MARK: - Properties
 
