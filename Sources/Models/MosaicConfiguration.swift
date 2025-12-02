@@ -42,7 +42,7 @@ public struct MosaicConfiguration: Codable, Sendable {
         includeMetadata: Bool = true,
         useAccurateTimestamps: Bool = false,
         compressionQuality: Double = 0.4,
-        ourputdirectory: URL? = nil,
+        outputdirectory: URL? = nil, // Corrected typo here
         fullPathInName: Bool = false
     ) {
         self.width = width
@@ -52,7 +52,7 @@ public struct MosaicConfiguration: Codable, Sendable {
         self.includeMetadata = includeMetadata
         self.useAccurateTimestamps = useAccurateTimestamps
         self.compressionQuality = compressionQuality
-        self.outputdirectory = ourputdirectory
+        self.outputdirectory = outputdirectory
         self.fullPathInName = fullPathInName
     }
 
@@ -62,9 +62,15 @@ public struct MosaicConfiguration: Codable, Sendable {
             width: 4000,
             density: .xl,
             format: .heif,
-            layout: .default,
+            layout: LayoutConfiguration(layoutType: .custom),
             compressionQuality: 0.4
         )
+    }
+
+    // Changed to an instance method (removed `static`) and marked `mutating`
+    public mutating func updateAspectRatio(new: AspectRatio)
+    {
+        self.layout.aspectRatio = new
     }
 
     // MARK: - Helper Methods
@@ -74,7 +80,7 @@ public struct MosaicConfiguration: Codable, Sendable {
     /// Example: "5120_XL_16-9"
     public var configurationHash: String {
         let aspectRatioString = layout.aspectRatio.rawValue.replacingOccurrences(of: ":", with: "-")
-        return "\(width)_\(density.name)_\(aspectRatioString)"
+        return "\(width)_\(density.name)_\(aspectRatioString)_\(layout.layoutType.rawValue)"
     }
 
     /// Sanitize a string for use in file paths

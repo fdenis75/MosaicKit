@@ -112,7 +112,8 @@ public actor CoreGraphicsMosaicGenerator: MosaicGeneratorProtocol {
                     duration: duration,
                     width: config.width,
                     density: config.density,
-                    useAutoLayout: config.layout.useAutoLayout
+                    layoutType: forIphone ? .iphone : config.layout.layoutType,
+                    videoAR: aspectRatio
                 )
                 logger.debug("🖼️ \(video.title ?? "N/A") - Calculated frame count: \(frameCount)")
 
@@ -131,10 +132,7 @@ public actor CoreGraphicsMosaicGenerator: MosaicGeneratorProtocol {
                     thumbnailCount: frameCount,
                     mosaicWidth: config.width,
                     density: config.density,
-                    useCustomLayout: true,
-                    useAutoLayout: false,
-                    useDynamicLayout: false,
-                    forIphone: forIphone
+                    layoutType: forIphone ? .iphone : config.layout.layoutType
                 )
                 logger.debug("📏 \(video.title ?? "N/A") Layout calculated - Size: \(layout.mosaicSize.width)x\(layout.mosaicSize.height), Thumbnails: \(layout.thumbCount)")
 
@@ -161,7 +159,7 @@ public actor CoreGraphicsMosaicGenerator: MosaicGeneratorProtocol {
                     metadataHeader = thumbnailProcessor.createMetadataHeader(
                         for: video,
                         width: Int(layout.mosaicSize.width),
-                        height: Int(layout.thumbnailSize.height * 0.3),
+                        height: Int(layout.thumbnailSize.height * 0.5),
                         forIphone: forIphone
                     ) as CGImage?
                 }

@@ -524,7 +524,7 @@ public init(
     includeMetadata: Bool = true,
     useAccurateTimestamps: Bool = true,
     compressionQuality: Double = 0.4,
-    ourputdirectory: URL? = nil
+    outputdirectory: URL? = nil
 )
 ```
 

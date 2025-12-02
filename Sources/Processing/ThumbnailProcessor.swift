@@ -313,7 +313,9 @@ public final class ThumbnailProcessor: @unchecked Sendable {
         // Draw metadata header if present
         if hasMetadata, let headerImage = metadataHeader {
             progressHandler?(0.1)
-            context.draw(headerImage, in: CGRect(x: 0, y: 0, width: mosaicSize.width, height: CGFloat(metadataHeight)))
+            // In CG, (0,0) is bottom-left. To draw at top, we need y = height - headerHeight
+            let yPos = mosaicSize.height - CGFloat(metadataHeight)
+            context.draw(headerImage, in: CGRect(x: 0, y: yPos, width: mosaicSize.width, height: CGFloat(metadataHeight)))
         }
         
         // Draw thumbnails
@@ -327,10 +329,33 @@ public final class ThumbnailProcessor: @unchecked Sendable {
             
             // Create adjusted position with offset for metadata header if needed
             let yOffset = hasMetadata ? metadataHeight : 0
+            
+            // Calculate Y position for Core Graphics (bottom-left origin)
+            // We want (0,0) of the layout to be at the top-left of the image (below metadata)
+            // So y = mosaicHeight - (layoutY + height + offset)
+            // Wait, layout.positions.y starts at 0 for top row.
+            // So top row y=0.
+            // In CG: y = mosaicHeight - (0 + size.height) - metadataHeight if metadata is at top.
+            // Let's verify:
+            // If metadata is at top (height=100), mosaicHeight=1000.
+            // Header drawn at y = 900.
+            // First row item (y=0, h=200).
+            // Should be drawn below header. Top of item at 900, bottom at 700.
+            // CG draw rect origin is bottom-left of the rect.
+            // So y = 900 - 200 = 700.
+            // Formula: mosaicHeight - (position.y + size.height) - (hasMetadata ? metadataHeight : 0)
+            // Wait, if metadata is at top, we shift everything down by metadataHeight.
+            // So visual Y (from top) = position.y + metadataHeight.
+            // CG Y = mosaicHeight - (visualY + size.height)
+            //      = mosaicHeight - (position.y + metadataHeight + size.height)
+            
+            let visualY = CGFloat(position.y) + CGFloat(yOffset)
+            let cgY = mosaicSize.height - visualY - size.height
+            
             // CGRect works on both platforms
             let rect = CGRect(
                 x: CGFloat(position.x), 
-                y: CGFloat(position.y) + CGFloat(yOffset), 
+                y: cgY, 
                 width: size.width, 
                 height: size.height
             )
@@ -520,8 +545,8 @@ public final class ThumbnailProcessor: @unchecked Sendable {
         let padding: CGFloat = 8.0
 
         // Calculate font size first, independent of height
-        let baseFontSize = forIphone ? 6.0 : 12.0
-        let fontSize = max(baseFontSize, CGFloat(width) * 0.012) // 1.2% of width for scalability
+        let baseFontSize = forIphone ? 6.0 : 16.0
+        var fontSize = max(baseFontSize, CGFloat(width) * 0.05) // 2% of width for scalability
 
         // Calculate height based on content needs (3 lines + padding)
         let estimatedLineHeight = fontSize * 1.5
@@ -530,6 +555,15 @@ public final class ThumbnailProcessor: @unchecked Sendable {
 
         // Use provided height or calculated height
         let metadataHeight = height ?? calculatedHeight
+        
+        // If height is constrained, ensure font size fits vertically
+        if height != nil {
+            let availableHeight = CGFloat(metadataHeight) - (padding * 4)
+            let maxFontSizeByHeight = availableHeight / (numberOfLines * 1.5)
+            fontSize = min(fontSize, maxFontSizeByHeight)
+            // Ensure a sane minimum
+            fontSize = max(forIphone ? 4.0 : 16.0, fontSize)
+        }
         
         // Create bitmap context for the header
         let colorSpace = CGColorSpaceCreateDeviceRGB()
@@ -607,7 +641,7 @@ public final class ThumbnailProcessor: @unchecked Sendable {
         // Create the attributed strings with enhanced styling
         let row1Attributes: [NSAttributedString.Key: Any] = [
             .font: font,
-            .foregroundColor: forIphone ? NSColor.white : NSColor.gray,
+            .foregroundColor: forIphone ? NSColor.white : NSColor.black,
             .paragraphStyle: paragraphStyle,
          //   .strokeWidth: -0.5, // Text outline for better visibility against semi-transparent background
            // .strokeColor: NSColor.black.withAlphaComponent(0.5)
@@ -616,7 +650,7 @@ public final class ThumbnailProcessor: @unchecked Sendable {
         
         let row2Attributes: [NSAttributedString.Key: Any] = [
             .font: font,
-            .foregroundColor: forIphone ? NSColor.white : NSColor.darkGray,
+            .foregroundColor: forIphone ? NSColor.white : NSColor.black,
             .paragraphStyle: paragraphStyle,
          //   .strokeWidth: -0.5, // Text outline
           //  .strokeColor: NSColor.black.withAlphaComponent(0.5)
@@ -626,7 +660,7 @@ public final class ThumbnailProcessor: @unchecked Sendable {
         let pathAttributes: [NSAttributedString.Key: Any] = [
             .font: smallerFont,
         
-            .foregroundColor: forIphone ? NSColor.white : NSColor.darkGray,// Brighter text for better visibility
+            .foregroundColor: forIphone ? NSColor.white : NSColor.black,// Brighter text for better visibility
             .paragraphStyle: paragraphStyle,
             //.strokeWidth: -0.3, // Subtle text outline
            // .strokeColor: NSColor.black.withAlphaComponent(0.3)
@@ -636,7 +670,7 @@ public final class ThumbnailProcessor: @unchecked Sendable {
         let row1Attributes: [NSAttributedString.Key: Any] = [
             .font: font,
 
-            .foregroundColor: UIColor.gray,
+            .foregroundColor: UIColor.black,
             .paragraphStyle: paragraphStyle,
             .strokeWidth: -0.5, // Text outline for better visibility against semi-transparent background
             .strokeColor: UIColor.black.withAlphaComponent(0.5)
@@ -645,7 +679,7 @@ public final class ThumbnailProcessor: @unchecked Sendable {
         let row2Attributes: [NSAttributedString.Key: Any] = [
             .font: font,
 
-            .foregroundColor: UIColor.darkGray,
+            .foregroundColor: UIColor.black,
             .paragraphStyle: paragraphStyle,
             .strokeWidth: -0.5, // Text outline
             .strokeColor: UIColor.black.withAlphaComponent(0.5)
@@ -654,7 +688,7 @@ public final class ThumbnailProcessor: @unchecked Sendable {
         let pathAttributes: [NSAttributedString.Key: Any] = [
             .font: smallerFont,
 
-            .foregroundColor: UIColor(white: 1.0, alpha: 0.9), // Brighter text for better visibility
+            .foregroundColor: UIColor.black,
             .paragraphStyle: paragraphStyle,
             .strokeWidth: -0.3, // Subtle text outline
             .strokeColor: UIColor.black.withAlphaComponent(0.3)

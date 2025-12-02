@@ -30,11 +30,11 @@
       shouldUseLaunchSchemeArgsEnv = "YES">
       <TestPlans>
          <TestPlanReference
-            reference = "container:TestPlan.xctestplan">
+            reference = "container:TestPlan.xctestplan"
+            default = "YES">
          </TestPlanReference>
          <TestPlanReference
-            reference = "container:Tests/TestPlanMetal.xctestplan"
-            default = "YES">
+            reference = "container:Tests/TestPlanMetal.xctestplan">
          </TestPlanReference>
          <TestPlanReference
             reference = "container:Tests/Metal/TestPlanmetal2.xctestplan">
@@ -48,26 +48,6 @@
                BlueprintIdentifier = "MosaicKitTests"
                BuildableName = "MosaicKitTests"
                BlueprintName = "MosaicKitTests"
-               ReferencedContainer = "container:">
-            </BuildableReference>
-         </TestableReference>
-         <TestableReference
-            skipped = "NO">
-            <BuildableReference
-               BuildableIdentifier = "primary"
-               BlueprintIdentifier = "Metal"
-               BuildableName = "Metal"
-               BlueprintName = "Metal"
-               ReferencedContainer = "container:">
-            </BuildableReference>
-         </TestableReference>
-         <TestableReference
-            skipped = "NO">
-            <BuildableReference
-               BuildableIdentifier = "primary"
-               BlueprintIdentifier = "MetalPerformance"
-               BuildableName = "MetalPerformance"
-               BlueprintName = "MetalPerformance"
                ReferencedContainer = "container:">
             </BuildableReference>
          </TestableReference>

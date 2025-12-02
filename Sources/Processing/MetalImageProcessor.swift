@@ -724,8 +724,8 @@ public final class MetalImageProcessor: @unchecked Sendable {
         let startTime = CFAbsoluteTimeGetCurrent()
         defer { trackPerformance(startTime: startTime) }
       
-        logger.debug("🎨 Starting Metal-accelerated mosaic generation - Frames: \(frames.count)")
-        logger.debug("📐 Layout size: \(layout.mosaicSize.width)x\(layout.mosaicSize.height)")
+        print("🎨 Starting Metal-accelerated mosaic generation - Frames: \(frames.count)")
+        print("📐 Layout size: \(layout.mosaicSize.width)x\(layout.mosaicSize.height)")
         
         // Determine if we need space for the metadata header
         let hasMetadata = config.includeMetadata && metadataHeader != nil

@@ -9,11 +9,8 @@ public struct LayoutConfiguration: Codable, Sendable {
     /// The spacing between frames in pixels.
     public var spacing: CGFloat
 
-    /// Whether to use auto layout based on video duration.
-    public var useAutoLayout: Bool
-
-    /// Whether to use custom layout settings.
-    public var useCustomLayout: Bool
+    /// The type of layout to use.
+    public var layoutType: LayoutType
 
     /// Visual settings for the layout.
     public var visual: VisualSettings
@@ -22,19 +19,32 @@ public struct LayoutConfiguration: Codable, Sendable {
     public init(
         aspectRatio: AspectRatio = .widescreen,
         spacing: CGFloat = 4,
-        useAutoLayout: Bool = false,
-        useCustomLayout: Bool = true,
+        layoutType: LayoutType = .custom,
         visual: VisualSettings = .default
     ) {
         self.aspectRatio = aspectRatio
         self.spacing = spacing
-        self.useAutoLayout = useAutoLayout
-        self.useCustomLayout = useCustomLayout
+        self.layoutType = layoutType
         self.visual = visual
     }
 
+   
     /// The default layout configuration.
     public static let `default` = LayoutConfiguration()
+}
+
+/// Available layout types for mosaic generation.
+public enum LayoutType: String, Codable, Sendable {
+    /// Auto layout based on screen size and content.
+    case auto
+    /// Custom layout with specific density and arrangement.
+    case custom
+    /// Dynamic layout with center emphasis.
+    case dynamic
+    /// Classic grid layout.
+    case classic
+    /// Layout optimized for iPhone screens.
+    case iphone
 }
 
 /// Predefined aspect ratios for mosaic layout.
@@ -59,6 +69,16 @@ public enum AspectRatio: String, Codable, Sendable {
         case .ultrawide: return 21.0 / 9.0
         case .vertical: return 9.0 / 16.0
         }
+    }
+    
+    // MARK: - FIX: Made findNearest a static method
+    public static func findNearest(to: CGSize) -> AspectRatio {
+        let targetRatio = to.width / to.height
+        return Self.allCases.min(by: {
+            let a = $0.ratio
+            let b = $1.ratio
+            return abs(a - targetRatio) < abs(b - targetRatio)
+        })!
     }
 
     /// All available aspect ratios
@@ -142,3 +162,4 @@ public struct ShadowSettings: Codable, Sendable {
     /// The default shadow settings.
     public static let `default` = ShadowSettings()
 }
+

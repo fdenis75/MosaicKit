@@ -21,7 +21,7 @@ typealias PlatformImage = UIImage
 #endif
 
 /// A Metal-accelerated implementation of the MosaicGeneratorProtocol
-@available(macOS 14, iOS 17, *)
+//@available(macOS )
 public actor MetalMosaicGenerator: MosaicGeneratorProtocol {
     // MARK: - Properties
     
@@ -126,7 +126,8 @@ public actor MetalMosaicGenerator: MosaicGeneratorProtocol {
                     duration: duration,
                     width: config.width,
                     density: config.density,
-                    useAutoLayout: config.layout.useAutoLayout
+                    layoutType: forIphone ? .iphone : config.layout.layoutType,
+                    videoAR: aspectRatio
                 )
                 // logger.debug("🖼️ \(video.title ?? "N/A") - Calculated frame count: \(frameCount)")
                 layoutProcessor.updateAspectRatio(config.layout.aspectRatio.ratio)
@@ -142,11 +143,13 @@ public actor MetalMosaicGenerator: MosaicGeneratorProtocol {
                     thumbnailCount: frameCount,
                     mosaicWidth: config.width,
                     density: config.density,
-                    useCustomLayout: true,
-                    useAutoLayout: false,
-                    useDynamicLayout: false,
-                    forIphone: forIphone
+                    layoutType: forIphone ? .iphone : config.layout.layoutType
                 )
+                
+                // MARK: - FIX: Create a mutable copy of config and use the static method
+                var mutableConfig = config // Create a mutable copy
+                mutableConfig.updateAspectRatio(new: AspectRatio.findNearest(to: layout.mosaicSize)) // Call on mutable copy using static method
+                
                 let layoutTime = CFAbsoluteTimeGetCurrent()
                 let executionTime = layoutTime - startTime
                 print("layout process in \(executionTime) seconds")
@@ -169,12 +172,12 @@ public actor MetalMosaicGenerator: MosaicGeneratorProtocol {
 
                 // If metadata is enabled, create a header image with enhanced information
                 var metadataHeader: CGImage? = nil
-                if config.includeMetadata {
+                if mutableConfig.includeMetadata { // Use mutableConfig
                  //   // logger.debug("🏷️ Creating enhanced metadata header with complete video information")
                     metadataHeader = thumbnailProcessor.createMetadataHeader(
                         for: video,
                         width: Int(layout.mosaicSize.width),
-                        height: Int(layout.thumbnailSize.height * 0.3),
+                        height: Int(layout.thumbnailSize.height * 0.5),
                         forIphone: forIphone
                     ) as CGImage? // Use as? for safe casting
                 }
@@ -193,7 +196,7 @@ public actor MetalMosaicGenerator: MosaicGeneratorProtocol {
                             from: videoURL,
                             layout: layout,
                             asset: asset,
-                            accurate: config.useAccurateTimestamps
+                            accurate: mutableConfig.useAccurateTimestamps // Use mutableConfig
                         )
                         
                         try await withThrowingTaskGroup(of: Void.self) { group in
@@ -224,7 +227,7 @@ public actor MetalMosaicGenerator: MosaicGeneratorProtocol {
                         bitrate: video.metadata.bitrate,
                         custom: video.metadata.custom
                     ),
-                    config: config,
+                    config: mutableConfig, // Use mutableConfig
                     metadataHeader: metadataHeader,
                     forIphone: forIphone,
                     progressHandler: { @Sendable progress in
@@ -248,7 +251,7 @@ public actor MetalMosaicGenerator: MosaicGeneratorProtocol {
                 let mosaicURL = try await saveMosaic(
                     mosaic,
                     for: video,
-                    config: config,
+                    config: mutableConfig, // Use mutableConfig
                     forIphone:  forIphone
                 )
                 
@@ -665,3 +668,4 @@ private func getPngData(from image: Any) -> Data? {
     #endif
     return nil
 }
+

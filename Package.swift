@@ -1,11 +1,11 @@
-// swift-tools-version: 6.1
+// swift-tools-version: 6.2
 // The swift-tools-version declares the minimum version of Swift required to build this package.
 
 import PackageDescription
 
 let package = Package(
     name: "MosaicKit",
-    platforms: [.macOS(.v14), .iOS(.v17), .macCatalyst(.v17)],
+    platforms: [.macOS(.v26), .iOS(.v26), .macCatalyst(.v26)],
     products: [
         .library(
             name: "MosaicKit",
@@ -33,11 +33,7 @@ let package = Package(
                 .enableUpcomingFeature("BareSlashRegexLiterals")
             ]
         ),
-        .testTarget(
-            name: "MetalPerformance",
-            dependencies: ["MosaicKit"],
-            path: "Tests/MetalPerformance"
-        ),
+
         .testTarget(
             name: "MosaicKitTests",
             dependencies: ["MosaicKit"],
