@@ -11,6 +11,24 @@ import OSLog
 import UniformTypeIdentifiers
 import SJSAssetExportSession
 
+/// Thread-safe cancellation token
+class CancellationToken: @unchecked Sendable {
+    private let lock = NSLock()
+    private var _isCancelled = false
+    
+    var isCancelled: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return _isCancelled
+    }
+    
+    func cancel() {
+        lock.lock()
+        _isCancelled = true
+        lock.unlock()
+    }
+}
+
 /// Actor responsible for generating preview videos from source videos
 @available(macOS 15, iOS 18, *)
 public actor PreviewVideoGenerator {
@@ -19,7 +37,7 @@ public actor PreviewVideoGenerator {
 
     private let logger = Logger(subsystem: "com.mosaickit", category: "PreviewVideoGenerator")
     private var progressHandlers: [UUID: @Sendable (PreviewGenerationProgress) -> Void] = [:]
-    private var cancellationFlags: [UUID: Bool] = [:]
+    private var cancellationTokens: [UUID: CancellationToken] = [:]
 
     // MARK: - Initialization
 
@@ -37,72 +55,43 @@ public actor PreviewVideoGenerator {
         config: PreviewConfiguration
     ) async throws -> URL {
         logger.info("Starting preview generation for \(video.title)")
-
-        // Check for cancellation
-        if cancellationFlags[video.id] == true {
-            throw PreviewError.cancelled
+        
+        // Create cancellation token
+        let token = CancellationToken()
+        cancellationTokens[video.id] = token
+        
+        defer {
+            cancellationTokens.removeValue(forKey: video.id)
         }
-
+        
         // Report analyzing status
         reportProgress(for: video, progress: 0.0, status: .analyzing)
-
-        // Load the video asset
-        let asset = AVURLAsset(url: video.url)
-
-        // Validate video
-        try await validateVideo(asset: asset, video: video, config: config)
-
-        // Calculate extract parameters
-        let (extractDuration, playbackSpeed) = config.calculateExtractParameters()
-        logger.info("Extract duration: \(extractDuration)s, playback speed: \(playbackSpeed)x")
-
-        // Calculate timestamps for extracts
-        reportProgress(for: video, progress: 0.1, status: .analyzing, message: "Calculating timestamps...")
-        let timestamps = try await calculateExtractTimestamps(
-            asset: asset,
-            video: video,
-            extractCount: config.extractCount,
-            extractDuration: extractDuration
-        )
-
-        // Check for cancellation
-        if cancellationFlags[video.id] == true {
-            throw PreviewError.cancelled
+        
+        do {
+            let outputURL = try await PreviewGenerationLogic.generate(
+                for: video,
+                config: config,
+                progressHandler: { [weak self] progress, status, url, message in
+                    Task { [weak self] in
+                        await self?.reportProgress(for: video, progress: progress, status: status, outputURL: url, message: message)
+                    }
+                },
+                cancellationCheck: { [token] in
+                    token.isCancelled
+                }
+            )
+            
+            // Report completion
+            reportProgress(for: video, progress: 1.0, status: .completed)
+            logger.info("Preview generation completed: \(outputURL.lastPathComponent)")
+            
+            return outputURL
+        } catch {
+            if token.isCancelled {
+                throw PreviewError.cancelled
+            }
+            throw error
         }
-
-        // Extract video segments
-        reportProgress(for: video, progress: 0.2, status: .extracting, message: "Extracting \(timestamps.count) segments...")
-        let videoComposition = try await composeVideoSegments(
-            asset: asset,
-            timestamps: timestamps,
-            extractDuration: extractDuration,
-            playbackSpeed: playbackSpeed,
-            includeAudio: config.includeAudio,
-            video: video
-        )
-
-        // Check for cancellation
-        if cancellationFlags[video.id] == true {
-            throw PreviewError.cancelled
-        }
-
-        // Export the composition
-        reportProgress(for: video, progress: 0.3, status: .encoding, message: "Encoding preview video...")
-        let outputURL = try await exportComposition(
-            composition: videoComposition.composition,
-            audioMix: videoComposition.audioMix,
-            config: config,
-            video: video
-        )
-
-        // Report completion
-        reportProgress(for: video, progress: 1.0, status: .completed)
-        logger.info("Preview generation completed: \(outputURL.lastPathComponent)")
-
-        // Cleanup
-        cancellationFlags.removeValue(forKey: video.id)
-
-        return outputURL
     }
 
     /// Set progress handler for a video
@@ -116,20 +105,106 @@ public actor PreviewVideoGenerator {
     /// Cancel generation for a specific video
     public func cancel(for video: VideoInput) {
         logger.info("Cancelling preview generation for \(video.title)")
-        cancellationFlags[video.id] = true
+        cancellationTokens[video.id]?.cancel()
     }
 
     /// Cancel all active generations
     public func cancelAll() {
         logger.info("Cancelling all preview generations")
-        for id in cancellationFlags.keys {
-            cancellationFlags[id] = true
+        for token in cancellationTokens.values {
+            token.cancel()
         }
     }
 
     // MARK: - Private Methods
 
-    private func validateVideo(asset: AVAsset, video: VideoInput, config: PreviewConfiguration) async throws {
+    private func reportProgress(
+        for video: VideoInput,
+        progress: Double,
+        status: PreviewGenerationStatus,
+        outputURL: URL? = nil,
+        message: String? = nil
+    ) {
+        let progressInfo = PreviewGenerationProgress(
+            video: video,
+            progress: progress,
+            status: status,
+            outputURL: outputURL,
+            message: message
+        )
+        progressHandlers[video.id]?(progressInfo)
+    }
+}
+
+/// Logic for preview generation, isolated to MainActor to ensure AVFoundation safety
+@available(macOS 15, iOS 18, *)
+@MainActor
+struct PreviewGenerationLogic {
+    private static let logger = Logger(subsystem: "com.mosaickit", category: "PreviewGenerationLogic")
+    
+    static func generate(
+        for video: VideoInput,
+        config: PreviewConfiguration,
+        progressHandler: @escaping @Sendable (Double, PreviewGenerationStatus, URL?, String?) -> Void,
+        cancellationCheck: @escaping @Sendable () -> Bool
+    ) async throws -> URL {
+        logger.info("Starting preview generation logic for \(video.title)")
+        
+        if cancellationCheck() { throw PreviewError.cancelled }
+        
+        progressHandler(0.0, .analyzing, nil, nil)
+        
+        // Load asset
+        let asset = AVURLAsset(url: video.url, options: [AVURLAssetPreferPreciseDurationAndTimingKey: true])
+        
+        // Validate
+        try await validateVideo(asset: asset, video: video, config: config)
+        
+        if cancellationCheck() { throw PreviewError.cancelled }
+        
+        // Calculate parameters
+        let (extractDuration, playbackSpeed) = config.calculateExtractParameters()
+        
+        progressHandler(0.1, .analyzing, nil, "Calculating timestamps...")
+        let timestamps = try await calculateExtractTimestamps(
+            asset: asset,
+            video: video,
+            extractCount: config.extractCount,
+            extractDuration: extractDuration
+        )
+        
+        if cancellationCheck() { throw PreviewError.cancelled }
+        
+        // Compose
+        progressHandler(0.2, .extracting, nil, "Extracting \(timestamps.count) segments...")
+        let videoComposition = try await composeVideoSegments(
+            asset: asset,
+            timestamps: timestamps,
+            extractDuration: extractDuration,
+            playbackSpeed: playbackSpeed,
+            includeAudio: config.includeAudio,
+            video: video,
+            progressHandler: progressHandler,
+            cancellationCheck: cancellationCheck
+        )
+        
+        if cancellationCheck() { throw PreviewError.cancelled }
+        
+        // Export
+        progressHandler(0.3, .encoding, nil, "Encoding preview video...")
+        let outputURL = try await exportComposition(
+            composition: videoComposition.composition,
+            audioMix: videoComposition.audioMix,
+            config: config,
+            video: video,
+            progressHandler: progressHandler,
+            cancellationCheck: cancellationCheck
+        )
+        
+        return outputURL
+    }
+    
+    private static func validateVideo(asset: AVAsset, video: VideoInput, config: PreviewConfiguration) async throws {
         logger.info("🔍 Validating video: \(video.title)")
 
         // Check for video tracks
@@ -173,8 +248,8 @@ public actor PreviewVideoGenerator {
 
         logger.info("✅ Video validation passed")
     }
-
-    private func calculateExtractTimestamps(
+    
+    private static func calculateExtractTimestamps(
         asset: AVAsset,
         video: VideoInput,
         extractCount: Int,
@@ -193,8 +268,8 @@ public actor PreviewVideoGenerator {
         let secondThirdEnd = skipStart + (usableDuration * 0.667)
 
         // Allocate extracts: 20% in first third, 60% in middle, 20% in last third
-        let firstThirdCount = max(1, Int(Double(extractCount) * 0.2))
-        let middleThirdCount = max(1, Int(Double(extractCount) * 0.6))
+        let firstThirdCount = Int(Double(extractCount) * 0.2)
+        let middleThirdCount = Int(Double(extractCount) * 0.6)
         let lastThirdCount = extractCount - firstThirdCount - middleThirdCount
 
         var timestamps: [(start: CMTime, duration: CMTime)] = []
@@ -207,8 +282,12 @@ public actor PreviewVideoGenerator {
 
             for i in 0..<count {
                 let startTime = sectionStart + (step * Double(i))
+                // Ensure the extract fits in the video
+                let maxStartTime = totalDuration - extractDuration
+                let clampedStartTime = min(startTime, maxStartTime)
+                
                 timestamps.append((
-                    start: CMTime(seconds: startTime, preferredTimescale: 600),
+                    start: CMTime(seconds: clampedStartTime, preferredTimescale: 600),
                     duration: CMTime(seconds: extractDuration, preferredTimescale: 600)
                 ))
             }
@@ -225,14 +304,16 @@ public actor PreviewVideoGenerator {
         logger.info("Calculated \(timestamps.count) extract timestamps")
         return timestamps
     }
-
-    private func composeVideoSegments(
+    
+    private static func composeVideoSegments(
         asset: AVAsset,
         timestamps: [(start: CMTime, duration: CMTime)],
         extractDuration: TimeInterval,
         playbackSpeed: Double,
         includeAudio: Bool,
-        video: VideoInput
+        video: VideoInput,
+        progressHandler: @escaping @Sendable (Double, PreviewGenerationStatus, URL?, String?) -> Void,
+        cancellationCheck: @escaping @Sendable () -> Bool
     ) async throws -> (composition: AVMutableComposition, audioMix: AVMutableAudioMix?) {
         logger.info("🎬 Starting composition with \(timestamps.count) segments, playback speed: \(playbackSpeed)x")
         let composition = AVMutableComposition()
@@ -271,7 +352,7 @@ public actor PreviewVideoGenerator {
             let audioTracks = try await asset.loadTracks(withMediaType: .audio)
             logger.info("🔊 Found \(audioTracks.count) audio track(s)")
 
-            if let audioTrack = audioTracks.first {
+            if !audioTracks.isEmpty {
                 compositionAudioTrack = composition.addMutableTrack(
                     withMediaType: .audio,
                     preferredTrackID: kCMPersistentTrackID_Invalid
@@ -292,7 +373,7 @@ public actor PreviewVideoGenerator {
 
         for (index, timestamp) in timestamps.enumerated() {
             // Check for cancellation
-            if cancellationFlags[video.id] == true {
+            if cancellationCheck() {
                 logger.warning("⚠️ Composition cancelled at segment \(index + 1)")
                 throw PreviewError.cancelled
             }
@@ -315,6 +396,9 @@ public actor PreviewVideoGenerator {
             do {
                 // Insert video segment
                 logger.debug("  📹 Inserting video segment...")
+                logger.debug("  - TimeRange: \(startSeconds)s, duration: \(durationSeconds)s")
+                logger.debug("  - InsertAt: \(CMTimeGetSeconds(insertTime))s")
+                
                 try compositionVideoTrack.insertTimeRange(
                     timeRange,
                     of: videoTrack,
@@ -360,11 +444,11 @@ public actor PreviewVideoGenerator {
 
                 // Report progress
                 let progress = 0.2 + (progressStep * Double(index + 1))
-                reportProgress(
-                    for: video,
-                    progress: progress,
-                    status: .composing,
-                    message: "Composing segment \(index + 1)/\(timestamps.count)"
+                progressHandler(
+                    progress,
+                    .composing,
+                    nil,
+                    "Composing segment \(index + 1)/\(timestamps.count)"
                 )
 
             } catch let error as NSError {
@@ -401,12 +485,14 @@ public actor PreviewVideoGenerator {
 
         return (composition, audioMix)
     }
-
-    private func exportComposition(
+    
+    private static func exportComposition(
         composition: AVMutableComposition,
         audioMix: AVMutableAudioMix?,
         config: PreviewConfiguration,
-        video: VideoInput
+        video: VideoInput,
+        progressHandler: @escaping @Sendable (Double, PreviewGenerationStatus, URL?, String?) -> Void,
+        cancellationCheck: @escaping @Sendable () -> Bool
     ) async throws -> URL {
         logger.info("🎞️ Starting export for \(video.title)")
 
@@ -435,7 +521,7 @@ public actor PreviewVideoGenerator {
         logger.info("📁 Output directory: \(outputDirectory.path)")
 
         if outputDirectory.startAccessingSecurityScopedResource() {
-            defer { outputDirectory.stopAccessingSecurityScopedResource() }
+            outputDirectory.stopAccessingSecurityScopedResource()
         }
         do {
             try FileManager.default.createDirectory(
@@ -486,7 +572,7 @@ public actor PreviewVideoGenerator {
         let progressTask = Task {
             for await progress in exporter.progressStream {
                 // Check for cancellation
-                if cancellationFlags[video.id] == true {
+                if cancellationCheck() {
                     break
                 }
 
@@ -494,17 +580,16 @@ public actor PreviewVideoGenerator {
                 // Export progress goes from 0-1, we map it to 0.7-1.0
                 let progressValue = Double(progress)
                 let exportProgress = 0.3 + (progressValue * 0.7)
-                reportProgress(
-                    for: video,
-                    progress: exportProgress,
-                    status: .encoding,
-                    message: "Encoding: \(Int(progressValue * 100))%"
+                progressHandler(
+                    exportProgress,
+                    .encoding,
+                    nil,
+                    "Encoding: \(Int(progressValue * 100))%"
                 )
-                logger.debug("Export progress: \(Int(progressValue * 100))%")
+            //    logger.debug("Export progress: \(Int(progressValue * 100))%")
                 if progressValue == 1.0 {
                     return true
                 }
-              //  return true
             }
             return true
         }
@@ -525,21 +610,21 @@ public actor PreviewVideoGenerator {
             )
 
             // Wait for progress task to complete
-            await progressTask.value
+            _ = await progressTask.value
 
             // Check for cancellation
-            if cancellationFlags[video.id] == true {
+            if cancellationCheck() {
                 throw PreviewError.cancelled
             }
 
             logger.info("🎬 Export completed successfully")
 
             // Report final completion status
-            reportProgress(
-                for: video,
-                progress: 0.9,
-                status: .saving,
-                message: "Export complete"
+            progressHandler(
+                0.9,
+                .saving,
+                nil,
+                "Export complete"
             )
 
             // Verify output file exists
@@ -549,11 +634,11 @@ public actor PreviewVideoGenerator {
                 logger.info("  - Output: \(outputURL.lastPathComponent)")
                 logger.info("  - Size: \(String(format: "%.2f", fileSizeMB)) MB")
             } else {
-                reportProgress(
-                    for: video,
-                    progress: 1.0,
-                    status: .failed,
-                    message: "Could not saved"
+                progressHandler(
+                    1.0,
+                    .failed,
+                    nil,
+                    "Could not saved"
                 )
                 logger.error("❌ Export completed but file does not exist at: \(outputURL.path)")
             }
@@ -561,12 +646,11 @@ public actor PreviewVideoGenerator {
             if didStartAccessing {
                 outputURL.stopAccessingSecurityScopedResource()
             }
-            reportProgress(
-                for: video,
-                progress: 1.0,
-                status: .completed,
-                outputURL: outputURL,
-                message: "Export saved"
+            progressHandler(
+                1.0,
+                .completed,
+                outputURL,
+                "Export saved"
             )
             return outputURL
 
@@ -579,18 +663,18 @@ public actor PreviewVideoGenerator {
             if didStartAccessing {
                 outputURL.stopAccessingSecurityScopedResource()
             }
-            reportProgress(
-                for: video,
-                progress: 1.0,
-                status: .failed,
-                message: error.localizedDescription
+            progressHandler(
+                1.0,
+                .failed,
+                nil,
+                error.localizedDescription
             )
             throw PreviewError.encodingFailed("Export failed", error)
         }
     }
-
+    
     /// Determine video and audio settings based on quality level and original dimensions
-    private func videoSettings(
+    private static func videoSettings(
         for quality: Double,
         format: VideoFormat,
         width: Int,
@@ -607,44 +691,52 @@ public actor PreviewVideoGenerator {
         let totalPixels = width * height
         let pixelMultiplier: Double
 
-        if quality >= 0.9 {
+        if quality == 1.0 {
             // Highest quality - HEVC with high bitrate
             pixelMultiplier = 0.15 // ~35 Mbps for 4K
             videoConfig = .codec(.hevc, width: width, height: height)
-                .fps(30)
+               // .fps(30)
                 .bitrate(Int(Double(totalPixels) * pixelMultiplier))
                 .color(.sdr)
-            audioBitrate = 256_000 // 256 kbps
-        } else if quality >= 0.75 {
+            audioBitrate = 160_000 // 256 kbps
+        } else if quality == 0.75 {
             // High quality - HEVC with medium-high bitrate
             pixelMultiplier = 0.08 // ~10 Mbps for 1080p
             videoConfig = .codec(.hevc, width: width, height: height)
                 .fps(30)
                 .bitrate(Int(Double(totalPixels) * pixelMultiplier))
                 .color(.sdr)
-            audioBitrate = 192_000 // 192 kbps
-        } else if quality >= 0.5 {
+            audioBitrate = 160_000  // 192 kbps
+        } else if quality == 0.5 {
             // Medium quality - H.264 with medium bitrate
             pixelMultiplier = 0.06 // ~8 Mbps for 1080p
             videoConfig = .codec(.h264, width: width, height: height)
-                .fps(30)
+                //.fps(30)
                 .bitrate(Int(Double(totalPixels) * pixelMultiplier))
                 .color(.sdr)
             audioBitrate = 160_000 // 160 kbps
-        } else {
-            // Lower quality - H.264 with lower bitrate
-            pixelMultiplier = 0.04 // ~5 Mbps for 1080p
+        } else if quality == 0.25 {
+            // Medium quality - H.264 with medium bitrate
+            pixelMultiplier = 0.04 // ~8 Mbps for 1080p
             videoConfig = .codec(.h264, width: width, height: height)
-                .fps(30)
+                //.fps(30)
                 .bitrate(Int(Double(totalPixels) * pixelMultiplier))
                 .color(.sdr)
-            audioBitrate = 128_000 // 128 kbps
+            audioBitrate = 160_000 // 160 kbps
+        } else
+        {
+            // Lower quality - H.264 with lower bitrate
+            pixelMultiplier = 0.02 // ~5 Mbps for 1080p
+            videoConfig = .codec(.h264, width: width/2 , height: height/2)
+               // .fps(30)
+                .bitrate(Int(Double(totalPixels) * pixelMultiplier))
+                .color(.sdr)
+            audioBitrate = 128_000  // 128 kbps
         }
-
         return (videoConfig, audioBitrate)
     }
 
-    private func statusDescription(_ status: AVAssetExportSession.Status) -> String {
+    private static func statusDescription(_ status: AVAssetExportSession.Status) -> String {
         switch status {
         case .unknown: return "unknown"
         case .waiting: return "waiting"
@@ -654,22 +746,5 @@ public actor PreviewVideoGenerator {
         case .cancelled: return "cancelled"
         @unknown default: return "unknown(\(status.rawValue))"
         }
-    }
-
-    private func reportProgress(
-        for video: VideoInput,
-        progress: Double,
-        status: PreviewGenerationStatus,
-        outputURL: URL? = nil,
-        message: String? = nil
-    ) {
-        let progressInfo = PreviewGenerationProgress(
-            video: video,
-            progress: progress,
-            status: status,
-            outputURL: outputURL,
-            message: message
-        )
-        progressHandlers[video.id]?(progressInfo)
     }
 }

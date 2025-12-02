@@ -1,0 +1,45 @@
+{
+  "configurations" : [
+    {
+      "id" : "A58342DF-44BB-4F21-8563-323BF51B0545",
+      "name" : "Configuration 1",
+      "options" : {
+
+      }
+    }
+  ],
+  "defaultOptions" : {
+    "testTimeoutsEnabled" : true
+  },
+  "testTargets" : [
+    {
+      "skippedTests" : {
+        "suites" : [
+          {
+            "name" : "TestMetal"
+          }
+        ],
+        "xctestClasses" : [
+          {
+            "name" : "BatchMosaicGenerationTests"
+          },
+          {
+            "name" : "GeneratorComparisonTests"
+          },
+          {
+            "name" : "VideoInputPerformanceTests"
+          },
+          {
+            "name" : "VideoInputTests"
+          }
+        ]
+      },
+      "target" : {
+        "containerPath" : "container:",
+        "identifier" : "MosaicKitTests",
+        "name" : "MosaicKitTests"
+      }
+    }
+  ],
+  "version" : 2
+}

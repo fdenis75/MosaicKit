@@ -67,7 +67,10 @@ public struct PreviewConfiguration: Codable, Sendable, Hashable {
         case "S": return 24
         case "XS": return 32
         case "XXS": return 48
-        default: return 16 // Default to M
+        case "XXS": return 48
+        default: 
+            // For custom densities, calculate based on factor (base 16)
+            return max(1, Int(16.0 * density.factor))
         }
     }
 
@@ -120,8 +123,9 @@ public struct PreviewConfiguration: Codable, Sendable, Hashable {
         // Create config hash: duration_density_format_audio
         let durationLabel = formatDuration(targetDuration)
         let audioLabel = includeAudio ? "audio" : "noaudio"
-        let configHash = "\(durationLabel)_\(density.name)_\(format.rawValue)_\(audioLabel)"
-
+        let quality = compressionQuality.isNaN ? "" : "_\(compressionQuality)"
+        let configHash = "\(durationLabel)_\(density.name)_\(format.rawValue)_\(audioLabel)_\(quality)"
+      
         if fullPathInName {
             // Use full path in filename
             let sanitizedPath = videoInput.url.deletingLastPathComponent().path
