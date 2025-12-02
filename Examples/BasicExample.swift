@@ -2,7 +2,7 @@ import MosaicKit
 import Foundation
 
 /// Basic example of generating a single mosaic
-@available(macOS 15, iOS 18, *)
+@available(macOS 26, iOS 26, *)
 @main
 struct BasicExample {
     static func main() async throws {

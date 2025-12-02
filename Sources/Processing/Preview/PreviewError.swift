@@ -8,7 +8,7 @@
 import Foundation
 
 /// Errors that can occur during preview video generation
-@available(macOS 15, iOS 18, *)
+@available(macOS 26, iOS 26, *)
 public enum PreviewError: LocalizedError, Sendable {
     case invalidConfiguration(String)
     case videoLoadFailed(URL, Error)

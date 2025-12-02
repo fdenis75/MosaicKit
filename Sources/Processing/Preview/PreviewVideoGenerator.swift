@@ -30,7 +30,7 @@ class CancellationToken: @unchecked Sendable {
 }
 
 /// Actor responsible for generating preview videos from source videos
-@available(macOS 15, iOS 18, *)
+@available(macOS 26, iOS 26, *)
 public actor PreviewVideoGenerator {
 
     // MARK: - Properties
@@ -137,7 +137,7 @@ public actor PreviewVideoGenerator {
 }
 
 /// Logic for preview generation, isolated to MainActor to ensure AVFoundation safety
-@available(macOS 15, iOS 18, *)
+@available(macOS 26, iOS 26, *)
 @MainActor
 struct PreviewGenerationLogic {
     private static let logger = Logger(subsystem: "com.mosaickit", category: "PreviewGenerationLogic")

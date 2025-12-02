@@ -9,7 +9,7 @@ import Foundation
 import AVFoundation
 
 /// Configuration for video preview generation
-@available(macOS 15, iOS 18, *)
+@available(macOS 26, iOS 26, *)
 public struct PreviewConfiguration: Codable, Sendable, Hashable {
 
     // MARK: - Properties
@@ -165,7 +165,7 @@ public struct PreviewConfiguration: Codable, Sendable, Hashable {
 
 // MARK: - Predefined Durations
 
-@available(macOS 15, iOS 18, *)
+@available(macOS 26, iOS 26, *)
 extension PreviewConfiguration {
     /// Common preview durations (30 second increments from 30s to 5m)
     public static let standardDurations: [TimeInterval] = [

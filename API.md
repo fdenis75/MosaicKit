@@ -85,7 +85,7 @@ public func generateBatch(
 Metal-accelerated mosaic generator (actor).
 
 ```swift
-@available(macOS 15, iOS 18, *)
+@available(macOS 26, iOS 26, *)
 public actor MetalMosaicGenerator
 ```
 
@@ -174,7 +174,7 @@ public func getPerformanceMetrics() -> [String: Any]
 Coordinator for batch mosaic generation operations (actor).
 
 ```swift
-@available(macOS 15, iOS 18, *)
+@available(macOS 26, iOS 26, *)
 public actor MosaicGeneratorCoordinator
 ```
 
@@ -262,7 +262,7 @@ public func cancelAllGenerations()
 Handles mosaic layout calculations and optimization.
 
 ```swift
-@available(macOS 15, iOS 18, *)
+@available(macOS 26, iOS 26, *)
 public final class LayoutProcessor
 ```
 
@@ -433,7 +433,7 @@ public func drawMosaicASCIIArt() -> String
 Result of mosaic generation.
 
 ```swift
-@available(macOS 15, iOS 18, *)
+@available(macOS 26, iOS 26, *)
 public struct MosaicGenerationResult: Sendable
 ```
 
@@ -453,7 +453,7 @@ public var isSuccess: Bool
 Progress information for mosaic generation.
 
 ```swift
-@available(macOS 15, iOS 18, *)
+@available(macOS 26, iOS 26, *)
 public struct MosaicGenerationProgress: Sendable
 ```
 
@@ -474,7 +474,7 @@ public let error: Error?
 Status of mosaic generation.
 
 ```swift
-@available(macOS 15, iOS 18, *)
+@available(macOS 26, iOS 26, *)
 public enum MosaicGenerationStatus: Sendable
 ```
 
@@ -778,7 +778,7 @@ case operationFailed(String)
 A factory for creating mosaic generators.
 
 ```swift
-@available(macOS 15, iOS 18, *)
+@available(macOS 26, iOS 26, *)
 public enum MosaicGeneratorFactory
 ```
 

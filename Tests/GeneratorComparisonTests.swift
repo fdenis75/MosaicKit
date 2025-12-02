@@ -3,7 +3,7 @@ import XCTest
 import Foundation
 
 /// Performance comparison tests between Metal and Core Graphics implementations
-@available(macOS 14, iOS 17, *)
+@available(macOS 26, iOS 26, *)
 final class GeneratorComparisonTests: XCTestCase {
 
     // MARK: - Properties

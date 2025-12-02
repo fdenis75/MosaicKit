@@ -82,7 +82,7 @@ import Metal
 ///     print("\(progress.video.filename): \(progress.status.displayLabel)")
 /// }
 /// ```
-@available(iOS 17, macOS 14, *)
+@available(macOS 26, iOS 26, *)
 public final class MosaicGenerator {
     private let logger = Logger(label: "com.mosaickit")
     private let internalGenerator: Any?
@@ -90,7 +90,7 @@ public final class MosaicGenerator {
 
     /// Initialize a mosaic generator with default platform preference
     /// - Default: Metal on macOS, Core Graphics on iOS
-    @available(iOS 18, *)
+    @available(macOS 26, iOS 26, *)
     public convenience init() throws {
         try self.init(preference: .auto)
     }
@@ -100,7 +100,7 @@ public final class MosaicGenerator {
     ///   - `.auto`: Metal on macOS, Core Graphics on iOS (default)
     ///   - `.preferMetal`: Metal (macOS only, falls back to Core Graphics on iOS)
     ///   - `.preferCoreGraphics`: Core Graphics (available on both platforms)
-    @available(iOS 17, macOS 14, *)
+    @available(macOS 26, iOS 26, *)
     public init(preference: MosaicGeneratorFactory.GeneratorPreference) throws {
         self.generatorPreference = preference
 

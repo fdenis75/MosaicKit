@@ -9,7 +9,7 @@ import Foundation
 import AVFoundation
 
 /// Supported video output formats for preview generation
-@available(macOS 15, iOS 18, *)
+@available(macOS 26, iOS 26, *)
 public enum VideoFormat: String, Codable, Sendable, CaseIterable {
     case mp4 = "mp4"
     case mov = "mov"

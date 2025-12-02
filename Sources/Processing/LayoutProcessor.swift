@@ -8,7 +8,7 @@ import UIKit
 #endif
 
 /// Handles mosaic layout calculations and optimization
-@available(macOS 14, iOS 17, *)
+@available(macOS 26, iOS 26, *)
 public final class LayoutProcessor {
     private let logger = Logger(subsystem: "com.mosaicKit", category: "layout-processing")
     private let signposter = OSSignposter(subsystem: "com.mosaicKit", category: "layout-processor")

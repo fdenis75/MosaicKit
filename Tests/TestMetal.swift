@@ -9,7 +9,7 @@ import CoreGraphics
 import ImageIO
 
 /// Performance comparison tests between Metal and Core Graphics implementations
-//@available(macOS 15, iOS 18, *)
+//@available(macOS 26, iOS 26, *)
 struct TestMetal : ~Copyable {
     
     // MARK: - Properties

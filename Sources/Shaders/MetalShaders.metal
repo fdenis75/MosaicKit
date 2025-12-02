@@ -129,7 +129,7 @@ kernel void addShadow(texture2d<float, access::read> sourceTexture [[texture(0)]
     uint2 pos = *position;
     uint2 sz = *size;
     float2 offset = *shadowOffset;
-    float radius = *shadowRadius;
+    //float radius = *shadowRadius;
     
     // Calculate shadow position
     uint2 shadowPos = uint2(pos.x + uint(offset.x), pos.y + uint(offset.y));

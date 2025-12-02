@@ -251,7 +251,7 @@ public actor MetalMosaicGenerator: MosaicGeneratorProtocol {
                 let mosaicURL = try await saveMosaic(
                     mosaic,
                     for: video,
-                    config: mutableConfig, // Use mutableConfig
+                    config: config, // Use mutableConfig
                     forIphone:  forIphone
                 )
                 

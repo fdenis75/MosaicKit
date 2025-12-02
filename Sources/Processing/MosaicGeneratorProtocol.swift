@@ -1,7 +1,7 @@
 import Foundation
 
 /// Protocol defining the interface for mosaic generators
-@available(macOS 14, iOS 17, *)
+@available(macOS 26, iOS 26, *)
 public protocol MosaicGeneratorProtocol: Actor {
     /// Generate a mosaic for a video
     /// - Parameters:

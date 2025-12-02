@@ -2,7 +2,7 @@ import XCTest
 @testable import MosaicKit
 import AVFoundation
 
-@available(macOS 15, iOS 18, *)
+@available(macOS 26, iOS 26, *)
 final class VideoInputPerformanceTests: XCTestCase {
 
     // Test video URLs

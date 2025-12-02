@@ -2,7 +2,7 @@ import MosaicKit
 import Foundation
 
 /// Advanced example showing different configurations and layouts
-@available(macOS 15, iOS 18, *)
+@available(macOS 26, iOS 26, *)
 struct AdvancedExample {
 
     static func run() async throws {
@@ -184,7 +184,7 @@ struct AdvancedExample {
 
 // MARK: - Progress Tracking Example
 
-@available(macOS 15, iOS 18, *)
+@available(macOS 26, iOS 26, *)
 struct ProgressTrackingExample {
 
     static func run() async throws {
@@ -224,7 +224,7 @@ struct ProgressTrackingExample {
 
 // MARK: - Error Handling Example
 
-@available(macOS 15, iOS 18, *)
+@available(macOS 26, iOS 26, *)
 struct ErrorHandlingExample {
 
     static func run() async {

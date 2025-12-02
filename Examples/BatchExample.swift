@@ -3,7 +3,7 @@ import Foundation
 import SwiftData
 
 /// Example of batch processing multiple videos
-@available(macOS 15, iOS 18, *)
+@available(macOS 26, iOS 26, *)
 struct BatchExample {
 
     static func run() async throws {

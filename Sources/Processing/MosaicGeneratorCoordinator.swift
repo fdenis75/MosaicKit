@@ -1,7 +1,7 @@
 import Foundation
 import OSLog
 import SwiftData
-@available(macOS 14, iOS 17, *)
+@available(macOS 26, iOS 26, *)
 public struct MosaicGenerationResult: Sendable {
     /// The video that was processed
     public let video: VideoInput
@@ -25,7 +25,7 @@ public struct MosaicGenerationResult: Sendable {
     }
 }
 
-@available(macOS 14, iOS 17, *)
+@available(macOS 26, iOS 26, *)
 public struct MosaicGenerationProgress: Sendable {
     /// The video being VideoInput
     public let video: VideoInput
@@ -59,7 +59,7 @@ public struct MosaicGenerationProgress: Sendable {
 }
 
 /// Status of mosaic generation
-@available(macOS 14, iOS 17, *)
+@available(macOS 26, iOS 26, *)
 public enum MosaicGenerationStatus: Sendable {
     /// Generation is queued
     case queued
@@ -83,7 +83,7 @@ public enum MosaicGenerationStatus: Sendable {
     case cancelled
 }
 /// Coordinator for mosaic generation operations
-@available(macOS 14, iOS 17, *)
+@available(macOS 26, iOS 26, *)
 public actor MosaicGeneratorCoordinator {
   
   

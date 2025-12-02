@@ -2,7 +2,7 @@ import XCTest
 @testable import MosaicKit
 import AVFoundation
 
-@available(macOS 15, iOS 18, *)
+@available(macOS 26, iOS 26, *)
 final class VideoInputTests: XCTestCase {
 
     // MARK: - Remote URL Tests
@@ -303,7 +303,7 @@ final class VideoInputTests: XCTestCase {
 
 // MARK: - Test Helpers
 
-@available(macOS 15, iOS 18, *)
+@available(macOS 26, iOS 26, *)
 extension VideoInputTests {
 
     /// Helper to print detailed video information

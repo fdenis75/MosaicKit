@@ -15,7 +15,7 @@ typealias XImage = NSImage
 #endif
 
 /// A Metal-based image processor for high-performance mosaic generation
-@available(macOS 14, iOS 17, *)
+@available(macOS 26, iOS 26, *)
 public final class MetalImageProcessor: @unchecked Sendable {
     // MARK: - Properties
     
@@ -66,12 +66,18 @@ public final class MetalImageProcessor: @unchecked Sendable {
         // Load Metal shader library
         do {
             logger.debug("📦 Bundle.module path: \(Bundle.module.bundlePath)")
-            
-            // Try to load default library first
-            if let defaultLib = try? device.makeDefaultLibrary() {
+
+            // Try to load default library from the module bundle first
+            if let libraryURL = Bundle.module.url(forResource: "default", withExtension: "metallib") {
+                logger.debug("🔍 Found metallib at: \(libraryURL.path)")
+                self.library = try device.makeLibrary(URL: libraryURL)
+                logger.debug("✅ Loaded Metal library from metallib")
+            } else if let defaultLib = try? device.makeDefaultLibrary(bundle: Bundle.module) {
+                // Fallback: Try makeDefaultLibrary with explicit bundle
                 self.library = defaultLib
+                logger.debug("✅ Loaded default Metal library from bundle")
             } else {
-                // Fallback: Try to compile from source if available in bundle
+                // Last resort: Try to compile from source if available in bundle
                 logger.debug("🔄 Attempting to compile from source in bundle")
                 if let shaderPath = Bundle.module.path(forResource: "MetalShaders", ofType: "metal") {
                     let source = try String(contentsOfFile: shaderPath, encoding: .utf8)
