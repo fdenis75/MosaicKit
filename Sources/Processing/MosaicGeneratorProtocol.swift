@@ -1,4 +1,5 @@
 import Foundation
+import CoreImage
 
 /// Protocol defining the interface for mosaic generators
 @available(macOS 26, iOS 26, *)
@@ -10,6 +11,14 @@ public protocol MosaicGeneratorProtocol: Actor {
     ///   - forIphone: Whether to use iPhone-optimized layout
     /// - Returns: The URL of the generated mosaic image
     func generate(for video: VideoInput, config: MosaicConfiguration, forIphone: Bool) async throws -> URL
+
+    /// Generate a mosaic image for a video without saving to disk
+    /// - Parameters:
+    ///   - video: The video to generate a mosaic for
+    ///   - config: The configuration for mosaic generation
+    ///   - forIphone: Whether to use iPhone-optimized layout
+    /// - Returns: The generated mosaic as a CGImage
+    func generateMosaicImage(for video: VideoInput, config: MosaicConfiguration, forIphone: Bool) async throws -> CGImage
 
     /// Generate mosaics for all combinations of sizes and densities
     /// - Parameters:

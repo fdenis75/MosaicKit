@@ -282,7 +282,150 @@ public actor MetalMosaicGenerator: MosaicGeneratorProtocol {
         
         return try await task.value
     }
-    
+
+    /// Generate a mosaic image for a video without saving to disk
+    /// - Parameters:
+    ///   - video: The video to generate a mosaic for
+    ///   - config: The configuration for mosaic generation
+    ///   - forIphone: Whether to use iPhone-optimized layout
+    /// - Returns: The generated mosaic as a CGImage
+    public func generateMosaicImage(for video: VideoInput, config: MosaicConfiguration, forIphone: Bool = false) async throws -> CGImage {
+        // logger.debug("🎯 Starting Metal-accelerated mosaic image generation for video: \(video.title ?? \"N/A\")")
+
+        let videoID = video.id
+        layoutProcessor.mosaicAspectRatio = config.layout.aspectRatio.ratio
+
+        let startTime = CFAbsoluteTimeGetCurrent()
+        defer { trackPerformance(startTime: startTime) }
+
+        do {
+            let videoURL = video.url
+            let asset = AVURLAsset(url: videoURL)
+            let duration = video.duration ?? 9999.99
+
+            if duration < 5.0 {
+                throw MosaicError.invalidVideo("video too short")
+            }
+
+            let aspectRatio = (video.width ?? 1.0) / (video.height ?? 1.0)
+
+            progressHandlers[videoID]?(MosaicGenerationProgress(
+                video: video,
+                progress: 0.00,
+                status: .countingThumbnails
+            ))
+
+            let frameCount = layoutProcessor.calculateThumbnailCount(
+                duration: duration,
+                width: config.width,
+                density: config.density,
+                layoutType: forIphone ? .iphone : config.layout.layoutType,
+                videoAR: aspectRatio
+            )
+
+            layoutProcessor.updateAspectRatio(config.layout.aspectRatio.ratio)
+
+            progressHandlers[videoID]?(MosaicGenerationProgress(
+                video: video,
+                progress: 0.00,
+                status: .computingLayout
+            ))
+
+            let layout = layoutProcessor.calculateLayout(
+                originalAspectRatio: aspectRatio,
+                mosaicAspectRatio: config.layout.aspectRatio,
+                thumbnailCount: frameCount,
+                mosaicWidth: config.width,
+                density: config.density,
+                layoutType: forIphone ? .iphone : config.layout.layoutType
+            )
+
+            var mutableConfig = config
+            mutableConfig.updateAspectRatio(new: AspectRatio.findNearest(to: layout.mosaicSize))
+
+            let currentProgressHandler = progressHandlers[videoID]
+
+            // Create metadata header if enabled
+            var metadataHeader: CGImage? = nil
+            if mutableConfig.includeMetadata {
+                metadataHeader = thumbnailProcessor.createMetadataHeader(
+                    for: video,
+                    width: Int(layout.mosaicSize.width),
+                    height: Int(layout.thumbnailSize.height * 0.5),
+                    forIphone: forIphone
+                ) as CGImage?
+            }
+
+            // Create a stream for processed images (with timestamps)
+            let (processedStream, continuation) = AsyncThrowingStream<(Int, CGImage), Error>.makeStream()
+
+            let processor = self.thumbnailProcessor
+            let thumbnailSizes = layout.thumbnailSizes
+
+            // Start producer task to burn timestamps in parallel
+            Task {
+                do {
+                    let rawStream = processor.extractFramesStream(
+                        from: videoURL,
+                        layout: layout,
+                        asset: asset,
+                        accurate: mutableConfig.useAccurateTimestamps
+                    )
+
+                    try await withThrowingTaskGroup(of: Void.self) { group in
+                        for try await (index, rawImage, timestamp) in rawStream {
+                            group.addTask {
+                                let size = thumbnailSizes[index]
+                                let processedImage = processor.addTimestampToImage(
+                                    image: rawImage,
+                                    timestamp: timestamp,
+                                    size: size
+                                )
+                                continuation.yield((index, processedImage))
+                            }
+                        }
+                    }
+                    continuation.finish()
+                } catch {
+                    continuation.finish(throwing: error)
+                }
+            }
+
+            // Generate mosaic using Metal with streaming input
+            let mosaic = try await metalProcessor.generateMosaicStream(
+                stream: processedStream,
+                layout: layout,
+                metadata: VideoMetadata(
+                    codec: video.metadata.codec,
+                    bitrate: video.metadata.bitrate,
+                    custom: video.metadata.custom
+                ),
+                config: mutableConfig,
+                metadataHeader: metadataHeader,
+                forIphone: forIphone,
+                progressHandler: { @Sendable progress in
+                    let scaledProgress = 0.7 + (0.299 * progress)
+                    currentProgressHandler?(MosaicGenerationProgress(
+                        video: video,
+                        progress: scaledProgress,
+                        status: .creatingMosaic
+                    ))
+                }
+            )
+
+            progressHandlers[videoID]?(MosaicGenerationProgress(
+                video: video,
+                progress: 1.0,
+                status: .completed
+            ))
+
+            return mosaic
+        } catch {
+            // logger.error("❌ Metal mosaic image generation failed: \(error.localizedDescription)")
+            throw error
+        }
+    }
+
     /// Cancel mosaic generation for a specific video
     /// - Parameter video: The video to cancel mosaic generation for
     public func cancel(for video: VideoInput) {

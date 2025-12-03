@@ -1,5 +1,6 @@
 import Foundation
 import Logging
+import CoreGraphics
 /*#if os(macOS)
 import Metal
 #endif
@@ -164,6 +165,54 @@ public final class MosaicGenerator {
 
         logger.info("Mosaic generated successfully at \(mosaicURL.lastPathComponent)")
         return mosaicURL
+    }
+
+    /// Generate a mosaic image from a single video file without saving to disk
+    /// - Parameters:
+    ///   - videoURL: URL to the video file
+    ///   - config: Mosaic generation configuration
+    /// - Returns: The generated mosaic as a CGImage
+    public func generateImage(
+        from videoURL: URL,
+        config: MosaicConfiguration
+    ) async throws -> CGImage {
+        logger.info("Generating mosaic image from \(videoURL.lastPathComponent)")
+
+        guard #available(macOS 15, iOS 18, *) else {
+            throw MosaicError.invalidConfiguration("MosaicKit requires macOS 15.0+ or iOS 18.0+")
+        }
+
+        guard let generator = internalGenerator as? any MosaicGeneratorProtocol else {
+            throw MosaicError.invalidConfiguration("Generator not available")
+        }
+
+        // Create VideoInput from URL
+        logger.debug("Loading video metadata from \(videoURL.lastPathComponent)")
+        let video = try await VideoInput(from: videoURL)
+
+        // Log which generator is being used
+        switch generatorPreference {
+        case .auto:
+            #if os(macOS)
+            logger.info("Generating mosaic image with Metal acceleration (auto-selected)...")
+            #else
+            logger.info("Generating mosaic image with Core Graphics acceleration (auto-selected)...")
+            #endif
+        case .preferMetal:
+            logger.info("Generating mosaic image with Metal acceleration (preferred)...")
+        case .preferCoreGraphics:
+            logger.info("Generating mosaic image with Core Graphics acceleration (preferred)...")
+        }
+
+        // Generate mosaic image using the selected generator
+        let mosaicImage = try await generator.generateMosaicImage(
+            for: video,
+            config: config,
+            forIphone: false
+        )
+
+        logger.info("Mosaic image generated successfully")
+        return mosaicImage
     }
 
     /// Generate mosaics from multiple video files

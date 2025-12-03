@@ -1,26 +1,52 @@
 import Foundation
 import OSLog
 import SwiftData
+import CoreImage
+
 @available(macOS 26, iOS 26, *)
 public struct MosaicGenerationResult: Sendable {
     /// The video that was processed
     public let video: VideoInput
-    
+
     /// The output URL of the generated mosaic
     public let outputURL: URL?
-    
+
     /// The error if generation failed
     public let error: Error?
-    
+
     /// Whether generation was successful
     public var isSuccess: Bool {
         outputURL != nil && error == nil
     }
-    
+
     /// Creates a new result instance
     public init(video: VideoInput, outputURL: URL? = nil, error: Error? = nil) {
         self.video = video
         self.outputURL = outputURL
+        self.error = error
+    }
+}
+
+@available(macOS 26, iOS 26, *)
+public struct MosaicGenerationImage: Sendable {
+    /// The video that was processed
+    public let video: VideoInput
+
+    /// The generated mosaic image
+    public let image: CGImage?
+
+    /// The error if generation failed
+    public let error: Error?
+
+    /// Whether generation was successful
+    public var isSuccess: Bool {
+        image != nil && error == nil
+    }
+
+    /// Creates a new image result instance
+    public init(video: VideoInput, image: CGImage? = nil, error: Error? = nil) {
+        self.video = video
+        self.image = image
         self.error = error
     }
 }
@@ -217,7 +243,81 @@ public actor MosaicGeneratorCoordinator {
 
         return result
     }
-    
+
+    /// Generate a mosaic image for a single video without saving to disk
+    /// - Parameters:
+    ///   - video: The video to generate a mosaic for
+    ///   - config: The configuration for mosaic generation
+    ///   - forIphone: Whether to use iPhone-optimized layout
+    ///   - progressHandler: Handler for progress updates
+    /// - Returns: The result of mosaic image generation with CGImage
+    public func generateMosaicImage(for video: VideoInput, config: MosaicConfiguration, forIphone: Bool = false, progressHandler: @escaping @Sendable (MosaicGenerationProgress) -> Void) async throws -> MosaicGenerationImage {
+
+        logger.debug("Starting mosaic image generation for video: \(video.title ?? "N/A")")
+
+        let videoID = video.id
+        // Store progress handler
+        progressHandlers[videoID] = progressHandler
+
+        // Report initial progress
+        progressHandler(MosaicGenerationProgress(
+            video: video,
+            progress: 0.0,
+            status: .queued
+        ))
+
+        // Create and start task with userInitiated priority
+        let task = Task<MosaicGenerationImage, Error>(priority: .userInitiated) {
+            // Check for cancellation at start
+            try Task.checkCancellation()
+
+            do {
+                // Report in-progress status
+                progressHandler(MosaicGenerationProgress(
+                    video: video,
+                    progress: 0.0,
+                    status: .inProgress
+                ))
+
+                // Check for cancellation before expensive operation
+                try Task.checkCancellation()
+
+                // Generate mosaic image
+                await mosaicGenerator.setProgressHandler(for: video, handler: progressHandler)
+                let mosaicImage = try await mosaicGenerator.generateMosaicImage(for: video, config: config, forIphone: forIphone)
+
+                // Report completion
+                let result = MosaicGenerationImage(video: video, image: mosaicImage)
+                progressHandler(MosaicGenerationProgress(
+                    video: video,
+                    progress: 1.0,
+                    status: .completed
+                ))
+
+                logger.debug("Mosaic image generation completed for video: \(video.title ?? "N/A")")
+                return result
+            } catch {
+                // Report failure
+                logger.error("Mosaic image generation failed for video: \(video.title ?? "N/A") - \(error.localizedDescription)")
+                progressHandler(MosaicGenerationProgress(
+                    video: video,
+                    progress: 0.0,
+                    status: .failed,
+                    error: error
+                ))
+                throw error
+            }
+        }
+
+        // Wait for task to complete
+        let result = try await task.value
+
+        // Clean up
+        progressHandlers[videoID] = nil
+
+        return result
+    }
+
     /// Generate mosaics for videos in a folder
     /// - Parameters:
     ///   - folderURL: The URL of the folder containing videos

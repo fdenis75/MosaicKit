@@ -223,6 +223,125 @@ public actor CoreGraphicsMosaicGenerator: MosaicGeneratorProtocol {
         return try await task.value
     }
 
+    /// Generate a mosaic image for a video without saving to disk
+    /// - Parameters:
+    ///   - video: The video to generate a mosaic for
+    ///   - config: The configuration for mosaic generation
+    ///   - forIphone: Whether to use iPhone-optimized layout
+    /// - Returns: The generated mosaic as a CGImage
+    public func generateMosaicImage(for video: VideoInput, config: MosaicConfiguration, forIphone: Bool = false) async throws -> CGImage {
+        logger.debug("Starting Core Graphics mosaic image generation for video: \(video.title ?? "N/A")")
+
+        let videoID = video.id
+        layoutProcessor.mosaicAspectRatio = config.layout.aspectRatio.ratio
+
+        let startTime = CFAbsoluteTimeGetCurrent()
+        defer { trackPerformance(startTime: startTime) }
+
+        do {
+            logger.debug("Video details - Duration: \(video.duration ?? 0.0)s, Size: \(video.fileSize ?? 0) bytes")
+
+            let videoURL = video.url
+            let asset = AVURLAsset(url: videoURL)
+            let duration = video.duration ?? 9999.99
+            let aspectRatio = (video.width ?? 1.0) / (video.height ?? 1.0)
+
+            progressHandlers[videoID]?(MosaicGenerationProgress(
+                video: video,
+                progress: 0.2,
+                status: .countingThumbnails
+            ))
+
+            let frameCount = await layoutProcessor.calculateThumbnailCount(
+                duration: duration,
+                width: config.width,
+                density: config.density,
+                layoutType: forIphone ? .iphone : config.layout.layoutType,
+                videoAR: aspectRatio
+            )
+            logger.debug("Calculated frame count: \(frameCount)")
+
+            layoutProcessor.updateAspectRatio(config.layout.aspectRatio.ratio)
+
+            progressHandlers[videoID]?(MosaicGenerationProgress(
+                video: video,
+                progress: 0.3,
+                status: .computingLayout
+            ))
+
+            let layout = await layoutProcessor.calculateLayout(
+                originalAspectRatio: aspectRatio,
+                mosaicAspectRatio: config.layout.aspectRatio,
+                thumbnailCount: frameCount,
+                mosaicWidth: config.width,
+                density: config.density,
+                layoutType: forIphone ? .iphone : config.layout.layoutType
+            )
+            logger.debug("Layout calculated - Size: \(layout.mosaicSize.width)x\(layout.mosaicSize.height), Thumbnails: \(layout.thumbCount)")
+
+            // Extract frames using ThumbnailProcessor
+            let frames = try await thumbnailProcessor.extractThumbnails(
+                from: videoURL,
+                layout: layout,
+                asset: asset,
+                preview: false,
+                accurate: config.useAccurateTimestamps,
+                progressHandler: { @Sendable progress in
+                    let scaledProgress = 0.4 + (0.3 * progress)
+                    _ = MosaicGenerationProgress(
+                        video: video,
+                        progress: scaledProgress,
+                        status: .extractingThumbnails
+                    )
+                }
+            )
+
+            // Create metadata header if enabled
+            var metadataHeader: CGImage? = nil
+            if config.includeMetadata {
+                metadataHeader = thumbnailProcessor.createMetadataHeader(
+                    for: video,
+                    width: Int(layout.mosaicSize.width),
+                    height: Int(layout.thumbnailSize.height * 0.5),
+                    forIphone: forIphone
+                ) as CGImage?
+            }
+
+            // Generate mosaic using Core Graphics
+            let mosaic = try await cgProcessor.generateMosaic(
+                from: frames,
+                layout: layout,
+                metadata: VideoMetadata(
+                    codec: video.metadata.codec,
+                    bitrate: video.metadata.bitrate,
+                    custom: video.metadata.custom
+                ),
+                config: config,
+                metadataHeader: metadataHeader,
+                forIphone: forIphone,
+                progressHandler: { @Sendable progress in
+                    let scaledProgress = 0.7 + (0.2 * progress)
+                    _ = MosaicGenerationProgress(
+                        video: video,
+                        progress: scaledProgress,
+                        status: .creatingMosaic
+                    )
+                }
+            )
+
+            progressHandlers[videoID]?(MosaicGenerationProgress(
+                video: video,
+                progress: 1.0,
+                status: .completed
+            ))
+
+            return mosaic
+        } catch {
+            logger.error("Core Graphics mosaic image generation failed: \(error.localizedDescription)")
+            throw error
+        }
+    }
+
     /// Cancel mosaic generation for a specific video
     /// - Parameter video: The video to cancel mosaic generation for
     public func cancel(for video: VideoInput) {
