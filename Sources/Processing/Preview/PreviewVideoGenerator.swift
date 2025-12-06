@@ -108,6 +108,55 @@ public actor PreviewVideoGenerator {
         cancellationTokens[video.id]?.cancel()
     }
 
+    /// Generate a preview composition without exporting to file (for video player playback)
+    /// - Parameters:
+    ///   - video: The source video
+    ///   - config: Preview configuration
+    /// - Returns: AVPlayerItem configured with the preview composition
+    public func generateComposition(
+        for video: VideoInput,
+        config: PreviewConfiguration
+    ) async throws -> AVPlayerItem {
+        logger.info("Starting preview composition generation for \(video.title)")
+
+        // Create cancellation token
+        let token = CancellationToken()
+        cancellationTokens[video.id] = token
+
+        defer {
+            cancellationTokens.removeValue(forKey: video.id)
+        }
+
+        // Report analyzing status
+        reportProgress(for: video, progress: 0.0, status: .analyzing)
+
+        do {
+            let playerItem = try await PreviewGenerationLogic.generateComposition(
+                for: video,
+                config: config,
+                progressHandler: { [weak self] progress, status, url, message in
+                    Task { [weak self] in
+                        await self?.reportProgress(for: video, progress: progress, status: status, outputURL: url, message: message)
+                    }
+                },
+                cancellationCheck: { [token] in
+                    token.isCancelled
+                }
+            )
+
+            // Report completion
+            reportProgress(for: video, progress: 1.0, status: .completed)
+            logger.info("Preview composition generated successfully")
+
+            return playerItem
+        } catch {
+            if token.isCancelled {
+                throw PreviewError.cancelled
+            }
+            throw error
+        }
+    }
+
     /// Cancel all active generations
     public func cancelAll() {
         logger.info("Cancelling all preview generations")
@@ -203,7 +252,77 @@ struct PreviewGenerationLogic {
         
         return outputURL
     }
-    
+
+    /// Generate a preview composition without exporting (for video player playback)
+    static func generateComposition(
+        for video: VideoInput,
+        config: PreviewConfiguration,
+        progressHandler: @escaping @Sendable (Double, PreviewGenerationStatus, URL?, String?) -> Void,
+        cancellationCheck: @escaping @Sendable () -> Bool
+    ) async throws -> AVPlayerItem {
+        logger.info("Starting preview composition generation logic for \(video.title)")
+
+        if cancellationCheck() { throw PreviewError.cancelled }
+
+        progressHandler(0.0, .analyzing, nil, nil)
+
+        // Load asset
+        let asset = AVURLAsset(url: video.url, options: [AVURLAssetPreferPreciseDurationAndTimingKey: true])
+
+        // Validate
+        try await validateVideo(asset: asset, video: video, config: config)
+
+        if cancellationCheck() { throw PreviewError.cancelled }
+
+        // Calculate parameters
+        let (extractDuration, playbackSpeed) = config.calculateExtractParameters()
+
+        progressHandler(0.1, .analyzing, nil, "Calculating timestamps...")
+        let timestamps = try await calculateExtractTimestamps(
+            asset: asset,
+            video: video,
+            extractCount: config.extractCount,
+            extractDuration: extractDuration
+        )
+
+        if cancellationCheck() { throw PreviewError.cancelled }
+
+        // Compose
+        progressHandler(0.2, .extracting, nil, "Extracting \(timestamps.count) segments...")
+        let videoComposition = try await composeVideoSegments(
+            asset: asset,
+            timestamps: timestamps,
+            extractDuration: extractDuration,
+            playbackSpeed: playbackSpeed,
+            includeAudio: config.includeAudio,
+            video: video,
+            progressHandler: progressHandler,
+            cancellationCheck: cancellationCheck
+        )
+
+        if cancellationCheck() { throw PreviewError.cancelled }
+
+        // Create player item from composition
+        progressHandler(0.8, .composing, nil, "Creating player item...")
+
+        // Note: AVMutableComposition is not Sendable in Swift 6, but it's safe to use here
+        // because it's created locally in this actor and won't be accessed concurrently
+        nonisolated(unsafe) let composition = videoComposition.composition
+        nonisolated(unsafe) let audioMix = videoComposition.audioMix
+
+        let playerItem = AVPlayerItem(asset: composition)
+
+        // Apply audio mix if available
+        if let mix = audioMix {
+            playerItem.audioMix = mix
+        }
+
+        progressHandler(1.0, .completed, nil, "Composition ready for playback")
+        logger.info("Preview composition created successfully")
+
+        return playerItem
+    }
+
     private static func validateVideo(asset: AVAsset, video: VideoInput, config: PreviewConfiguration) async throws {
         logger.info("🔍 Validating video: \(video.title)")
 

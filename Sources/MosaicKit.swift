@@ -83,6 +83,20 @@ import Metal
 ///     print("\(progress.video.filename): \(progress.status.displayLabel)")
 /// }
 /// ```
+///
+/// ### Preview Generation - Composition for Video Player
+/// ```swift
+/// let generator = PreviewVideoGenerator()
+/// let video = try await VideoInput(from: videoURL)
+/// let config = PreviewConfiguration(targetDuration: 60, density: .M)
+///
+/// // Generate composition without exporting to file
+/// let playerItem = try await generator.generateComposition(for: video, config: config)
+///
+/// // Use with AVPlayer for immediate playback
+/// let player = AVPlayer(playerItem: playerItem)
+/// player.play()
+/// ```
 @available(macOS 26, iOS 26, *)
 public final class MosaicGenerator {
     private let logger = Logger(label: "com.mosaickit")

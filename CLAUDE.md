@@ -82,6 +82,23 @@ let mosaicURL = try await generator.generate(
     config: config,
     outputDirectory: outputDir
 )
+
+// Generate preview video and save to disk
+let previewGenerator = PreviewVideoGenerator()
+let video = try await VideoInput(from: videoURL)
+let previewConfig = PreviewConfiguration(
+    targetDuration: 60,
+    density: .m,
+    format: .mp4,
+    includeAudio: true
+)
+let previewURL = try await previewGenerator.generate(for: video, config: previewConfig)
+
+// Generate preview composition for direct playback (without exporting)
+let playerItem = try await previewGenerator.generateComposition(for: video, config: previewConfig)
+// Use with AVPlayer for immediate playback
+let player = AVPlayer(playerItem: playerItem)
+player.play()
 ```
 
 ### Building
