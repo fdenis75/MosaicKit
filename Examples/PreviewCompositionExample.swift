@@ -74,6 +74,70 @@ func observePlayerStatus(player: AVPlayer) {
     }
 }
 
+// MARK: - Coordinator Examples
+
+@available(macOS 26, iOS 26, *)
+func exampleWithCoordinator() async throws {
+    let videoURL = URL(fileURLWithPath: "/path/to/video.mp4")
+    let video = try await VideoInput(from: videoURL)
+    let config = PreviewConfiguration(targetDuration: 60, density: .m)
+
+    // Use coordinator for better progress tracking
+    let coordinator = PreviewGeneratorCoordinator()
+    let playerItem = try await coordinator.generatePreviewComposition(
+        for: video,
+        config: config
+    ) { progress in
+        print("Progress: \(Int(progress.progress * 100))% - \(progress.status.displayLabel)")
+        if let message = progress.message {
+            print("  \(message)")
+        }
+    }
+
+    // Use with AVPlayer
+    let player = AVPlayer(playerItem: playerItem)
+    player.play()
+}
+
+@available(macOS 26, iOS 26, *)
+func exampleBatchCompositions() async throws {
+    let videoURLs = [
+        URL(fileURLWithPath: "/path/to/video1.mp4"),
+        URL(fileURLWithPath: "/path/to/video2.mp4"),
+        URL(fileURLWithPath: "/path/to/video3.mp4")
+    ]
+
+    let videos = try await videoURLs.asyncMap { try await VideoInput(from: $0) }
+    let config = PreviewConfiguration(targetDuration: 30, density: .m)
+
+    // Generate multiple compositions concurrently
+    let coordinator = PreviewGeneratorCoordinator(concurrencyLimit: 2)
+    let results = try await coordinator.generatePreviewCompositionsForBatch(
+        videos: videos,
+        config: config
+    ) { progress in
+        print("\(progress.video.filename): \(progress.status.displayLabel)")
+    }
+
+    // Process results
+    print("\nGenerated \(results.filter { $0.isSuccess }.count)/\(results.count) compositions")
+
+    // Play the first successful composition
+    if let firstSuccess = results.first(where: { $0.isSuccess }),
+       let playerItem = firstSuccess.playerItem {
+        let player = AVPlayer(playerItem: playerItem)
+        player.play()
+        print("Playing: \(firstSuccess.video.title)")
+    }
+
+    // Handle failures
+    for result in results where !result.isSuccess {
+        if let error = result.error {
+            print("Failed to generate composition for \(result.video.filename): \(error)")
+        }
+    }
+}
+
 // MARK: - Example Usage Scenarios
 
 @available(macOS 26, iOS 26, *)

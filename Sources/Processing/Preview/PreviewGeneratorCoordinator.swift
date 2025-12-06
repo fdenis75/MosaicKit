@@ -85,6 +85,175 @@ public actor PreviewGeneratorCoordinator {
         }
     }
 
+    /// Generate preview composition for a single video (for video player playback)
+    /// - Parameters:
+    ///   - video: The source video
+    ///   - config: Preview configuration
+    ///   - progressHandler: Optional progress callback
+    /// - Returns: AVPlayerItem configured with the preview composition
+    public func generatePreviewComposition(
+        for video: VideoInput,
+        config: PreviewConfiguration,
+        progressHandler: (@Sendable (PreviewGenerationProgress) -> Void)? = nil
+    ) async throws -> AVPlayerItem {
+        logger.info("Starting preview composition generation for \(video.title)")
+
+        // Set progress handler
+        if let handler = progressHandler {
+            progressHandlers[video.id] = handler
+            await previewGenerator.setProgressHandler(for: video, handler: handler)
+        }
+
+        // Generate composition
+        do {
+            let playerItem = try await previewGenerator.generateComposition(for: video, config: config)
+            logger.info("Preview composition generated successfully")
+
+            // Cleanup
+            progressHandlers.removeValue(forKey: video.id)
+
+            return playerItem
+        } catch {
+            logger.error("Preview composition generation failed: \(error.localizedDescription)")
+
+            // Report failure
+            progressHandlers[video.id]?(.failed(for: video, error: error))
+            progressHandlers.removeValue(forKey: video.id)
+
+            throw error
+        }
+    }
+
+    /// Generate preview compositions for multiple videos with concurrency management
+    /// - Parameters:
+    ///   - videos: Array of videos to process
+    ///   - config: Preview configuration
+    ///   - progressHandler: Optional progress callback for each video
+    /// - Returns: Array of composition results with AVPlayerItems
+    public func generatePreviewCompositionsForBatch(
+        videos: [VideoInput],
+        config: PreviewConfiguration,
+        progressHandler: (@Sendable (PreviewGenerationProgress) -> Void)? = nil
+    ) async throws -> [PreviewCompositionResult] {
+        logger.info("🎬 Starting batch preview composition generation for \(videos.count) videos")
+
+        // Determine the effective concurrency limit for this batch
+        var effectiveConcurrencyLimit: Int
+        if self.concurrencyLimit == 0 {
+            // Dynamically adjust concurrency based on system capabilities
+            let processorCount = ProcessInfo.processInfo.activeProcessorCount
+            let systemMemory = ProcessInfo.processInfo.physicalMemory
+            let memoryGB = Double(systemMemory) / 1_073_741_824.0 // Convert to GB
+
+            // Calculate optimal concurrency with balanced approach
+            let cpuBasedLimit = max(2, processorCount / 2) // Use half of cores to avoid oversubscription
+            let memoryPerTask = 0.5 // Estimate 500MB per preview generation task
+            let memoryBasedLimit = max(2, Int(memoryGB / memoryPerTask))
+            effectiveConcurrencyLimit = min(memoryBasedLimit, cpuBasedLimit, 8) // Cap at 8
+
+            logger.info("⚙️ Using dynamic concurrency limit of \(effectiveConcurrencyLimit) (CPU cores: \(processorCount), Memory: \(Int(memoryGB))GB)")
+        } else {
+            // Use the configured concurrency limit
+            effectiveConcurrencyLimit = self.concurrencyLimit
+            logger.info("⚙️ Using configured concurrency limit: \(effectiveConcurrencyLimit)")
+        }
+
+        var results: [PreviewCompositionResult] = []
+        var completed = 0
+        var successCount = 0
+        var failureCount = 0
+        var activeTasks = 0
+
+        return try await withThrowingTaskGroup(of: PreviewCompositionResult.self) { group in
+            var videoIndex = 0
+
+            for video in videos {
+                // Check for concurrency limit changes
+                if effectiveConcurrencyLimit != self.concurrencyLimit && self.concurrencyLimit > 0 {
+                    effectiveConcurrencyLimit = self.concurrencyLimit
+                    logger.info("⚙️ Updated effective concurrency to: \(effectiveConcurrencyLimit)")
+                }
+
+                // Wait for available slot
+                while activeTasks >= effectiveConcurrencyLimit {
+                    logger.debug("Threshold reached: \(activeTasks)/\(effectiveConcurrencyLimit)")
+                    try await Task.sleep(for: .seconds(0.2))
+
+                    if let result = try await group.next() {
+                        results.append(result)
+                        completed += 1
+                        activeTasks -= 1
+
+                        if result.isSuccess {
+                            successCount += 1
+                        } else {
+                            failureCount += 1
+                        }
+
+                        // Report aggregated progress
+                        let overallProgress = Double(completed) / Double(videos.count)
+                        logger.debug("🔄 Progress: \(Int(overallProgress * 100))% (\(completed)/\(videos.count) complete)")
+                    }
+                }
+
+                // Queue video for processing
+                logger.debug("Adding task for video: \(video.title)")
+                progressHandler?(.queued(for: video))
+
+                activeTasks += 1
+                videoIndex += 1
+
+                group.addTask(priority: .medium) { @Sendable in
+                    // Check for cancellation at start
+                    try Task.checkCancellation()
+
+                    do {
+                        self.logger.debug("Starting composition generation for: \(video.title)")
+
+                        // Set progress handler
+                        if let handler = progressHandler {
+                            await self.previewGenerator.setProgressHandler(for: video, handler: handler)
+                        }
+
+                        // Generate composition
+                        let playerItem = try await self.previewGenerator.generateComposition(for: video, config: config)
+                        let result = PreviewCompositionResult.success(video: video, playerItem: playerItem)
+
+                        self.logger.debug("Finished composition generation for: \(video.title)")
+                        return result
+
+                    } catch {
+                        self.logger.error("Composition generation failed for: \(video.title) - \(error.localizedDescription)")
+                        return PreviewCompositionResult.failure(video: video, error: error)
+                    }
+                }
+            }
+
+            // Collect remaining results
+            while let result = try await group.next() {
+                logger.debug("Waiting for results")
+
+                results.append(result)
+                completed += 1
+                activeTasks -= 1
+
+                if result.isSuccess {
+                    successCount += 1
+                } else {
+                    failureCount += 1
+                }
+
+                // Report aggregated progress
+                let overallProgress = Double(completed) / Double(videos.count)
+                logger.debug("🔄 Progress: \(Int(overallProgress * 100))% (\(completed)/\(videos.count) complete)")
+            }
+
+            // Log final results
+            logger.info("✅ Preview composition generation completed - Success: \(successCount), Failed: \(failureCount), Total: \(videos.count)")
+            return results
+        }
+    }
+
     /// Generate previews for multiple videos with concurrency management
     /// - Parameters:
     ///   - videos: Array of videos to process

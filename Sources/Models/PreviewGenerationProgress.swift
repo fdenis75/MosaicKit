@@ -164,3 +164,38 @@ public struct PreviewGenerationResult: Sendable {
         PreviewGenerationResult(video: video, outputURL: nil, error: error)
     }
 }
+
+/// Result of preview composition generation (for video player playback)
+@available(macOS 26, iOS 26, *)
+public struct PreviewCompositionResult: Sendable {
+    /// The video that was processed
+    public let video: VideoInput
+
+    /// AVPlayerItem if successful (marked as nonisolated unsafe for Sendable conformance)
+    /// This is safe because the playerItem is created once and never modified
+    nonisolated(unsafe) public let playerItem: AVPlayerItem?
+
+    /// Error if generation failed
+    public let error: Error?
+
+    /// Whether generation was successful
+    public var isSuccess: Bool {
+        return playerItem != nil && error == nil
+    }
+
+    public init(video: VideoInput, playerItem: AVPlayerItem?, error: Error?) {
+        self.video = video
+        self.playerItem = playerItem
+        self.error = error
+    }
+
+    /// Create a successful result
+    public static func success(video: VideoInput, playerItem: AVPlayerItem) -> PreviewCompositionResult {
+        PreviewCompositionResult(video: video, playerItem: playerItem, error: nil)
+    }
+
+    /// Create a failed result
+    public static func failure(video: VideoInput, error: Error) -> PreviewCompositionResult {
+        PreviewCompositionResult(video: video, playerItem: nil, error: error)
+    }
+}

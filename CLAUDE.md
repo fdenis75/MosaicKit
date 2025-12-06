@@ -99,6 +99,21 @@ let playerItem = try await previewGenerator.generateComposition(for: video, conf
 // Use with AVPlayer for immediate playback
 let player = AVPlayer(playerItem: playerItem)
 player.play()
+
+// Or use the coordinator for better integration and batch processing
+let coordinator = PreviewGeneratorCoordinator()
+let playerItem = try await coordinator.generatePreviewComposition(
+    for: video,
+    config: previewConfig
+) { progress in
+    print("\(progress.status.displayLabel): \(progress.progress * 100)%")
+}
+
+// Batch composition generation
+let results = try await coordinator.generatePreviewCompositionsForBatch(
+    videos: [video1, video2, video3],
+    config: previewConfig
+)
 ```
 
 ### Building

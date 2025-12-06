@@ -86,16 +86,47 @@ import Metal
 ///
 /// ### Preview Generation - Composition for Video Player
 /// ```swift
+/// // Single video composition (via generator)
 /// let generator = PreviewVideoGenerator()
 /// let video = try await VideoInput(from: videoURL)
 /// let config = PreviewConfiguration(targetDuration: 60, density: .M)
-///
-/// // Generate composition without exporting to file
 /// let playerItem = try await generator.generateComposition(for: video, config: config)
+///
+/// // Or use the coordinator for better integration
+/// let coordinator = PreviewGeneratorCoordinator()
+/// let playerItem = try await coordinator.generatePreviewComposition(
+///     for: video,
+///     config: config
+/// ) { progress in
+///     print("\(progress.status.displayLabel): \(progress.progress * 100)%")
+/// }
 ///
 /// // Use with AVPlayer for immediate playback
 /// let player = AVPlayer(playerItem: playerItem)
 /// player.play()
+/// ```
+///
+/// ### Preview Generation - Batch Composition
+/// ```swift
+/// let coordinator = PreviewGeneratorCoordinator(concurrencyLimit: 4)
+/// let videos = try await videoURLs.asyncMap { try await VideoInput(from: $0) }
+/// let config = PreviewConfiguration(targetDuration: 60, density: .M)
+///
+/// // Generate multiple compositions concurrently
+/// let results = try await coordinator.generatePreviewCompositionsForBatch(
+///     videos: videos,
+///     config: config
+/// ) { progress in
+///     print("\(progress.video.filename): \(progress.status.displayLabel)")
+/// }
+///
+/// // Play each composition
+/// for result in results where result.isSuccess {
+///     if let playerItem = result.playerItem {
+///         let player = AVPlayer(playerItem: playerItem)
+///         player.play()
+///     }
+/// }
 /// ```
 @available(macOS 26, iOS 26, *)
 public final class MosaicGenerator {
