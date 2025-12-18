@@ -6,6 +6,7 @@
 //
 
 import Foundation
+import AVFoundation
 
 /// Status of preview video generation
 @available(macOS 26, iOS 26, *)

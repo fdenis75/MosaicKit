@@ -8,6 +8,8 @@
 import Foundation
 import OSLog
 import SwiftData
+import AVFoundation
+
 
 /// Coordinator for batch preview video generation with concurrency management
 @available(macOS 26, iOS 26, *)

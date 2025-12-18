@@ -126,9 +126,9 @@ public struct MosaicConfiguration: Codable, Sendable {
         var sanitizedName = Self.sanitizeForFilePath(originalFilename)
 
         // Remove existing extension
-        if let lastDot = sanitizedName.lastIndex(of: ".") {
+   /*     if let lastDot = sanitizedName.lastIndex(of: ".") {
             sanitizedName = String(sanitizedName[..<lastDot])
-        }
+        }*/
 
         // Build base filename
         var filename: String

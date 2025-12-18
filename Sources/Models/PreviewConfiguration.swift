@@ -57,8 +57,8 @@ public struct PreviewConfiguration: Codable, Sendable, Hashable {
 
     // MARK: - Extract Calculation
 
-    /// Number of video extracts based on density
-    public var extractCount: Int {
+    /// Base number of video extracts based on density (before duration adjustment)
+    public var baseExtractCount: Int {
         switch density.name {
         case "XXL": return 4
         case "XL": return 8
@@ -67,12 +67,44 @@ public struct PreviewConfiguration: Codable, Sendable, Hashable {
         case "S": return 24
         case "XS": return 32
         case "XXS": return 48
-        case "XXS": return 48
-        default: 
+        default:
             // For custom densities, calculate based on factor (base 16)
             return max(1, Int(16.0 * density.factor))
         }
     }
+    
+    public static func exterEtractCount(density: String) -> Int
+    {switch density.uppercased() {
+    case "XXL": return 4
+    case "XL": return 8
+    case "L": return 12
+    case "M": return 16
+    case "S": return 24
+    case "XS": return 32
+    case "XXS": return 48
+    default:
+        // For custom densities, calculate based on factor (base 16)
+        return max(1,16)
+    }
+        
+    }
+
+    /// Calculate number of video extracts based on density and video duration
+    /// - Parameter videoDuration: Duration of the input video in seconds
+    /// - Returns: Total extract count (base count + duration-based adjustment)
+    public func extractCount(forVideoDuration videoDuration: TimeInterval) -> Int {
+        let durationAdjustment = ((videoDuration > 1800.00) ? 20.0 : 10.0) * log(videoDuration)
+        let totalCount = Double(baseExtractCount) + durationAdjustment
+        print("extraCount(forVideoDuration:) -> \(totalCount)")
+        return max(1, Int(totalCount.rounded()))
+    }
+    public static func extractCountExt(forVideoDuration videoDuration: TimeInterval, density: String, targetDuration: TimeInterval) -> Int {
+        let durationAdjustment = ((videoDuration > 1800.00) ? 20.0 : 10.0) * log(videoDuration)
+        let totalCount = Double(self.exterEtractCount(density: density)) + durationAdjustment
+        print("extraCount(forVideoDuration:) -> \(totalCount)")
+        return max(1, Int(totalCount.rounded()))
+    }
+    
 
     /// Minimum duration for each extract (in seconds)
     public static let minimumExtractDuration: TimeInterval = 2.0
@@ -81,21 +113,23 @@ public struct PreviewConfiguration: Codable, Sendable, Hashable {
     public static let maximumPlaybackSpeed: Double = 4.0
 
     /// Calculate the duration per extract and playback speed
+    /// - Parameter videoDuration: Duration of the input video in seconds
     /// - Returns: Tuple of (extractDuration, playbackSpeed)
-    public func calculateExtractParameters() -> (extractDuration: TimeInterval, playbackSpeed: Double) {
-        let baseExtractDuration = targetDuration / Double(extractCount)
+    public func calculateExtractParameters(forVideoDuration videoDuration: TimeInterval) -> (extractDuration: TimeInterval, playbackSpeed: Double) {
+        let count = extractCount(forVideoDuration: videoDuration)
+        let baseExtractDuration = targetDuration / Double(count)
 
         if baseExtractDuration >= Self.minimumExtractDuration {
             // Each extract can be at least 2 seconds at normal speed
             return (baseExtractDuration, 1.0)
         } else {
             // Need to speed up playback to fit extracts
-            let minimumTotalDuration = Self.minimumExtractDuration * Double(extractCount)
+            let minimumTotalDuration = Self.minimumExtractDuration * Double(count)
             let requiredSpeed = minimumTotalDuration / targetDuration
             let cappedSpeed = min(requiredSpeed, Self.maximumPlaybackSpeed)
 
             // Calculate actual extract duration based on capped speed
-            let actualExtractDuration = targetDuration * cappedSpeed / Double(extractCount)
+            let actualExtractDuration = targetDuration * cappedSpeed / Double(count)
 
             return (actualExtractDuration, cappedSpeed)
         }

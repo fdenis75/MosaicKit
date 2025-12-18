@@ -872,32 +872,60 @@ public final class MetalImageProcessor: @unchecked Sendable {
     ) async throws -> CGImage {
         let startTime = CFAbsoluteTimeGetCurrent()
         defer { trackPerformance(startTime: startTime) }
-      
+
         logger.debug("🎨 Starting Streaming Metal-accelerated mosaic generation")
         logger.debug("📐 Layout size: \(layout.mosaicSize.width)x\(layout.mosaicSize.height)")
-        
+
         // Determine if we need space for the metadata header
         let hasMetadata = config.includeMetadata && metadataHeader != nil
         let metadataHeight = hasMetadata ? metadataHeader!.height : 0
-        
+
         // Calculate adjusted mosaic size to accommodate metadata header
         var mosaicSize = layout.mosaicSize
         if hasMetadata {
             mosaicSize.height += CGFloat(metadataHeight)
         }
-        
-        // Create mosaic texture
+
+        // Collect all frames first to enable dominant color sampling
+        var allFrames: [(Int, CGImage)] = []
+        progressHandler?(0.05)
+
+        for try await (index, image) in stream {
+            allFrames.append((index, image))
+
+            // Update progress during collection (0.05 to 0.15)
+            let collectionProgress = 0.05 + (0.1 * Double(allFrames.count) / Double(layout.positions.count))
+            progressHandler?(collectionProgress)
+        }
+
+        logger.debug("📦 Collected \(allFrames.count) frames for processing")
+
+        // Create mosaic texture with dominant color background
         var mosaicTexture: MTLTexture
-        progressHandler?(0.1)
+        progressHandler?(0.15)
+
         if forIphone {
+            // iPhone: use solid gray background
             let color = SIMD4<Float>(0.5, 0.5, 0.5, 1.0)
             mosaicTexture = try createFilledTexture(size: mosaicSize, color: color)
         } else {
-             let color = SIMD4<Float>(0.1, 0.1, 0.1, 1.0)
-             mosaicTexture = try createFilledTexture(size: mosaicSize, color: color)
+            // Extract images for dominant color sampling
+            let frameImages = allFrames.map { $0.1 }
+
+            // Generate gradient background from dominant colors
+            if let texture = try processImagesToMTLTexture(images: frameImages, maxColors: 5, outputSize: mosaicSize) {
+                mosaicTexture = texture
+                logger.debug("✅ Created mosaic background from dominant colors")
+            } else {
+                // Fallback to dark gray if color extraction fails
+                let color = SIMD4<Float>(0.1, 0.1, 0.1, 1.0)
+                mosaicTexture = try createFilledTexture(size: mosaicSize, color: color)
+                logger.warning("⚠️ Falling back to solid color background")
+            }
         }
-        
-        progressHandler?(0.2)
+
+        progressHandler?(0.25)
+
         // If we have a metadata header, composite it at the top of the mosaic
         if hasMetadata, let headerImage = metadataHeader {
             logger.debug("🏷️ Adding metadata header - Size: \(headerImage.width)×\(headerImage.height)")
@@ -908,40 +936,32 @@ public final class MetalImageProcessor: @unchecked Sendable {
                 at: CGPoint(x: 0, y: 0)
             )
         }
-        
+
         // Process frames in batches
         let batchSize = 20
-        var batch: [(Int, CGImage)] = []
         var processedCount = 0
-        let totalExpected = layout.positions.count
-        
-        for try await (index, image) in stream {
-            batch.append((index, image))
-            
-            if batch.count >= batchSize {
-                try processBatch(batch, into: mosaicTexture, layout: layout, hasMetadata: hasMetadata, metadataHeight: CGFloat(metadataHeight))
-                processedCount += batch.count
-                batch.removeAll()
-                
-                let progress = 0.2 + (0.7 * Double(processedCount) / Double(totalExpected))
-                progressHandler?(progress)
-            }
-        }
-        
-        // Process remaining frames
-        if !batch.isEmpty {
+        let totalExpected = allFrames.count
+
+        for batchStart in stride(from: 0, to: allFrames.count, by: batchSize) {
+            let batchEnd = min(batchStart + batchSize, allFrames.count)
+            let batch = Array(allFrames[batchStart..<batchEnd])
+
             try processBatch(batch, into: mosaicTexture, layout: layout, hasMetadata: hasMetadata, metadataHeight: CGFloat(metadataHeight))
             processedCount += batch.count
+
+            // Progress from 0.25 to 0.95
+            let progress = 0.25 + (0.7 * Double(processedCount) / Double(totalExpected))
+            progressHandler?(progress)
         }
-        
+
         // Create CGImage from the final mosaic texture
         progressHandler?(0.95)
         let finalImage = try createCGImage(from: mosaicTexture)
-        
+
         let generationTime = CFAbsoluteTimeGetCurrent() - startTime
         logger.debug("✅ Metal mosaic generation complete - Size: \(finalImage.width)x\(finalImage.height) in \(generationTime) seconds")
         progressHandler?(1.0)
-        
+
         return finalImage
     }
     

@@ -210,15 +210,20 @@ struct PreviewGenerationLogic {
         try await validateVideo(asset: asset, video: video, config: config)
         
         if cancellationCheck() { throw PreviewError.cancelled }
-        
+
+        // Get video duration for extract calculation
+        let duration = try await asset.load(.duration)
+        let videoDuration = CMTimeGetSeconds(duration)
+
         // Calculate parameters
-        let (extractDuration, playbackSpeed) = config.calculateExtractParameters()
-        
+        let (extractDuration, playbackSpeed) = config.calculateExtractParameters(forVideoDuration: videoDuration)
+        let extractCount = config.extractCount(forVideoDuration: videoDuration)
+
         progressHandler(0.1, .analyzing, nil, "Calculating timestamps...")
         let timestamps = try await calculateExtractTimestamps(
             asset: asset,
             video: video,
-            extractCount: config.extractCount,
+            extractCount: extractCount,
             extractDuration: extractDuration
         )
         
@@ -274,14 +279,19 @@ struct PreviewGenerationLogic {
 
         if cancellationCheck() { throw PreviewError.cancelled }
 
+        // Get video duration for extract calculation
+        let duration = try await asset.load(.duration)
+        let videoDuration = CMTimeGetSeconds(duration)
+
         // Calculate parameters
-        let (extractDuration, playbackSpeed) = config.calculateExtractParameters()
+        let (extractDuration, playbackSpeed) = config.calculateExtractParameters(forVideoDuration: videoDuration)
+        let extractCount = config.extractCount(forVideoDuration: videoDuration)
 
         progressHandler(0.1, .analyzing, nil, "Calculating timestamps...")
         let timestamps = try await calculateExtractTimestamps(
             asset: asset,
             video: video,
-            extractCount: config.extractCount,
+            extractCount: extractCount,
             extractDuration: extractDuration
         )
 
@@ -348,11 +358,13 @@ struct PreviewGenerationLogic {
         logger.info("⏱️  Video duration: \(durationSeconds)s")
 
         // Minimum required duration: at least enough for the minimum extract duration
-        let (extractDuration, playbackSpeed) = config.calculateExtractParameters()
-        let minimumRequired = extractDuration * Double(config.extractCount)
+        let (extractDuration, playbackSpeed) = config.calculateExtractParameters(forVideoDuration: durationSeconds)
+        let extractCount = config.extractCount(forVideoDuration: durationSeconds)
+        let minimumRequired = extractDuration * Double(extractCount)
 
         logger.info("📊 Extract parameters:")
-        logger.info("  - Extract count: \(config.extractCount)")
+        logger.info("  - Base extract count: \(config.baseExtractCount)")
+        logger.info("  - Adjusted extract count: \(extractCount)")
         logger.info("  - Extract duration: \(extractDuration)s")
         logger.info("  - Playback speed: \(playbackSpeed)x")
         logger.info("  - Minimum required video duration: \(minimumRequired)s")
@@ -434,17 +446,17 @@ struct PreviewGenerationLogic {
         progressHandler: @escaping @Sendable (Double, PreviewGenerationStatus, URL?, String?) -> Void,
         cancellationCheck: @escaping @Sendable () -> Bool
     ) async throws -> (composition: AVMutableComposition, audioMix: AVMutableAudioMix?) {
-        logger.info("🎬 Starting composition with \(timestamps.count) segments, playback speed: \(playbackSpeed)x")
+        logger.debug("🎬 Starting composition with \(timestamps.count) segments, playback speed: \(playbackSpeed)x")
         let composition = AVMutableComposition()
 
         // Get asset duration for validation
         let assetDuration = try await asset.load(.duration)
         let assetDurationSeconds = CMTimeGetSeconds(assetDuration)
-        logger.info("📹 Asset duration: \(assetDurationSeconds)s")
+        logger.debug("📹 Asset duration: \(assetDurationSeconds)s")
 
         // Add video track
         let videoTracks = try await asset.loadTracks(withMediaType: .video)
-        logger.info("📹 Found \(videoTracks.count) video track(s)")
+        logger.debug("📹 Found \(videoTracks.count) video track(s)")
 
         guard let videoTrack = videoTracks.first else {
             logger.error("❌ No video tracks found in asset")
@@ -453,7 +465,7 @@ struct PreviewGenerationLogic {
 
         // Log video track info
         let videoTrackDuration = try await videoTrack.load(.timeRange).duration
-        logger.info("📹 Video track duration: \(CMTimeGetSeconds(videoTrackDuration))s")
+        logger.debug("📹 Video track duration: \(CMTimeGetSeconds(videoTrackDuration))s")
 
         guard let compositionVideoTrack = composition.addMutableTrack(
             withMediaType: .video,
@@ -462,33 +474,33 @@ struct PreviewGenerationLogic {
             logger.error("❌ Failed to create composition video track")
             throw PreviewError.compositionFailed("Failed to create composition video track", nil)
         }
-        logger.info("✅ Created composition video track")
+        logger.debug("✅ Created composition video track")
 
         // Add audio track if needed
         var compositionAudioTrack: AVMutableCompositionTrack?
 
         if includeAudio {
             let audioTracks = try await asset.loadTracks(withMediaType: .audio)
-            logger.info("🔊 Found \(audioTracks.count) audio track(s)")
+            logger.debug("🔊 Found \(audioTracks.count) audio track(s)")
 
             if !audioTracks.isEmpty {
                 compositionAudioTrack = composition.addMutableTrack(
                     withMediaType: .audio,
                     preferredTrackID: kCMPersistentTrackID_Invalid
                 )
-                logger.info("✅ Created composition audio track")
+                logger.debug("✅ Created composition audio track")
             } else {
                 logger.warning("⚠️ Audio requested but no audio tracks found")
             }
         } else {
-            logger.info("🔇 Audio disabled for this preview")
+            logger.debug("🔇 Audio disabled for this preview")
         }
 
         // Insert segments
         var insertTime = CMTime.zero
         let progressStep = 0.5 / Double(timestamps.count) // 0.2 to 0.7 range
 
-        logger.info("🔧 Starting to insert \(timestamps.count) segments...")
+        logger.debug("🔧 Starting to insert \(timestamps.count) segments...")
 
         for (index, timestamp) in timestamps.enumerated() {
             // Check for cancellation
@@ -619,10 +631,10 @@ struct PreviewGenerationLogic {
         let compositionDuration = CMTimeGetSeconds(composition.duration)
         let videoTracks = composition.tracks(withMediaType: .video).count
         let audioTracks = composition.tracks(withMediaType: .audio).count
-        logger.info("📊 Composition details:")
-        logger.info("  - Duration: \(compositionDuration)s")
-        logger.info("  - Video tracks: \(videoTracks)")
-        logger.info("  - Audio tracks: \(audioTracks)")
+        logger.debug("📊 Composition details:")
+        logger.debug("  - Duration: \(compositionDuration)s")
+        logger.debug("  - Video tracks: \(videoTracks)")
+        logger.debug("  - Audio tracks: \(audioTracks)")
 
         // Get original video dimensions from composition
         guard let compositionVideoTrack = composition.tracks(withMediaType: .video).first else {
