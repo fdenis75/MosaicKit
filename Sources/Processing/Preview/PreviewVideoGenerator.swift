@@ -38,10 +38,26 @@ public actor PreviewVideoGenerator {
     private let logger = Logger(subsystem: "com.mosaickit", category: "PreviewVideoGenerator")
     private var progressHandlers: [UUID: @Sendable (PreviewGenerationProgress) -> Void] = [:]
     private var cancellationTokens: [UUID: CancellationToken] = [:]
+    private var progressTasks: [UUID: Task<Void, Never>] = [:]
 
     // MARK: - Initialization
 
     public init() {}
+
+    // MARK: - Cleanup
+
+    /// Cancel all progress tasks for a video
+    private func cancelProgressTasks(for videoID: UUID) {
+        progressTasks[videoID]?.cancel()
+        progressTasks.removeValue(forKey: videoID)
+    }
+
+    /// Store a progress task for later cancellation
+    private func storeProgressTask(_ task: Task<Void, Never>, for videoID: UUID) {
+        // Cancel any existing progress task for this video
+        progressTasks[videoID]?.cancel()
+        progressTasks[videoID] = task
+    }
 
     // MARK: - Public Methods
 
@@ -62,29 +78,35 @@ public actor PreviewVideoGenerator {
         
         defer {
             cancellationTokens.removeValue(forKey: video.id)
+            cancelProgressTasks(for: video.id)
         }
-        
+
         // Report analyzing status
         reportProgress(for: video, progress: 0.0, status: .analyzing)
-        
+
         do {
             let outputURL = try await PreviewGenerationLogic.generate(
                 for: video,
                 config: config,
                 progressHandler: { [weak self] progress, status, url, message in
+                    guard let self = self else { return }
+                    let progressTask = Task { [weak self] in
+                        guard let self = self else { return }
+                        await self.reportProgress(for: video, progress: progress, status: status, outputURL: url, message: message)
+                    }
                     Task { [weak self] in
-                        await self?.reportProgress(for: video, progress: progress, status: status, outputURL: url, message: message)
+                        await self?.storeProgressTask(progressTask, for: video.id)
                     }
                 },
                 cancellationCheck: { [token] in
                     token.isCancelled
                 }
             )
-            
+
             // Report completion
             reportProgress(for: video, progress: 1.0, status: .completed)
             logger.info("Preview generation completed: \(outputURL.lastPathComponent)")
-            
+
             return outputURL
         } catch {
             if token.isCancelled {
@@ -106,6 +128,7 @@ public actor PreviewVideoGenerator {
     public func cancel(for video: VideoInput) {
         logger.info("Cancelling preview generation for \(video.title)")
         cancellationTokens[video.id]?.cancel()
+        cancelProgressTasks(for: video.id)
     }
 
     /// Generate a preview composition without exporting to file (for video player playback)
@@ -125,6 +148,7 @@ public actor PreviewVideoGenerator {
 
         defer {
             cancellationTokens.removeValue(forKey: video.id)
+            cancelProgressTasks(for: video.id)
         }
 
         // Report analyzing status
@@ -135,8 +159,13 @@ public actor PreviewVideoGenerator {
                 for: video,
                 config: config,
                 progressHandler: { [weak self] progress, status, url, message in
+                    guard let self = self else { return }
+                    let progressTask = Task { [weak self] in
+                        guard let self = self else { return }
+                        await self.reportProgress(for: video, progress: progress, status: status, outputURL: url, message: message)
+                    }
                     Task { [weak self] in
-                        await self?.reportProgress(for: video, progress: progress, status: status, outputURL: url, message: message)
+                        await self?.storeProgressTask(progressTask, for: video.id)
                     }
                 },
                 cancellationCheck: { [token] in
@@ -163,6 +192,11 @@ public actor PreviewVideoGenerator {
         for token in cancellationTokens.values {
             token.cancel()
         }
+        // Cancel all progress tasks
+        for task in progressTasks.values {
+            task.cancel()
+        }
+        progressTasks.removeAll()
     }
 
     // MARK: - Private Methods

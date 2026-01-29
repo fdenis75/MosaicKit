@@ -1,7 +1,6 @@
-import Foundation
+@preconcurrency import Foundation
 import OSLog
-import SwiftData
-import CoreImage
+@preconcurrency import CoreImage
 
 @available(macOS 26, iOS 26, *)
 public struct MosaicGenerationResult: Sendable {
@@ -109,50 +108,37 @@ public enum MosaicGenerationStatus: Sendable {
     case cancelled
 }
 /// Coordinator for mosaic generation operations
+/// Generic over Generator type to eliminate existential container overhead
 @available(macOS 26, iOS 26, *)
-public actor MosaicGeneratorCoordinator {
-  
-  
-    
-    
+public actor MosaicGeneratorCoordinator<Generator: MosaicGeneratorProtocol> {
+
+
+
+
     // MARK: - Properties
 
     public let logger = Logger(subsystem: "com.mosaicKit", category: "mosaic-coordinator")
     public let signposter = OSSignposter(subsystem: "com.mosaicKit", category: "mosaic-coordinator")
-    public let mosaicGenerator: any MosaicGeneratorProtocol
+    public let mosaicGenerator: Generator
     public var concurrencyLimit: Int
     public var activeTasks: [UUID: Task<MosaicGenerationResult, Error>] = [:]
     public var progressHandlers: [UUID: (MosaicGenerationProgress) -> Void] = [:]
-    public let modelContext: ModelContext
 
     // MARK: - Initialization
 
-    /// Creates a new mosaic generator coordinator
+    /// Creates a new mosaic generator coordinator with a specific generator
     /// - Parameters:
-    ///   - mosaicGenerator: The mosaic generator to use (optional, will auto-create if nil)
-    ///   - modelContext: The SwiftData model context
+    ///   - mosaicGenerator: The mosaic generator to use
     ///   - concurrencyLimit: Maximum number of concurrent generation tasks
-    ///   - generatorPreference: Preference for which generator implementation to use
     public init(
-        mosaicGenerator: (any MosaicGeneratorProtocol)? = nil,
-        modelContext: ModelContext,
-        concurrencyLimit: Int = 0,
-        generatorPreference: MosaicGeneratorFactory.GeneratorPreference = .auto
+        mosaicGenerator: Generator,
+        concurrencyLimit: Int = 0
     ) {
-        if let generator = mosaicGenerator {
-            self.mosaicGenerator = generator
-            logger.debug("🎬 MosaicGeneratorCoordinator initialized with provided generator")
-        } else {
-            let generator = try! MosaicGeneratorFactory.createGenerator(preference: generatorPreference)
-            self.mosaicGenerator = generator
-            logger.debug("🎬 MosaicGeneratorCoordinator initialized with auto-created generator")
-        }
-
-        self.modelContext = modelContext
+        self.mosaicGenerator = mosaicGenerator
         self.concurrencyLimit = concurrencyLimit
-        logger.debug("🎬 MosaicGeneratorCoordinator initialized with concurrency limit: \(concurrencyLimit)")
+        logger.debug("🎬 MosaicGeneratorCoordinator initialized with provided generator, concurrency limit: \(concurrencyLimit)")
     }
-    
+
     public func setConcurrencyLimit(_ limit: Int) {
         let oldLimit = self.concurrencyLimit
         self.concurrencyLimit = limit
@@ -355,49 +341,45 @@ public actor MosaicGeneratorCoordinator {
     
     /// Cancel mosaic generation for a specific video
     /// - Parameter video: The video to cancel mosaic generation for
-    public func cancelGeneration(for video: VideoInput) {
+    public func cancelGeneration(for video: VideoInput) async {
         // Add default value for optional title
         logger.debug("❌ Cancelling mosaic generation for video: \(video.title ?? "N/A")")
-        
+
         // Safely unwrap video.id
          let videoID = video.id
-        
+
         // Cancel task
         activeTasks[videoID]?.cancel() // Use unwrapped ID
         activeTasks[videoID] = nil // Use unwrapped ID
-        
+
         // Report cancellation
         progressHandlers[videoID]?(MosaicGenerationProgress( // Use unwrapped ID
             video: video,
             progress: 0.0,
             status: .cancelled
         ))
-        
+
         progressHandlers[videoID] = nil // Use unwrapped ID
-        
-        // Cancel in generator - use Task to handle actor isolation
-        Task {
-            await mosaicGenerator.cancel(for: video)
-        }
+
+        // Cancel in generator - direct await instead of fire-and-forget Task
+        await mosaicGenerator.cancel(for: video)
     }
     
     /// Cancel all ongoing mosaic generation operations
-    public func cancelAllGenerations() {
+    public func cancelAllGenerations() async {
         logger.debug("❌ Cancelling all mosaic generation tasks")
-        
+
         // Cancel all tasks
         for (_, task) in activeTasks {
             task.cancel()
         }
-        
+
         // Clear state
         activeTasks.removeAll()
         progressHandlers.removeAll()
-        
-        // Cancel in generator - use Task to handle actor isolation
-        Task {
-            await mosaicGenerator.cancelAll()
-        }
+
+        // Cancel in generator - direct await instead of fire-and-forget Task
+        await mosaicGenerator.cancelAll()
     }
     
     // MARK: - Private Methods
@@ -476,25 +458,25 @@ public actor MosaicGeneratorCoordinator {
                                          
                                         "effective: (effectiveConcurrencyLimit)")
                 }
+                // Wait for a slot to become available by getting next completed result
                 while activeTasks >= effectiveConcurrencyLimit {
-                    
-                    logger.debug("treshold reached : \(activeTasks)/\(effectiveConcurrencyLimit)")
-                    signposter.emitEvent("Wainting for slot",id: signpostID,
+                    logger.debug("Threshold reached: \(activeTasks)/\(effectiveConcurrencyLimit), waiting for task completion")
+                    signposter.emitEvent("Waiting for slot", id: signpostID,
                                          "Active: \(activeTasks)/\(effectiveConcurrencyLimit)")
-                    try  await Task.sleep(for: .seconds(0.2))
-                    if let result = try  await group.next() {
+
+                    // group.next() properly suspends until a result is available - no polling needed
+                    if let result = try await group.next() {
                         results.append(result)
                         completed += 1
                         activeTasks -= 1
-                        signposter.emitEvent("result arrived",id: signpostID
-                                            )
-                        
+                        signposter.emitEvent("Result arrived", id: signpostID)
+
                         if result.isSuccess {
                             successCount += 1
                         } else {
                             failureCount += 1
                         }
-                        
+
                         // Report aggregated progress (useful for UI progress indicators)
                         let overallProgress = Double(completed) / Double(videos.count)
                         logger.debug("🔄 Progress: \(Int(overallProgress * 100))% (\(completed)/\(videos.count) complete)")
@@ -586,19 +568,11 @@ public actor MosaicGeneratorCoordinator {
         // 1. Shorter videos get higher priority (faster to process)
         // 2. Already cached videos get higher priority
         // 3. Higher resolution videos get slightly lower priority (more resource-intensive)
-        
-        return try! videos.sorted { video1id, video2id in
-            var video1: VideoInput
-            var video2: VideoInput
-            do {
-                 video1 = video1id
-                 video2 = video2id
-            } catch {
-                logger.error("Error fetching video: \(error)")
-                throw error
-            }
+
+        return videos.sorted { video1, video2 in
             var score1: Double = 0
             var score2: Double = 0
+
             // Factor 1: Duration - shorter videos get higher score (negative correlation)
             // Clamp to 1-300 seconds range for scoring purposes
             // Provide default value for optional duration
@@ -606,10 +580,10 @@ public actor MosaicGeneratorCoordinator {
             let duration2 = min(300, max(1, video2.duration ?? 300))
             score1 += 300.0 / duration1 * 10 // Shorter = higher score, max weight 10
             score2 += 300.0 / duration2 * 10
-            
+
             // Factor 2: Already has thumbnail/cached data - bonus points
-          
-            
+
+
             // Factor 3: Resolution - lower resolution gets higher score (easier to process)
             let resolution1 = (video1.width ?? 1920) * (video1.height ?? 1080)
             let resolution2 = (video2.width ?? 1920) * (video2.height ?? 1080)
@@ -617,7 +591,7 @@ public actor MosaicGeneratorCoordinator {
             let resolutionMax = 3840 * 2160
             score1 += 5.0 * (1.0 - min(1.0, Double(resolution1) / Double(resolutionMax)))
             score2 += 5.0 * (1.0 - min(1.0, Double(resolution2) / Double(resolutionMax)))
-            
+
             // Return comparison result (higher score comes first)
             return score1 > score2
         }
@@ -625,7 +599,44 @@ public actor MosaicGeneratorCoordinator {
     }
 }
 
+// MARK: - Convenience Factory Functions
+
+/// Creates a coordinator with auto-generated Metal generator (macOS only)
+/// - Parameter concurrencyLimit: Maximum number of concurrent generation tasks
+/// - Returns: A coordinator with Metal generator for maximum performance
+#if os(macOS)
+@available(macOS 26, *)
+public func createMosaicCoordinatorWithMetal(concurrencyLimit: Int = 0) throws -> MosaicGeneratorCoordinator<MetalMosaicGenerator> {
+    let generator = try MetalMosaicGenerator()
+    return MosaicGeneratorCoordinator(mosaicGenerator: generator, concurrencyLimit: concurrencyLimit)
+}
+#endif
+
+/// Creates a coordinator with Core Graphics generator (cross-platform)
+/// - Parameter concurrencyLimit: Maximum number of concurrent generation tasks
+/// - Returns: A coordinator with Core Graphics generator
+@available(macOS 26, iOS 26, *)
+public func createMosaicCoordinatorWithCoreGraphics(concurrencyLimit: Int = 0) throws -> MosaicGeneratorCoordinator<CoreGraphicsMosaicGenerator> {
+    let generator = try CoreGraphicsMosaicGenerator()
+    return MosaicGeneratorCoordinator(mosaicGenerator: generator, concurrencyLimit: concurrencyLimit)
+}
+
+/// Creates a coordinator with the default generator for the current platform
+/// - Parameter concurrencyLimit: Maximum number of concurrent generation tasks
+/// - Returns: A coordinator with the optimal generator for this platform
+#if os(macOS)
+@available(macOS 26, *)
+public func createDefaultMosaicCoordinator(concurrencyLimit: Int = 0) throws -> MosaicGeneratorCoordinator<MetalMosaicGenerator> {
+    try createMosaicCoordinatorWithMetal(concurrencyLimit: concurrencyLimit)
+}
+#else
+@available(iOS 26, *)
+public func createDefaultMosaicCoordinator(concurrencyLimit: Int = 0) throws -> MosaicGeneratorCoordinator<CoreGraphicsMosaicGenerator> {
+    try createMosaicCoordinatorWithCoreGraphics(concurrencyLimit: concurrencyLimit)
+}
+#endif
+
 // Placeholder for CoordinatorError - Define this properly elsewhere
 enum CoordinatorError: Error {
     case missingVideoID
-} 
+}

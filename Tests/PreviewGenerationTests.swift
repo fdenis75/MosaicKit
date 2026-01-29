@@ -15,7 +15,7 @@ struct PreviewGenerationTests {
     
     init() async throws {
         // Use the test video provided by the user
-        let originalURL = URL(fileURLWithPath: "/Volumes/Ext-Photos5/91T/DDSC-045 .mp4")
+        let originalURL = URL(fileURLWithPath: "/Users/francois/Downloads/bunn2.mp4")
         
         // Copy to temp directory
         // let tempVideoURL = FileManager.default.temporaryDirectory.appendingPathComponent("test_video_copy.mp4")
@@ -49,8 +49,8 @@ struct PreviewGenerationTests {
     @Test("Preview Generation with Variations")
     func previewGenerationWithVariations() async throws {
       
-        let durations: [TimeInterval] = [120]
-        let densities: [DensityConfig] = [.s]
+        let durations: [TimeInterval] = [120, 60, 240]
+        let densities: [DensityConfig] = [.s, .xxs, .m]
         let qualities: [Double] = [1.0, 0.75, 0.5, 0.25, 0.1]
         
         let videoInput = try await VideoInput(from: videoURL)

@@ -7,7 +7,6 @@
 
 import Foundation
 import OSLog
-import SwiftData
 import AVFoundation
 
 
@@ -339,11 +338,6 @@ public actor PreviewGeneratorCoordinator {
                     // Check for cancellation at start
                     try Task.checkCancellation()
 
-                    // Create individual progress handler to track this video
-                    let videoProgressHandler: @Sendable (PreviewGenerationProgress) -> Void = { progress in
-                        progressHandler?(progress)
-                    }
-
                     do {
                         self.logger.debug("Starting generation for: \(video.title)")
 
@@ -426,7 +420,7 @@ public actor PreviewGeneratorCoordinator {
         }
 
         // Report cancellations
-        for (id, handler) in progressHandlers {
+        for (_, handler) in progressHandlers {
             // Create a temporary VideoInput for cancellation (we don't have the full object)
             // The handler should handle this gracefully
             handler(PreviewGenerationProgress(

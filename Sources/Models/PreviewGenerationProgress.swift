@@ -5,8 +5,8 @@
 //  Created by Claude Code on 2025-11-23.
 //
 
-import Foundation
-import AVFoundation
+@preconcurrency import Foundation
+@preconcurrency import AVFoundation
 
 /// Status of preview video generation
 @available(macOS 26, iOS 26, *)
@@ -172,9 +172,8 @@ public struct PreviewCompositionResult: Sendable {
     /// The video that was processed
     public let video: VideoInput
 
-    /// AVPlayerItem if successful (marked as nonisolated unsafe for Sendable conformance)
-    /// This is safe because the playerItem is created once and never modified
-    nonisolated(unsafe) public let playerItem: AVPlayerItem?
+    /// AVPlayerItem if successful
+    public let playerItem: AVPlayerItem?
 
     /// Error if generation failed
     public let error: Error?
