@@ -1,0 +1,12 @@
+version: 1
+builder:
+  configs:
+    # macOS builds with documentation
+    - documentation_targets: [MosaicKit]
+      platform: macos
+      swift_version: 6.2
+
+    # iOS builds with documentation
+    - documentation_targets: [MosaicKit]
+      platform: ios
+      swift_version: 6.2
