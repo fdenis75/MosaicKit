@@ -15,17 +15,42 @@ import SJSAssetExportSession
 class CancellationToken: @unchecked Sendable {
     private let lock = NSLock()
     private var _isCancelled = false
-    
+
     var isCancelled: Bool {
         lock.lock()
         defer { lock.unlock() }
         return _isCancelled
     }
-    
+
     func cancel() {
         lock.lock()
         _isCancelled = true
         lock.unlock()
+    }
+}
+
+/// Thread-safe tracker for the last time export progress changed.
+/// Used to detect stalled exports that stop making forward progress.
+class ExportProgressTracker: @unchecked Sendable {
+    private let lock = NSLock()
+    private var _lastProgressTime: Date = Date()
+    private var _lastProgressValue: Double = -1
+
+    /// Record that progress changed. Only updates the timestamp when the value actually moves.
+    func recordProgress(_ value: Double) {
+        lock.lock()
+        defer { lock.unlock() }
+        if value != _lastProgressValue {
+            _lastProgressValue = value
+            _lastProgressTime = Date()
+        }
+    }
+
+    /// Seconds since the last time progress actually changed.
+    var secondsSinceLastProgress: TimeInterval {
+        lock.lock()
+        defer { lock.unlock() }
+        return Date().timeIntervalSince(_lastProgressTime)
     }
 }
 
@@ -683,16 +708,39 @@ struct PreviewGenerationLogic {
 
         logger.info("SJS export: format=\(config.format.rawValue), quality=\(config.compressionQuality), audioBitrate=\(audioBitrate)")
 
+        // Stall detection: cancel if no progress for 60 seconds
+        let stallTimeout: TimeInterval = 60
+        let progressTracker = ExportProgressTracker()
+        progressTracker.recordProgress(0)
+        let stallDetected = CancellationToken()
+
         // Start progress monitoring task
         let progressTask = Task {
             for await progress in exporter.progressStream {
                 if cancellationCheck() { break }
                 let progressValue = Double(progress)
+                progressTracker.recordProgress(progressValue)
                 let exportProgress = 0.3 + (progressValue * 0.7)
                 progressHandler(exportProgress, .encoding, nil, "Encoding: \(Int(progressValue * 100))%")
                 if progressValue >= 1.0 { return }
             }
         }
+
+        // Stall + cancellation monitor for SJS export
+        let stallMonitor = Task {
+            while !Task.isCancelled {
+                if cancellationCheck() { break }
+                let elapsed = progressTracker.secondsSinceLastProgress
+                if elapsed >= stallTimeout {
+                    logger.error("SJS export stalled: no progress for \(Int(elapsed))s, cancelling")
+                    stallDetected.cancel()
+                    progressTask.cancel()
+                    break
+                }
+                try? await Task.sleep(nanoseconds: 1_000_000_000) // check every 1s
+            }
+        }
+        defer { stallMonitor.cancel() }
 
         // Perform the export
         do {
@@ -706,7 +754,12 @@ struct PreviewGenerationLogic {
                 as: config.format.avFileType
             )
 
-            _ = await { progressTask.cancel() }()
+            progressTask.cancel()
+
+            if stallDetected.isCancelled {
+                try? FileManager.default.removeItem(at: outputURL)
+                throw PreviewError.exportStalled(elapsedSeconds: Int(progressTracker.secondsSinceLastProgress))
+            }
 
             if cancellationCheck() {
                 try? FileManager.default.removeItem(at: outputURL)
@@ -728,6 +781,10 @@ struct PreviewGenerationLogic {
             progressTask.cancel()
             // Clean up partial output file on failure
             try? FileManager.default.removeItem(at: outputURL)
+            if stallDetected.isCancelled {
+                logger.error("SJS export stalled and was cancelled")
+                throw PreviewError.exportStalled(elapsedSeconds: Int(progressTracker.secondsSinceLastProgress))
+            }
             logger.error("SJS export failed: \(error.localizedDescription)")
             progressHandler(1.0, .failed, nil, error.localizedDescription)
             throw PreviewError.encodingFailed("Export failed", error)
@@ -904,6 +961,11 @@ struct PreviewGenerationLogic {
         exportSession.allowsParallelizedExport = true
         exportSession.shouldOptimizeForNetworkUse = true
 
+        // Stall detection: cancel if no progress for 60 seconds
+        let stallTimeout: TimeInterval = 60
+        let progressTracker = ExportProgressTracker()
+        progressTracker.recordProgress(0)
+
         // Progress monitoring
         let progressMonitor = Task {
             for await state in exportSession.states(updateInterval: 5) {
@@ -915,6 +977,7 @@ struct PreviewGenerationLogic {
                     progressHandler(0, .queued, nil, "Waiting")
                 case let .exporting(progress):
                     let progressValue = progress.fractionCompleted
+                    progressTracker.recordProgress(progressValue)
                     progressHandler(0.3 + (progressValue * 0.7), .encoding, nil, "Encoding: \(Int(progressValue * 100))%")
                     if progressValue >= 0.999 { return }
                 @unknown default:
@@ -926,14 +989,23 @@ struct PreviewGenerationLogic {
 
         if cancellationCheck() { throw PreviewError.cancelled }
 
-        // Cancellation monitoring
+        // Cancellation + stall monitoring
+        let stallDetected = CancellationToken()
         let cancellationMonitor = Task {
             while !Task.isCancelled {
                 if cancellationCheck() {
+                    logger.warning("Cancellation requested, cancelling export")
                     exportSession.cancelExport()
                     return
                 }
-                try? await Task.sleep(nanoseconds: 100_000_000)
+                let elapsed = progressTracker.secondsSinceLastProgress
+                if elapsed >= stallTimeout {
+                    logger.error("Export stalled: no progress for \(Int(elapsed))s, cancelling")
+                    stallDetected.cancel()
+                    exportSession.cancelExport()
+                    return
+                }
+                try? await Task.sleep(nanoseconds: 1_000_000_000) // check every 1s
             }
         }
         defer { cancellationMonitor.cancel() }
@@ -942,6 +1014,10 @@ struct PreviewGenerationLogic {
         do {
             try await exportSession.export(to: outputURL, as: config.format.avFileType)
         } catch {
+            if stallDetected.isCancelled {
+                try? FileManager.default.removeItem(at: outputURL)
+                throw PreviewError.exportStalled(elapsedSeconds: Int(progressTracker.secondsSinceLastProgress))
+            }
             if cancellationCheck() {
                 try? FileManager.default.removeItem(at: outputURL)
                 throw PreviewError.cancelled
@@ -952,6 +1028,11 @@ struct PreviewGenerationLogic {
 
         let finalStatus = exportSession.status
         let finalError = exportSession.error
+
+        if stallDetected.isCancelled {
+            try? FileManager.default.removeItem(at: outputURL)
+            throw PreviewError.exportStalled(elapsedSeconds: Int(progressTracker.secondsSinceLastProgress))
+        }
 
         if cancellationCheck() {
             try? FileManager.default.removeItem(at: outputURL)
