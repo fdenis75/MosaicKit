@@ -1,7 +1,7 @@
 {
   "configurations" : [
     {
-      "id" : "A58342DF-44BB-4F21-8563-323BF51B0545",
+      "id" : "BA8EDA53-3227-4C83-85CC-12D6D658D999",
       "name" : "Configuration 1",
       "options" : {
 
@@ -9,7 +9,7 @@
     }
   ],
   "defaultOptions" : {
-    "testTimeoutsEnabled" : true
+
   },
   "testTargets" : [
     {
@@ -18,7 +18,7 @@
           {
             "name" : "PreviewGenerationTests",
             "testFunctions" : [
-              "previewGenerationWithVariations()"
+              "mosaicGenerationWithVariations()"
             ]
           },
           {
@@ -27,22 +27,10 @@
         ],
         "xctestClasses" : [
           {
-            "name" : "BatchMosaicGenerationTests"
-          },
-          {
             "name" : "GeneratorComparisonTests"
           },
           {
-            "name" : "PreviewGenerationTests",
-            "xctestMethods" : [
-              "testPreviewGenerationWithVariations()"
-            ]
-          },
-          {
             "name" : "VideoInputPerformanceTests"
-          },
-          {
-            "name" : "VideoInputTests"
           }
         ]
       },

@@ -110,6 +110,11 @@ public struct VideoInput: Codable, Hashable, Sendable {
     ///   - postID: Optional post ID for file naming
     /// - Throws: Error if video cannot be accessed or metadata cannot be extracted
     public init(from url: URL, serviceName: String? = nil, creatorName: String? = nil, postID: String? = nil) async throws {
+        guard url.startAccessingSecurityScopedResource() else {
+            throw MosaicError.invalidVideo("No video track found")
+        }
+        
+        
         let asset = AVURLAsset(url: url)
         
         // Load all tracks
@@ -117,28 +122,28 @@ public struct VideoInput: Codable, Hashable, Sendable {
         guard let videoTrack = tracks.first else {
             throw MosaicError.invalidVideo("No video track found")
         }
-
+        
         // Extract basic properties
         let duration = try await asset.load(.duration).seconds
         let (naturalSize,nominalFrameRate,formatDescriptions,estimatedDataRate) = try await videoTrack.load(.naturalSize, .nominalFrameRate,.formatDescriptions,.estimatedDataRate)
-       // let nominalFrameRate = try await videoTrack.load(.nominalFrameRate)
-
+        // let nominalFrameRate = try await videoTrack.load(.nominalFrameRate)
+        
         // Get file size
         var fileSize: Int64?
         if url.isFileURL {
             let attributes = try? FileManager.default.attributesOfItem(atPath: url.path)
             fileSize = attributes?[.size] as? Int64
         }
-
+        
         // Extract codec and bitrate
         var codec: String?
         var bitrate: Int64?
-
-      //  let formatDescriptions = try await videoTrack.load(.formatDescriptions)
+        
+        //  let formatDescriptions = try await videoTrack.load(.formatDescriptions)
         if let formatDescription = formatDescriptions.first {
             let mediaType = CMFormatDescriptionGetMediaType(formatDescription)
             let mediaSubType = CMFormatDescriptionGetMediaSubType(formatDescription)
-
+            
             // Convert FourCC code to string
             let chars = [
                 UInt8((mediaSubType >> 24) & 0xFF),
@@ -148,12 +153,12 @@ public struct VideoInput: Codable, Hashable, Sendable {
             ]
             codec = String(bytes: chars, encoding: .utf8)
         }
-
+        
         // Try to get bitrate
-       // if let estimatedDataRate = try? await videoTrack.load(.estimatedDataRate) {
-            bitrate = Int64(estimatedDataRate)
+        // if let estimatedDataRate = try? await videoTrack.load(.estimatedDataRate) {
+        bitrate = Int64(estimatedDataRate)
         //}
-
+        
         self.init(
             url: url,
             duration: duration,
@@ -167,6 +172,8 @@ public struct VideoInput: Codable, Hashable, Sendable {
             postID: postID
         )
     }
+   
+    
 }
 
 // MARK: - Error Type

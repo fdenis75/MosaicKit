@@ -49,14 +49,25 @@ public enum VideoFormat: String, Codable, Sendable, CaseIterable {
     /// - Returns: AVAssetExportSession preset name
     public func exportPreset(quality: Double) -> String {
         // Higher quality -> higher resolution preset
-        if quality >= 0.9 {
-            return AVAssetExportPresetHEVC3840x2160 // 4K HEVC
-        } else if quality >= 0.75 {
-            return AVAssetExportPresetHEVC1920x1080 // 1080p HEVC
-        } else if quality >= 0.5 {
+        if quality == 1.0 {
+            return AVAssetExportPresetPassthrough // 4K HEVC
+        } else if quality == 0.9 {
+            return AVAssetExportPresetHighestQuality // 1080p HEVC
+        } else if quality == 0.8 {
+            return AVAssetExportPresetHEVC1920x1080 // 1080p H.264
+        } else if quality == 0.7 {
             return AVAssetExportPreset1920x1080 // 1080p H.264
-        } else {
-            return AVAssetExportPreset1280x720 // 720p H.264
+        }
+        else if quality == 0.6 {
+            return AVAssetExportPresetMediumQuality // 1080p H.264
+        }else if quality == 0.5 {
+            return AVAssetExportPresetLowQuality // 1080p H.264
+        }
+        else {
+            return AVAssetExportPreset960x540 // 720p H.264
         }
     }
+    
+    
+    
 }
