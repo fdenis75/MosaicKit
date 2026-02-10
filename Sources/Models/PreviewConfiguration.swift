@@ -93,13 +93,13 @@ public struct PreviewConfiguration: Codable, Sendable, Hashable {
     /// - Parameter videoDuration: Duration of the input video in seconds
     /// - Returns: Total extract count (base count + duration-based adjustment)
     public func extractCount(forVideoDuration videoDuration: TimeInterval) -> Int {
-        let durationAdjustment = ((videoDuration > 1800.00) ? 20.0 : 10.0) * log(videoDuration)
+        let durationAdjustment = ((videoDuration > 1800.00) ? 8.0 : 4.0) * log(videoDuration)
         let totalCount = Double(baseExtractCount) + durationAdjustment
         print("extraCount(forVideoDuration:) -> \(totalCount)")
         return max(1, Int(totalCount.rounded()))
     }
     public static func extractCountExt(forVideoDuration videoDuration: TimeInterval, density: String, targetDuration: TimeInterval) -> Int {
-        let durationAdjustment = ((videoDuration > 1800.00) ? 20.0 : 10.0) * log(videoDuration)
+        let durationAdjustment = ((videoDuration > 1800.00) ? 8.0 : 4.0) * log(videoDuration)
         let totalCount = Double(self.exterEtractCount(density: density)) + durationAdjustment
         print("extraCount(forVideoDuration:) -> \(totalCount)")
         return max(1, Int(totalCount.rounded()))
@@ -107,10 +107,10 @@ public struct PreviewConfiguration: Codable, Sendable, Hashable {
     
 
     /// Minimum duration for each extract (in seconds)
-    public static let minimumExtractDuration: TimeInterval = 2.0
+    public static let minimumExtractDuration: TimeInterval = 4.0
 
     /// Maximum playback speed multiplier
-    public static let maximumPlaybackSpeed: Double = 4.0
+    public static let maximumPlaybackSpeed: Double = 1.5
 
     /// Calculate the duration per extract and playback speed
     /// - Parameter videoDuration: Duration of the input video in seconds
@@ -229,4 +229,96 @@ extension PreviewConfiguration {
             return "\(minutes):\(String(format: "%02d", seconds))"
         }
     }
+}
+
+// MARK: - Playground
+
+#Playground {
+    // MARK: Setup
+    // PreviewConfiguration.calculateExtractParameters(forVideoDuration:) decides two things:
+    //   1. extractDuration  — how many real seconds to grab from each clip
+    //   2. playbackSpeed    — the speed multiplier when stitching clips together
+    //
+    // Rules:
+    //   • minimumExtractDuration = 4 s  (each clip must be at least this long)
+    //   • maximumPlaybackSpeed   = 1.5× (never speed up more than this)
+    //
+    // When baseExtractDuration (= targetDuration / count) ≥ 4 s → play at 1×, use that duration.
+    // When it would be < 4 s → speed up playback (capped at 1.5×) and recalculate actual duration.
+
+    let config = PreviewConfiguration(targetDuration: 60, density: .m) // 60 s preview, medium density
+
+    // -------------------------------------------------------------------------
+    // Scenario 1 — Short video (5 minutes)
+    // At medium density with a short video, extract count is modest so each
+    // extract is long enough to stay at 1× speed.
+    // -------------------------------------------------------------------------
+    let shortDuration: TimeInterval = 5 * 60   // 300 s
+    let shortCount = config.extractCount(forVideoDuration: shortDuration)
+    let shortParams = config.calculateExtractParameters(forVideoDuration: shortDuration)
+    print("--- Scenario 1: Short video (5 min) ---")
+    print("  Extract count : \(shortCount)")
+    print("  Extract dur   : \(String(format: "%.2f", shortParams.extractDuration)) s")
+    print("  Playback speed: \(String(format: "%.2f", shortParams.playbackSpeed))×")
+    // Expected: speed == 1.0 because targetDuration/count is well above 4 s
+
+    // -------------------------------------------------------------------------
+    // Scenario 2 — Long video (2 hours)
+    // Duration-based adjustment adds many extra extracts, driving baseExtractDuration
+    // below 4 s → playback is sped up toward the 1.5× cap.
+    // -------------------------------------------------------------------------
+    let longDuration: TimeInterval = 2 * 60 * 60   // 7200 s
+    let longCount = config.extractCount(forVideoDuration: longDuration)
+    let longParams = config.calculateExtractParameters(forVideoDuration: longDuration)
+    print("\n--- Scenario 2: Long video (2 hours) ---")
+    print("  Extract count : \(longCount)")
+    print("  Extract dur   : \(String(format: "%.2f", longParams.extractDuration)) s")
+    print("  Playback speed: \(String(format: "%.2f", longParams.playbackSpeed))×")
+    // Expected: speed approaches (or hits) 1.5× because many extracts don't fit at 1×
+
+    // -------------------------------------------------------------------------
+    // Scenario 3 — Different target durations, same video
+    // Shorter target → fewer seconds per extract → may force speed-up sooner.
+    // -------------------------------------------------------------------------
+    let testVideoDuration: TimeInterval = 45 * 60  // 45-minute video
+    print("\n--- Scenario 3: 45-min video across target durations ---")
+    for target in [30.0, 60.0, 120.0, 300.0] {
+        let cfg = PreviewConfiguration(targetDuration: target, density: .m)
+        let count = cfg.extractCount(forVideoDuration: testVideoDuration)
+        let params = cfg.calculateExtractParameters(forVideoDuration: testVideoDuration)
+        print("  target=\(Int(target))s  count=\(count)  extractDur=\(String(format: "%.2f", params.extractDuration))s  speed=\(String(format: "%.2f", params.playbackSpeed))×")
+    }
+
+    // -------------------------------------------------------------------------
+    // Scenario 4 — Different density levels, same video & target
+    // Higher density (XXS) → more extracts → smaller per-extract duration
+    // Lower density (XXL)  → fewer extracts → larger per-extract duration
+    // -------------------------------------------------------------------------
+    let stdVideo: TimeInterval = 30 * 60   // 30-minute video
+    let stdTarget: TimeInterval = 60       // 60-second preview
+    print("\n--- Scenario 4: 30-min video, 60 s target, varying density ---")
+    for density in DensityConfig.allCases {
+        let cfg = PreviewConfiguration(targetDuration: stdTarget, density: density)
+        let count = cfg.extractCount(forVideoDuration: stdVideo)
+        let params = cfg.calculateExtractParameters(forVideoDuration: stdVideo)
+        print("  density=\(density.name.padding(toLength: 4, withPad: " ", startingAt: 0))  count=\(String(count).padding(toLength: 4, withPad: " ", startingAt: 0))  extractDur=\(String(format: "%.2f", params.extractDuration))s  speed=\(String(format: "%.2f", params.playbackSpeed))×")
+    }
+
+    // -------------------------------------------------------------------------
+    // Scenario 5 — Edge cases
+    // -------------------------------------------------------------------------
+    print("\n--- Scenario 5: Edge cases ---")
+
+    // Very short video (< 1 min)
+    let tinyVideo: TimeInterval = 30   // 30-second video
+    let tinyCfg = PreviewConfiguration(targetDuration: 60, density: .m)
+    let tinyParams = tinyCfg.calculateExtractParameters(forVideoDuration: tinyVideo)
+    print("  30-s video, 60-s target : extractDur=\(String(format: "%.2f", tinyParams.extractDuration))s  speed=\(String(format: "%.2f", tinyParams.playbackSpeed))×")
+
+    // Very long video (5 hours)
+    let hugeVideo: TimeInterval = 5 * 60 * 60
+    let hugeCfg = PreviewConfiguration(targetDuration: 60, density: .m)
+    let hugeParams = hugeCfg.calculateExtractParameters(forVideoDuration: hugeVideo)
+    print("  5-hr video,  60-s target: extractDur=\(String(format: "%.2f", hugeParams.extractDuration))s  speed=\(String(format: "%.2f", hugeParams.playbackSpeed))×")
+    // At 1.5× cap the actual extract duration will be: 60 * 1.5 / count
 }

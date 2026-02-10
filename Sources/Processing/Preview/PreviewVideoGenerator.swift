@@ -221,7 +221,6 @@ public actor PreviewVideoGenerator {
 
 /// Logic for preview generation, isolated to MainActor to ensure AVFoundation safety
 @available(macOS 26, iOS 26, *)
-@MainActor
 struct PreviewGenerationLogic {
     private static let logger = Logger(subsystem: "com.mosaickit", category: "PreviewGenerationLogic")
     
@@ -352,7 +351,7 @@ struct PreviewGenerationLogic {
         nonisolated(unsafe) let composition = videoComposition.composition
         nonisolated(unsafe) let audioMix = videoComposition.audioMix
         
-        let playerItem = AVPlayerItem(asset: composition)
+        let playerItem = await AVPlayerItem(asset: composition)
         
         // Apply audio mix if available
         if let mix = audioMix {
@@ -478,178 +477,128 @@ struct PreviewGenerationLogic {
         progressHandler: @escaping @Sendable (Double, PreviewGenerationStatus, URL?, String?) -> Void,
         cancellationCheck: @escaping @Sendable () -> Bool
     ) async throws -> (composition: AVMutableComposition, audioMix: AVMutableAudioMix?) {
-        logger.debug("🎬 Starting composition with \(timestamps.count) segments, playback speed: \(playbackSpeed)x")
+        logger.debug("Starting composition with \(timestamps.count) segments, playback speed: \(playbackSpeed)x")
         let composition = AVMutableComposition()
-        
+
         // Get asset duration for validation
         let assetDuration = try await asset.load(.duration)
         let assetDurationSeconds = CMTimeGetSeconds(assetDuration)
-        logger.debug("📹 Asset duration: \(assetDurationSeconds)s")
-        
-        // Add video track
+
+        // Load source tracks ONCE before the loop
         let videoTracks = try await asset.loadTracks(withMediaType: .video)
-        logger.debug("📹 Found \(videoTracks.count) video track(s)")
-        
         guard let videoTrack = videoTracks.first else {
-            logger.error("❌ No video tracks found in asset")
+            logger.error("No video tracks found in asset")
             throw PreviewError.noVideoTracks
         }
-        
-        // Log video track info
-        let videoTrackDuration = try await videoTrack.load(.timeRange).duration
-        logger.debug("📹 Video track duration: \(CMTimeGetSeconds(videoTrackDuration))s")
-        
+
+        let audioTrack: AVAssetTrack? = includeAudio
+            ? try await asset.loadTracks(withMediaType: .audio).first
+            : nil
+
+        if includeAudio && audioTrack == nil {
+            logger.warning("Audio requested but no audio tracks found in asset")
+        }
+
+        // Create composition tracks
         guard let compositionVideoTrack = composition.addMutableTrack(
             withMediaType: .video,
             preferredTrackID: kCMPersistentTrackID_Invalid
         ) else {
-            logger.error("❌ Failed to create composition video track")
+            logger.error("Failed to create composition video track")
             throw PreviewError.compositionFailed("Failed to create composition video track", nil)
         }
-        logger.debug("✅ Created composition video track")
-        
-        // Add audio track if needed
+
         var compositionAudioTrack: AVMutableCompositionTrack?
-        
-        if includeAudio {
-            let audioTracks = try await asset.loadTracks(withMediaType: .audio)
-            logger.debug("🔊 Found \(audioTracks.count) audio track(s)")
-            
-            if !audioTracks.isEmpty {
-                compositionAudioTrack = composition.addMutableTrack(
-                    withMediaType: .audio,
-                    preferredTrackID: kCMPersistentTrackID_Invalid
-                )
-                logger.debug("✅ Created composition audio track")
-            } else {
-                logger.warning("⚠️ Audio requested but no audio tracks found")
-            }
-        } else {
-            logger.debug("🔇 Audio disabled for this preview")
+        if audioTrack != nil {
+            compositionAudioTrack = composition.addMutableTrack(
+                withMediaType: .audio,
+                preferredTrackID: kCMPersistentTrackID_Invalid
+            )
         }
-        
+
         // Insert segments
         var insertTime = CMTime.zero
-        let progressStep = 0.5 / Double(timestamps.count) // 0.2 to 0.7 range
-        
-        logger.debug("🔧 Starting to insert \(timestamps.count) segments...")
-        //   var filterStr: String = ""
-        // var filterstrP2: String = ""
+        let progressStep = 0.5 / Double(timestamps.count)
+
         for (index, timestamp) in timestamps.enumerated() {
-            // Check for cancellation
             if cancellationCheck() {
-                logger.warning("⚠️ Composition cancelled at segment \(index + 1)")
+                logger.warning("Composition cancelled at segment \(index + 1)")
                 throw PreviewError.cancelled
             }
-            
-            // Calculate time range
-            let startSeconds = CMTimeGetSeconds(timestamp.start)
-            let durationSeconds = CMTimeGetSeconds(timestamp.duration)
+
             let timeRange = CMTimeRange(start: timestamp.start, duration: timestamp.duration)
             let endTime = CMTimeAdd(timestamp.start, timestamp.duration)
-            logger.debug("📍 Segment \(index + 1): start=\(startSeconds)s, duration=\(durationSeconds)s, insertAt=\(CMTimeGetSeconds(insertTime))s")
-            /*    filterStr += "[0:v]trim=start="+startSeconds.description+":end="+endTime.seconds.description+",setpts=PTS-STARTPTS[v"+String(index+1)+"];[0:a]atrim=start="+startSeconds.description+":end="+endTime.seconds.description+",asetpts=PTS-STARTPTS[a"+String(index+1)+"];"
-             filterstrP2 += "[v\(index+1)][a\(index+1)]"*/
-            
+
             // Validate time range is within asset bounds
-            //     let endTime = CMTimeAdd(timestamp.start, timestamp.duration)
             if CMTimeCompare(endTime, assetDuration) > 0 {
                 let error = "Time range exceeds asset duration: \(CMTimeGetSeconds(endTime))s > \(assetDurationSeconds)s"
-                logger.error("❌ \(error)")
+                logger.error("\(error)")
                 throw PreviewError.compositionFailed(error, nil)
             }
-            
+
             do {
                 // Insert video segment
-                logger.debug("  📹 Inserting video segment...")
-                logger.debug("  - TimeRange: \(startSeconds)s, duration: \(durationSeconds)s")
-                logger.debug("  - InsertAt: \(CMTimeGetSeconds(insertTime))s")
-                
-                try compositionVideoTrack.insertTimeRange(
-                    timeRange,
-                    of: videoTrack,
-                    at: insertTime
-                )
-                logger.debug("  ✅ Video segment inserted")
-                
-                // Insert audio segment if available
-                if includeAudio, let compAudioTrack = compositionAudioTrack {
-                    logger.debug("  🔊 Inserting audio segment...")
-                    if let audioTrack = try await asset.loadTracks(withMediaType: .audio).first {
-                        try compAudioTrack.insertTimeRange(
-                            timeRange,
-                            of: audioTrack,
-                            at: insertTime
-                        )
-                        logger.debug("  ✅ Audio segment inserted")
-                    }
+                try compositionVideoTrack.insertTimeRange(timeRange, of: videoTrack, at: insertTime)
+
+                // Insert audio segment from pre-loaded track
+                if let srcAudio = audioTrack, let dstAudio = compositionAudioTrack {
+                    try dstAudio.insertTimeRange(timeRange, of: srcAudio, at: insertTime)
                 }
-                
-                // Apply time scaling if needed
+
+                // Apply time scaling on the COMPOSITION (scales all tracks atomically)
                 if playbackSpeed != 1.0 {
-                    logger.debug("  ⚡ Applying time scaling: \(playbackSpeed)x")
                     let scaledDuration = CMTime(
                         seconds: extractDuration / playbackSpeed,
                         preferredTimescale: 600
                     )
                     let scaleRange = CMTimeRange(start: insertTime, duration: timestamp.duration)
-                    
-                    logger.debug("    Scale range: start=\(CMTimeGetSeconds(scaleRange.start))s, duration=\(CMTimeGetSeconds(scaleRange.duration))s → \(CMTimeGetSeconds(scaledDuration))s")
-                    
-                    compositionVideoTrack.scaleTimeRange(scaleRange, toDuration: scaledDuration)
-                    
-                    if let compAudioTrack = compositionAudioTrack {
-                        compAudioTrack.scaleTimeRange(scaleRange, toDuration: scaledDuration)
-                    }
-                    
+                    composition.scaleTimeRange(scaleRange, toDuration: scaledDuration)
                     insertTime = CMTimeAdd(insertTime, scaledDuration)
-                    logger.debug("  ✅ Time scaling applied, new insertTime: \(CMTimeGetSeconds(insertTime))s")
                 } else {
                     insertTime = CMTimeAdd(insertTime, timestamp.duration)
                 }
-                
-                // Report progress
+
                 let progress = 0.2 + (progressStep * Double(index + 1))
-                progressHandler(
-                    progress,
-                    .composing,
-                    nil,
-                    "Composing segment \(index + 1)/\(timestamps.count)"
-                )
-                
+                progressHandler(progress, .composing, nil, "Composing segment \(index + 1)/\(timestamps.count)")
+
             } catch let error as NSError {
-                let errorDetails = """
-                ❌ Failed to insert segment \(index + 1)/\(timestamps.count)
-                   Time range: \(startSeconds)s - \(startSeconds + durationSeconds)s (duration: \(durationSeconds)s)
-                   Insert at: \(CMTimeGetSeconds(insertTime))s
-                   Error domain: \(error.domain)
-                   Error code: \(error.code)
-                   Error description: \(error.localizedDescription)
-                   User info: \(error.userInfo)
-                """
-                logger.error("\(errorDetails)")
+                logger.error("Failed to insert segment \(index + 1)/\(timestamps.count): \(error.localizedDescription)")
                 throw PreviewError.compositionFailed(
                     "Segment \(index + 1): \(error.localizedDescription)",
                     error
                 )
             }
         }
-        //      filterstrP2 += "concat=n=\(timestamps.count):v=1:a=1[outv][outa]"
+
         let finalDuration = CMTimeGetSeconds(insertTime)
-        logger.info("✅ All segments inserted successfully. Final composition duration: \(finalDuration)s")
-        //    print(filterStr)
-        //  print(filterstrP2)
+        logger.info("All segments inserted. Final composition duration: \(finalDuration)s")
+
+        // Validate segments on composition tracks
+        if let videoSegments = compositionVideoTrack.segments {
+            do {
+                try compositionVideoTrack.validateSegments(videoSegments)
+            } catch {
+                logger.warning("Video track segments failed validation: \(error.localizedDescription)")
+            }
+        }
+        if let compAudioTrack = compositionAudioTrack, let audioSegments = compAudioTrack.segments {
+            do {
+                try compAudioTrack.validateSegments(audioSegments)
+            } catch {
+                logger.warning("Audio track segments failed validation: \(error.localizedDescription)")
+            }
+        }
+
         // Create audio mix if we have audio
         var audioMix: AVMutableAudioMix?
         if let compAudioTrack = compositionAudioTrack {
             let params = AVMutableAudioMixInputParameters(track: compAudioTrack)
             params.trackID = compAudioTrack.trackID
-            
             let mix = AVMutableAudioMix()
             mix.inputParameters = [params]
             audioMix = mix
         }
-        
+
         return (composition, audioMix)
     }
     
@@ -926,7 +875,7 @@ struct PreviewGenerationLogic {
         @unknown default: return "unknown(\(status.rawValue))"
         }
     }
-    
+    @MainActor
     private static func exportComposition2(
         composition: AVMutableComposition,
         audioMix: AVMutableAudioMix?,
@@ -1035,8 +984,9 @@ struct PreviewGenerationLogic {
         logger.info("✅ Export session created successfully")
         exportSession.outputURL = outputURL
         exportSession.outputFileType = config.format.avFileType
-        exportSession.audioMix = audioMix
-
+  //      exportSession.audioMix = audioMix
+        exportSession.allowsParallelizedExport = true
+        exportSession.shouldOptimizeForNetworkUse = true
         logger.info("🎬 Starting export...")
 
         // Initial progress

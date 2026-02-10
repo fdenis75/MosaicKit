@@ -7,9 +7,13 @@
       "Bash(git add:*)",
       "Bash(git commit:*)",
       "Bash(git push:*)",
-      "Bash(git checkout:*)"
+      "Bash(git checkout:*)",
+      "mcp__apple-docs__choose_technology",
+      "mcp__apple-docs__get_documentation",
+      "mcp__apple-docs__search_symbols"
     ],
     "deny": [],
     "ask": []
-  }
+  },
+  "disableAllHooks": true
 }
