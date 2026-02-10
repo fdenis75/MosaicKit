@@ -7,10 +7,13 @@
 
 import Foundation
 import AVFoundation
+import OSLog
 
 /// Configuration for video preview generation
 @available(macOS 26, iOS 26, *)
 public struct PreviewConfiguration: Codable, Sendable, Hashable {
+
+    private static let logger = Logger(subsystem: "com.mosaickit", category: "PreviewConfiguration")
 
     // MARK: - Properties
 
@@ -33,7 +36,18 @@ public struct PreviewConfiguration: Codable, Sendable, Hashable {
     public var fullPathInName: Bool
 
     /// Compression quality (0.0 - 1.0, where 1.0 is highest quality)
+    /// Used by the SJSAssetExportSession export path to determine codec and bitrate.
     public var compressionQuality: Double
+
+    /// When true, uses AVAssetExportSession (Apple's native exporter) instead of SJSAssetExportSession.
+    /// The native exporter uses preset-based quality control via ``exportPresetName``.
+    public var useNativeExport: Bool
+
+    /// The AVAssetExportSession preset to use when ``useNativeExport`` is true.
+    /// If nil, a preset is automatically selected based on ``compressionQuality`` via ``VideoFormat/exportPreset(quality:)``.
+    /// Common presets: AVAssetExportPresetHighestQuality, AVAssetExportPresetHEVC1920x1080,
+    /// AVAssetExportPreset1920x1080, AVAssetExportPresetMediumQuality, etc.
+    public var exportPresetName: String?
 
     // MARK: - Initialization
 
@@ -44,7 +58,9 @@ public struct PreviewConfiguration: Codable, Sendable, Hashable {
         includeAudio: Bool = true,
         outputDirectory: URL? = nil,
         fullPathInName: Bool = false,
-        compressionQuality: Double = 0.8
+        compressionQuality: Double = 0.8,
+        useNativeExport: Bool = true,
+        exportPresetName: String? = nil
     ) {
         self.targetDuration = targetDuration
         self.density = density
@@ -52,7 +68,30 @@ public struct PreviewConfiguration: Codable, Sendable, Hashable {
         self.includeAudio = includeAudio
         self.outputDirectory = outputDirectory
         self.fullPathInName = fullPathInName
-        self.compressionQuality = compressionQuality
+        self.compressionQuality = min(max(compressionQuality, 0.0), 1.0)
+        self.useNativeExport = useNativeExport
+        self.exportPresetName = exportPresetName
+    }
+
+    /// The effective export preset: explicit ``exportPresetName`` if set, otherwise derived from quality.
+    public var effectiveExportPreset: String {
+        exportPresetName ?? format.exportPreset(quality: compressionQuality)
+    }
+
+    // MARK: - Codable (backward-compatible decoding)
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        targetDuration = try container.decode(TimeInterval.self, forKey: .targetDuration)
+        density = try container.decode(DensityConfig.self, forKey: .density)
+        format = try container.decode(VideoFormat.self, forKey: .format)
+        includeAudio = try container.decode(Bool.self, forKey: .includeAudio)
+        outputDirectory = try container.decodeIfPresent(URL.self, forKey: .outputDirectory)
+        fullPathInName = try container.decode(Bool.self, forKey: .fullPathInName)
+        compressionQuality = min(max(try container.decode(Double.self, forKey: .compressionQuality), 0.0), 1.0)
+        // New fields with backward-compatible defaults
+        useNativeExport = try container.decodeIfPresent(Bool.self, forKey: .useNativeExport) ?? true
+        exportPresetName = try container.decodeIfPresent(String.self, forKey: .exportPresetName)
     }
 
     // MARK: - Extract Calculation
@@ -95,13 +134,13 @@ public struct PreviewConfiguration: Codable, Sendable, Hashable {
     public func extractCount(forVideoDuration videoDuration: TimeInterval) -> Int {
         let durationAdjustment = ((videoDuration > 1800.00) ? 8.0 : 4.0) * log(videoDuration)
         let totalCount = Double(baseExtractCount) + durationAdjustment
-        print("extraCount(forVideoDuration:) -> \(totalCount)")
+        Self.logger.debug("extractCount(forVideoDuration:) -> \(totalCount)")
         return max(1, Int(totalCount.rounded()))
     }
     public static func extractCountExt(forVideoDuration videoDuration: TimeInterval, density: String, targetDuration: TimeInterval) -> Int {
         let durationAdjustment = ((videoDuration > 1800.00) ? 8.0 : 4.0) * log(videoDuration)
         let totalCount = Double(self.exterEtractCount(density: density)) + durationAdjustment
-        print("extraCount(forVideoDuration:) -> \(totalCount)")
+        Self.logger.debug("extractCount(forVideoDuration:) -> \(totalCount)")
         return max(1, Int(totalCount.rounded()))
     }
     
@@ -194,6 +233,8 @@ public struct PreviewConfiguration: Codable, Sendable, Hashable {
         hasher.combine(format)
         hasher.combine(includeAudio)
         hasher.combine(compressionQuality)
+        hasher.combine(useNativeExport)
+        hasher.combine(exportPresetName)
     }
 }
 

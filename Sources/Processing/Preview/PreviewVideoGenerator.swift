@@ -263,7 +263,7 @@ struct PreviewGenerationLogic {
         if cancellationCheck() { throw PreviewError.cancelled }
         
         // Compose
-        progressHandler(0.2, .extracting, nil, "Extracting \(timestamps.count) segments...")
+        progressHandler(0.2, .composing, nil, "Composing \(timestamps.count) segments...")
         let videoComposition = try await composeVideoSegments(
             asset: asset,
             timestamps: timestamps,
@@ -277,16 +277,27 @@ struct PreviewGenerationLogic {
         
         if cancellationCheck() { throw PreviewError.cancelled }
         
-        // Export
+        // Export — route based on configuration
         progressHandler(0.3, .encoding, nil, "Encoding preview video...")
-        return try await exportComposition2(
-            composition: videoComposition.composition,
-            audioMix: videoComposition.audioMix,
-            config: config,
-            video: video,
-            progressHandler: progressHandler,
-            cancellationCheck: cancellationCheck
-        )
+        if config.useNativeExport {
+            return try await exportWithNativeSession(
+                composition: videoComposition.composition,
+                audioMix: videoComposition.audioMix,
+                config: config,
+                video: video,
+                progressHandler: progressHandler,
+                cancellationCheck: cancellationCheck
+            )
+        } else {
+            return try await exportWithSJSSession(
+                composition: videoComposition.composition,
+                audioMix: videoComposition.audioMix,
+                config: config,
+                video: video,
+                progressHandler: progressHandler,
+                cancellationCheck: cancellationCheck
+            )
+        }
     }
     
     /// Generate a preview composition without exporting (for video player playback)
@@ -329,7 +340,7 @@ struct PreviewGenerationLogic {
         if cancellationCheck() { throw PreviewError.cancelled }
         
         // Compose
-        progressHandler(0.2, .extracting, nil, "Extracting \(timestamps.count) segments...")
+        progressHandler(0.2, .composing, nil, "Composing \(timestamps.count) segments...")
         let videoComposition = try await composeVideoSegments(
             asset: asset,
             timestamps: timestamps,
@@ -462,9 +473,24 @@ struct PreviewGenerationLogic {
         
         // Sort by start time
         timestamps.sort { CMTimeCompare($0.start, $1.start) == -1 }
-        
-        logger.info("Calculated \(timestamps.count) extract timestamps")
-        return timestamps
+
+        // Deduplicate timestamps that were clamped to the same start time
+        var deduplicated: [(start: CMTime, duration: CMTime)] = []
+        for ts in timestamps {
+            if let last = deduplicated.last,
+               abs(CMTimeGetSeconds(ts.start) - CMTimeGetSeconds(last.start)) < 0.01 {
+                // Skip duplicate — timestamps clamped to maxStartTime
+                continue
+            }
+            deduplicated.append(ts)
+        }
+
+        if deduplicated.count < timestamps.count {
+            logger.info("Deduplicated timestamps: \(timestamps.count) -> \(deduplicated.count)")
+        }
+
+        logger.info("Calculated \(deduplicated.count) extract timestamps")
+        return deduplicated
     }
     
     private static func composeVideoSegments(
@@ -519,6 +545,7 @@ struct PreviewGenerationLogic {
         // Insert segments
         var insertTime = CMTime.zero
         let progressStep = 0.5 / Double(timestamps.count)
+        var skippedSegments = 0
 
         for (index, timestamp) in timestamps.enumerated() {
             if cancellationCheck() {
@@ -529,11 +556,11 @@ struct PreviewGenerationLogic {
             let timeRange = CMTimeRange(start: timestamp.start, duration: timestamp.duration)
             let endTime = CMTimeAdd(timestamp.start, timestamp.duration)
 
-            // Validate time range is within asset bounds
+            // Validate time range is within asset bounds — skip if out of range
             if CMTimeCompare(endTime, assetDuration) > 0 {
-                let error = "Time range exceeds asset duration: \(CMTimeGetSeconds(endTime))s > \(assetDurationSeconds)s"
-                logger.error("\(error)")
-                throw PreviewError.compositionFailed(error, nil)
+                logger.warning("Segment \(index + 1) exceeds asset duration (\(CMTimeGetSeconds(endTime))s > \(assetDurationSeconds)s), skipping")
+                skippedSegments += 1
+                continue
             }
 
             do {
@@ -562,12 +589,18 @@ struct PreviewGenerationLogic {
                 progressHandler(progress, .composing, nil, "Composing segment \(index + 1)/\(timestamps.count)")
 
             } catch let error as NSError {
-                logger.error("Failed to insert segment \(index + 1)/\(timestamps.count): \(error.localizedDescription)")
-                throw PreviewError.compositionFailed(
-                    "Segment \(index + 1): \(error.localizedDescription)",
-                    error
-                )
+                logger.warning("Failed to insert segment \(index + 1)/\(timestamps.count): \(error.localizedDescription), skipping")
+                skippedSegments += 1
             }
+        }
+
+        // Ensure we have at least some segments
+        if skippedSegments > 0 {
+            logger.info("Skipped \(skippedSegments)/\(timestamps.count) segments")
+        }
+        let insertedCount = timestamps.count - skippedSegments
+        guard insertedCount > 0 else {
+            throw PreviewError.compositionFailed("All \(timestamps.count) segments failed to insert", nil)
         }
 
         let finalDuration = CMTimeGetSeconds(insertTime)
@@ -602,7 +635,8 @@ struct PreviewGenerationLogic {
         return (composition, audioMix)
     }
     
-    private static func exportComposition(
+    /// Export using SJSAssetExportSession (custom exporter with fine-grained codec/bitrate control)
+    private static func exportWithSJSSession(
         composition: AVMutableComposition,
         audioMix: AVMutableAudioMix?,
         config: PreviewConfiguration,
@@ -610,63 +644,35 @@ struct PreviewGenerationLogic {
         progressHandler: @escaping @Sendable (Double, PreviewGenerationStatus, URL?, String?) -> Void,
         cancellationCheck: @escaping @Sendable () -> Bool
     ) async throws -> URL {
-        logger.info("🎞️ Starting export for \(video.title)")
-        
-        // Log composition details
-        let compositionDuration = CMTimeGetSeconds(composition.duration)
-        let videoTracks = composition.tracks(withMediaType: .video).count
-        let audioTracks = composition.tracks(withMediaType: .audio).count
-        logger.debug("📊 Composition details:")
-        logger.debug("  - Duration: \(compositionDuration)s")
-        logger.debug("  - Video tracks: \(videoTracks)")
-        logger.debug("  - Audio tracks: \(audioTracks)")
-        
+        logger.info("Starting SJS export for \(video.title)")
+
         // Get original video dimensions from composition
         guard let compositionVideoTrack = composition.tracks(withMediaType: .video).first else {
-            logger.error("❌ No video tracks in composition")
             throw PreviewError.noVideoTracks
         }
-        
+
         let naturalSize = try await compositionVideoTrack.load(.naturalSize)
         let originalWidth = Int(naturalSize.width)
         let originalHeight = Int(naturalSize.height)
-        logger.info("📐 Original dimensions: \(originalWidth)x\(originalHeight)")
-        // Create output directory
-        let outputDirectory = config.generateOutputDirectory(for: video)
-        logger.info("📁 Output directory: \(outputDirectory.path)")
-        
-        if outputDirectory.startAccessingSecurityScopedResource() {
-            outputDirectory.stopAccessingSecurityScopedResource()
-        }
-        do {
-            try FileManager.default.createDirectory(
-                at: outputDirectory,
-                withIntermediateDirectories: true,
-                attributes: nil
-            )
-            logger.info("✅ Output directory created/verified")
-        } catch {
-            logger.error("❌ Failed to create output directory: \(error.localizedDescription)")
-            throw PreviewError.outputDirectoryCreationFailed(outputDirectory, error)
-        }
-        
-        // Generate output URL
-        let filename = config.generateFilename(for: video)
-        let outputURL = outputDirectory.appendingPathComponent(filename)
-        logger.info("📄 Output file: \(filename)")
-        logger.info("📍 Full path: \(outputURL.path)")
-        
+
+        // Prepare output URL
+        let outputURL = try prepareOutputURL(config: config, video: video)
+
         let didStartAccessing = outputURL.startAccessingSecurityScopedResource()
-        
+        defer {
+            if didStartAccessing {
+                outputURL.stopAccessingSecurityScopedResource()
+            }
+        }
+
         // Remove existing file if present
         if FileManager.default.fileExists(atPath: outputURL.path) {
-            logger.info("🗑️ Removing existing file at output path")
             try? FileManager.default.removeItem(at: outputURL)
         }
-        
+
         // Create export session with SJSAssetExportSession
         let exporter = ExportSession()
-        
+
         // Determine video settings based on quality, using original dimensions
         let (videoConfig, audioBitrate) = videoSettings(
             for: config.compressionQuality,
@@ -674,48 +680,24 @@ struct PreviewGenerationLogic {
             width: originalWidth,
             height: originalHeight
         )
-        
-        logger.info("⚙️ Export configuration:")
-        logger.info("  - Format: \(config.format.rawValue)")
-        logger.info("  - Quality: \(config.compressionQuality)")
-        logger.info("  - Audio bitrate: \(audioBitrate) bps")
-        logger.info("  - Audio mix: \(audioMix != nil ? "enabled" : "disabled")")
-        
-        logger.info("🎬 Starting export with progress tracking...")
-        
+
+        logger.info("SJS export: format=\(config.format.rawValue), quality=\(config.compressionQuality), audioBitrate=\(audioBitrate)")
+
         // Start progress monitoring task
         let progressTask = Task {
             for await progress in exporter.progressStream {
-                // Check for cancellation
-                if cancellationCheck() {
-                    break
-                }
-                
-                // Map export progress from 0.7-1.0 range
-                // Export progress goes from 0-1, we map it to 0.7-1.0
+                if cancellationCheck() { break }
                 let progressValue = Double(progress)
                 let exportProgress = 0.3 + (progressValue * 0.7)
-                progressHandler(
-                    exportProgress,
-                    .encoding,
-                    nil,
-                    "Encoding: \(Int(progressValue * 100))%"
-                )
-                //    logger.debug("Export progress: \(Int(progressValue * 100))%")
-                if progressValue == 1.0 {
-                    return true
-                }
+                progressHandler(exportProgress, .encoding, nil, "Encoding: \(Int(progressValue * 100))%")
+                if progressValue >= 1.0 { return }
             }
-            return true
         }
-        
+
         // Perform the export
         do {
-            // Note: AVMutableComposition is not Sendable in Swift 6, but it's safe to use here
-            // because it's created locally in this actor and won't be accessed concurrently
-            // We use nonisolated(unsafe) to bypass the Sendable check
             nonisolated(unsafe) let compositionAsset = composition as AVAsset
-            
+
             try await exporter.export(
                 asset: compositionAsset,
                 audio: .format(.aac),
@@ -723,71 +705,60 @@ struct PreviewGenerationLogic {
                 to: outputURL,
                 as: config.format.avFileType
             )
-            
-            // Wait for progress task to complete
-            _ = await progressTask.value
-            
-            // Check for cancellation
+
+            _ = await { progressTask.cancel() }()
+
             if cancellationCheck() {
+                try? FileManager.default.removeItem(at: outputURL)
                 throw PreviewError.cancelled
             }
-            
-            logger.info("🎬 Export completed successfully")
-            
-            // Report final completion status
-            progressHandler(
-                0.9,
-                .saving,
-                nil,
-                "Export complete"
-            )
-            
+
             // Verify output file exists
-            if FileManager.default.fileExists(atPath: outputURL.path) {
-                let fileSize = (try? FileManager.default.attributesOfItem(atPath: outputURL.path)[.size] as? Int64) ?? 0
-                let fileSizeMB = Double(fileSize) / 1_048_576.0
-                logger.info("  - Output: \(outputURL.lastPathComponent)")
-                logger.info("  - Size: \(String(format: "%.2f", fileSizeMB)) MB")
-            } else {
-                progressHandler(
-                    1.0,
-                    .failed,
-                    nil,
-                    "Could not saved"
-                )
-                logger.error("❌ Export completed but file does not exist at: \(outputURL.path)")
+            guard FileManager.default.fileExists(atPath: outputURL.path) else {
+                throw PreviewError.encodingFailed("Export completed but output file not found", nil)
             }
-            
-            if didStartAccessing {
-                outputURL.stopAccessingSecurityScopedResource()
-            }
-            progressHandler(
-                1.0,
-                .completed,
-                outputURL,
-                "Export saved"
-            )
+
+            let fileSize = (try? FileManager.default.attributesOfItem(atPath: outputURL.path)[.size] as? Int64) ?? 0
+            logger.info("SJS export completed: \(outputURL.lastPathComponent) (\(String(format: "%.2f", Double(fileSize) / 1_048_576.0)) MB)")
+
+            progressHandler(1.0, .completed, outputURL, "Export saved")
             return outputURL
-            
+
         } catch {
-            // Cancel progress monitoring
             progressTask.cancel()
-            
-            logger.error("❌ Export failed with error: \(error.localizedDescription)")
-            
-            if didStartAccessing {
-                outputURL.stopAccessingSecurityScopedResource()
-            }
-            progressHandler(
-                1.0,
-                .failed,
-                nil,
-                error.localizedDescription
-            )
+            // Clean up partial output file on failure
+            try? FileManager.default.removeItem(at: outputURL)
+            logger.error("SJS export failed: \(error.localizedDescription)")
+            progressHandler(1.0, .failed, nil, error.localizedDescription)
             throw PreviewError.encodingFailed("Export failed", error)
         }
     }
     
+    /// Prepare the output URL: create the output directory and return the full file URL
+    private static func prepareOutputURL(config: PreviewConfiguration, video: VideoInput) throws -> URL {
+        let outputDirectory = config.generateOutputDirectory(for: video)
+
+        let didStartAccessingDir = outputDirectory.startAccessingSecurityScopedResource()
+        defer {
+            if didStartAccessingDir {
+                outputDirectory.stopAccessingSecurityScopedResource()
+            }
+        }
+
+        do {
+            try FileManager.default.createDirectory(
+                at: outputDirectory,
+                withIntermediateDirectories: true,
+                attributes: nil
+            )
+        } catch {
+            throw PreviewError.outputDirectoryCreationFailed(outputDirectory, error)
+        }
+
+        let filename = config.generateFilename(for: video)
+        return outputDirectory.appendingPathComponent(filename)
+    }
+
     /// Determine video and audio settings based on quality level and original dimensions
     private static func videoSettings(
         for quality: Double,
@@ -875,8 +846,9 @@ struct PreviewGenerationLogic {
         @unknown default: return "unknown(\(status.rawValue))"
         }
     }
+    /// Export using AVAssetExportSession (Apple's native preset-based exporter)
     @MainActor
-    private static func exportComposition2(
+    private static func exportWithNativeSession(
         composition: AVMutableComposition,
         audioMix: AVMutableAudioMix?,
         config: PreviewConfiguration,
@@ -884,59 +856,20 @@ struct PreviewGenerationLogic {
         progressHandler: @escaping @Sendable (Double, PreviewGenerationStatus, URL?, String?) -> Void,
         cancellationCheck: @escaping @Sendable () -> Bool
     ) async throws -> URL {
-        logger.info("🎞️ Starting export for \(video.title)")
+        logger.info("Starting native export for \(video.title)")
 
-        // ✅ FIX 1: Configure audio session (iOS only)
         #if os(iOS)
         do {
             try AVAudioSession.sharedInstance().setCategory(.playback)
             try AVAudioSession.sharedInstance().setActive(true)
-            logger.debug("✅ Audio session configured for export")
         } catch {
-            logger.warning("⚠️ Failed to configure audio session: \(error.localizedDescription)")
+            logger.warning("Failed to configure audio session: \(error.localizedDescription)")
         }
         #endif
 
-        // Log composition details
-        let compositionDuration = CMTimeGetSeconds(composition.duration)
-        let videoTracks = composition.tracks(withMediaType: .video).count
-        let audioTracks = composition.tracks(withMediaType: .audio).count
-        logger.info("📊 Composition details:")
-        logger.info("  - Duration: \(compositionDuration)s")
-        logger.info("  - Video tracks: \(videoTracks)")
-        logger.info("  - Audio tracks: \(audioTracks)")
+        // Prepare output URL
+        let outputURL = try prepareOutputURL(config: config, video: video)
 
-        // Create output directory
-        let outputDirectory = config.generateOutputDirectory(for: video)
-        logger.info("📁 Output directory: \(outputDirectory.path)")
-
-        // ✅ FIX 2: Proper security-scoped resource handling with defer
-        let didStartAccessingDir = outputDirectory.startAccessingSecurityScopedResource()
-        defer {
-            if didStartAccessingDir {
-                outputDirectory.stopAccessingSecurityScopedResource()
-            }
-        }
-
-        do {
-            try FileManager.default.createDirectory(
-                at: outputDirectory,
-                withIntermediateDirectories: true,
-                attributes: nil
-            )
-            logger.info("✅ Output directory created/verified")
-        } catch {
-            logger.error("❌ Failed to create output directory: \(error.localizedDescription)")
-            throw PreviewError.outputDirectoryCreationFailed(outputDirectory, error)
-        }
-
-        // Generate output URL
-        let filename = config.generateFilename(for: video)
-        let outputURL = outputDirectory.appendingPathComponent(filename)
-        logger.info("📄 Output file: \(filename)")
-        logger.info("📍 Full path: \(outputURL.path)")
-
-        // ✅ FIX 3: Proper security-scoped resource handling for output file
         let didStartAccessingFile = outputURL.startAccessingSecurityScopedResource()
         defer {
             if didStartAccessingFile {
@@ -946,190 +879,103 @@ struct PreviewGenerationLogic {
 
         // Remove existing file if present
         if FileManager.default.fileExists(atPath: outputURL.path) {
-            logger.info("🗑️ Removing existing file at output path")
             try? FileManager.default.removeItem(at: outputURL)
         }
 
-        // Create export session
-        let preset = config.format.exportPreset(quality: config.compressionQuality)
-        logger.info("⚙️ Export configuration:")
-        logger.info("  - Preset: \(preset)")
-        logger.info("  - Format: \(config.format.rawValue)")
-        logger.info("  - File type: \(config.format.avFileType.rawValue)")
-        logger.info("  - Quality: \(config.compressionQuality)")
-        logger.info("  - Audio mix: \(audioMix != nil ? "enabled" : "disabled")")
+        // Use the effective preset (explicit or derived from quality)
+        let preset = config.effectiveExportPreset
+        logger.info("Native export: preset=\(preset), format=\(config.format.rawValue), quality=\(config.compressionQuality)")
 
-        // Check compatible presets for this composition
+        // Check compatible presets
         let compatiblePresets = AVAssetExportSession.exportPresets(compatibleWith: composition)
-        logger.info("✅ Compatible presets for this composition: \(compatiblePresets.count)")
-        logger.debug("  Presets: \(compatiblePresets.joined(separator: ", "))")
-
         if !compatiblePresets.contains(preset) {
-            logger.warning("⚠️ Selected preset '\(preset)' is NOT in compatible presets list")
-            logger.info("  Attempting anyway as AVFoundation may still support it...")
-        } else {
-            logger.info("✅ Selected preset '\(preset)' is compatible")
+            logger.warning("Preset '\(preset)' not in compatible presets, attempting anyway")
         }
 
         guard let exportSession = AVAssetExportSession(
             asset: composition,
             presetName: preset
         ) else {
-            logger.error("❌ Failed to create AVAssetExportSession")
-            logger.error("  - Preset: \(preset)")
-            logger.error("  - Composition duration: \(compositionDuration)s")
-            logger.error("  - Composition tracks: \(videoTracks) video, \(audioTracks) audio")
             throw PreviewError.encodingFailed("Failed to create export session with preset '\(preset)'", nil)
         }
-        logger.info("✅ Export session created successfully")
+
         exportSession.outputURL = outputURL
         exportSession.outputFileType = config.format.avFileType
-  //      exportSession.audioMix = audioMix
         exportSession.allowsParallelizedExport = true
         exportSession.shouldOptimizeForNetworkUse = true
-        logger.info("🎬 Starting export...")
 
-        // Initial progress
-        progressHandler(0, .queued, nil, "Waiting")
-
-        // ✅ FIX 4: Proper progress monitoring with cleanup
+        // Progress monitoring
         let progressMonitor = Task {
             for await state in exportSession.states(updateInterval: 5) {
-                // Check for task cancellation
-                if Task.isCancelled {
-                    logger.debug("Progress monitor cancelled")
-                    return
-                }
-
+                if Task.isCancelled { return }
                 switch state {
                 case .pending:
                     progressHandler(0, .queued, nil, "Pending")
-
                 case .waiting:
                     progressHandler(0, .queued, nil, "Waiting")
-
                 case let .exporting(progress):
                     let progressValue = progress.fractionCompleted
-                    let exportProgress = 0.3 + (progressValue * 0.7)
-                    progressHandler(
-                        exportProgress,
-                        .encoding,
-                        nil,
-                        "Encoding: \(Int(progressValue * 100))%"
-                    )
-
-                    // ✅ FIX 5: Exit when export completes (use return, not break)
-                    if progressValue >= 0.999 {
-                        logger.debug("Progress reached 100%, exiting monitor")
-                        return
-                    }
-
+                    progressHandler(0.3 + (progressValue * 0.7), .encoding, nil, "Encoding: \(Int(progressValue * 100))%")
+                    if progressValue >= 0.999 { return }
                 @unknown default:
                     break
                 }
             }
         }
+        defer { progressMonitor.cancel() }
 
-        // Ensure progress monitor is cleaned up
-        defer {
-            progressMonitor.cancel()
-        }
+        if cancellationCheck() { throw PreviewError.cancelled }
 
-        // ✅ FIX 6: Check for cancellation before starting export
-        if cancellationCheck() {
-            logger.warning("Export cancelled before starting")
-            throw PreviewError.cancelled
-        }
-
-        // ✅ FIX 7: Cancellation monitoring during export
+        // Cancellation monitoring
         let cancellationMonitor = Task {
             while !Task.isCancelled {
                 if cancellationCheck() {
-                    logger.warning("Cancellation requested, cancelling export")
                     exportSession.cancelExport()
                     return
                 }
-                // Check every 100ms
                 try? await Task.sleep(nanoseconds: 100_000_000)
             }
         }
+        defer { cancellationMonitor.cancel() }
 
-        // Ensure cancellation monitor is cleaned up
-        defer {
-            cancellationMonitor.cancel()
-        }
-
-        // Perform the export with error handling
+        // Perform the export
         do {
             try await exportSession.export(to: outputURL, as: config.format.avFileType)
         } catch {
-            logger.error("❌ Export threw error: \(error.localizedDescription)")
-
-            // Check if it was a cancellation
             if cancellationCheck() {
+                try? FileManager.default.removeItem(at: outputURL)
                 throw PreviewError.cancelled
             }
-
+            try? FileManager.default.removeItem(at: outputURL)
             throw PreviewError.encodingFailed("Export failed", error)
         }
 
-        // Capture status and error to avoid data races
         let finalStatus = exportSession.status
         let finalError = exportSession.error
 
-        logger.info("🎬 Export completed, checking status...")
-        logger.info("  - Status: \(finalStatus.rawValue) (\(self.statusDescription(finalStatus)))")
-
-        // ✅ FIX 8: Check for cancellation after export
         if cancellationCheck() {
-            logger.warning("Export was cancelled")
+            try? FileManager.default.removeItem(at: outputURL)
             throw PreviewError.cancelled
         }
 
-        // Check for errors
         if let error = finalError {
-            let nsError = error as NSError
-            let errorDetails = """
-                   ❌ Export failed with error:
-                      Status: \(finalStatus.rawValue) (\(self.statusDescription(finalStatus)))
-                      Error domain: \(nsError.domain)
-                      Error code: \(nsError.code)
-                      Error description: \(nsError.localizedDescription)
-                      User info: \(nsError.userInfo)
-                      Output URL: \(outputURL.path)
-                      Preset: \(preset)
-                      File type: \(config.format.avFileType.rawValue)
-                   """
-            logger.error("\(errorDetails)")
+            try? FileManager.default.removeItem(at: outputURL)
             throw PreviewError.encodingFailed("Export failed", error)
         }
 
         guard finalStatus == .completed else {
-            let errorDetails = """
-                   ❌ Export finished with non-completed status:
-                      Status: \(finalStatus.rawValue) (\(self.statusDescription(finalStatus)))
-                      Output URL: \(outputURL.path)
-                      Preset: \(preset)
-                      File type: \(config.format.avFileType.rawValue)
-                   """
-            logger.error("\(errorDetails)")
+            try? FileManager.default.removeItem(at: outputURL)
             throw PreviewError.encodingFailed(
-                "Export finished with status: \(self.statusDescription(finalStatus))",
-                nil
+                "Export finished with status: \(self.statusDescription(finalStatus))", nil
             )
         }
 
-        // Verify output file exists
-        if FileManager.default.fileExists(atPath: outputURL.path) {
-            let fileSize = (try? FileManager.default.attributesOfItem(atPath: outputURL.path)[.size] as? Int64) ?? 0
-            let fileSizeMB = Double(fileSize) / 1_048_576.0
-            logger.info("✅ Export completed successfully")
-            logger.info("  - Output: \(outputURL.lastPathComponent)")
-            logger.info("  - Size: \(String(format: "%.2f", fileSizeMB)) MB")
-        } else {
-            logger.error("❌ Export reported success but file does not exist at: \(outputURL.path)")
+        guard FileManager.default.fileExists(atPath: outputURL.path) else {
             throw PreviewError.encodingFailed("Export completed but output file not found", nil)
         }
+
+        let fileSize = (try? FileManager.default.attributesOfItem(atPath: outputURL.path)[.size] as? Int64) ?? 0
+        logger.info("Native export completed: \(outputURL.lastPathComponent) (\(String(format: "%.2f", Double(fileSize) / 1_048_576.0)) MB)")
 
         return outputURL
     }
