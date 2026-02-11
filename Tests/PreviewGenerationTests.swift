@@ -27,7 +27,7 @@ struct PreviewGenerationTests {
      
         
         
-        videoURL = URL(fileURLWithPath: "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/Rollercoaster666MYM.mp4")
+        videoURL = URL(fileURLWithPath: "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/nata.mp4")
         guard videoURL.startAccessingSecurityScopedResource() else {
          throw fatalError()
         }
@@ -36,7 +36,7 @@ struct PreviewGenerationTests {
         
         if videoURL.startAccessingSecurityScopedResource() {
             // Copy to temp directory
-      /*      let tempVideoURL = FileManager.default.temporaryDirectory.appendingPathComponent("test_video_copy.mp4")
+      /*            let tempVideoURL = FileManager.default.temporaryDirectory.appendingPathComponent("test_video_copy.mp4")
             if FileManager.default.fileExists(atPath: tempVideoURL.path) {
                 try FileManager.default.removeItem(at: tempVideoURL)
             }
@@ -78,9 +78,13 @@ struct PreviewGenerationTests {
              throw fatalError()
             }
             
-                let durations: [TimeInterval] = [60]
-                let densities: [DensityConfig] = [.xxl]
-            let qualities: [Double] = [1, 0.9, 0.8, 0.7, 0.6, 0.5, 0.1]
+                let durations: [TimeInterval] = [30]
+            let densities: [DensityConfig] = [.m]
+            let usenativeTools: [Bool] = [false]
+            let nativePresets: [nativeExportPreset] = [nativeExportPreset.AVAssetExportPresetHEVC1920x1080]
+            let sjsPresets: [SjSExportPreset] = [SjSExportPreset.hevc , SjSExportPreset.h264_HighAutoLevel]
+            let sjsRes: [ExportMaxResolution] = ExportMaxResolution.allCases
+        //    let qualities: [Double] = [V]
                 //     let didStartAccessing = videoURL.startAccessingSecurityScopedResource()
                 
                 let videoInput = try await VideoInput(from: videoURL)
@@ -100,56 +104,173 @@ struct PreviewGenerationTests {
                 var successCount = 0
                 var failureCount = 0
                 
+                struct RunResult {
+                    let mode: String // "Native" or "SJS"
+                    let targetDuration: TimeInterval
+                    let density: DensityConfig
+                    let presetLabel: String
+                    let elapsed: TimeInterval
+                    let sizeMB: Double
+                    let actualDuration: Double
+                }
+                var results: [RunResult] = []
+                
+                var config: PreviewConfiguration?
                 for duration in durations {
                     for density in densities {
-                        for quality in qualities {
-                            print("\n--------------------------------------------------")
-                            print("test:🧪 Testing Configuration:")
-                            print("test:  - Target Duration: \(duration)s")
-                            print("test:  - Density: \(density.name)")
-                            print("test:  - Quality: \(quality)")
+                        for resolution in sjsRes {
                             
-                            let config = PreviewConfiguration(
-                                targetDuration: duration,
-                                density: density,
-                                format: .mp4,
-                                includeAudio: false,
-                                outputDirectory: outputDirectory,
-                                fullPathInName: false,
-                                compressionQuality: quality
-                            )
-                            do {
-                                let startTime = Date()
-                                
-                                let outputURL = try await coordinator.generatePreview(for: videoInput, config: config) { progress in
-                                    // Track progress if needed
-                                    print("Progress: \(progress.status.displayLabel) - \(Int(progress.progress * 100))%")
+                            for usenativeTool in usenativeTools {
+                                if usenativeTool {
+                                    for nativePreset in nativePresets {
+                                        config = PreviewConfiguration(
+                                            targetDuration: duration,
+                                            density: density,
+                                            format: .mp4,
+                                            includeAudio: true,
+                                            outputDirectory: outputDirectory,
+                                            fullPathInName: false,
+                                            useNativeExport: usenativeTool,
+                                            exportPresetName: nativePreset,
+                                            maxResolution: resolution
+                                        )
+                                        
+                                        print("\n--------------------------------------------------")
+                                        print("test:🧪 Testing Configuration:")
+                                        print("test:  - Target Duration: \(duration)s")
+                                        
+                                        // Ensure config is set before use
+                                        guard let config = config else {
+                                            Issue.record("Configuration was not initialized for duration=\(duration), density=\(density), useNative=\(usenativeTool)")
+                                            continue
+                                        }
+                                        
+                                        print(config.debugDescription)
+                                        
+                                        
+                                        
+                                        do {
+                                            let startTime = Date()
+                                            
+                                            let outputURL = try await coordinator.generatePreview(for: videoInput, config: config) { progress in
+                                                // Track progress if needed
+                                                //      sleep(5)
+                                                print("Progress: \(progress.status.displayLabel) - \(Int(progress.progress * 100))%")
+                                            }
+                                            
+                                            let elapsed = Date().timeIntervalSince(startTime)
+                                            
+                                            // Verify file exists and has size
+                                            let attributes = try FileManager.default.attributesOfItem(atPath: outputURL.path)
+                                            let fileSize = attributes[.size] as? Int64 ?? 0
+                                            let fileSizeMB = Double(fileSize) / 1_048_576.0
+                                            
+                                            print("test: ✅ Success!")
+                                            print("test:  - Output: \(outputURL.path)")
+                                            print("test:  - Time: \(String(format: "%.2f", elapsed))s")
+                                            print("test:  - Size: \(String(format: "%.2f", fileSizeMB)) MB")
+                                            
+                                            // Basic validation of the generated file
+                                            let asset = AVURLAsset(url: outputURL)
+                                            let actualCMTime = try await asset.load(.duration)
+                                            let actualSeconds = CMTimeGetSeconds(actualCMTime)
+                                            print("test:  - Actual Duration: \(actualSeconds)s")
+                                            
+                                            results.append(RunResult(
+                                                mode: "Native",
+                                                targetDuration: duration,
+                                                density: density,
+                                                presetLabel: nativePreset.rawValue,
+                                                elapsed: elapsed,
+                                                sizeMB: fileSizeMB,
+                                                actualDuration: actualSeconds
+                                            ))
+                                            
+                                            successCount += 1
+                                            
+                                        } catch {
+                                            print("❌ Failed: \(error.localizedDescription)")
+                                            failureCount += 1
+                                            // Don't fail the whole test, just log it, so we can see which combinations fail
+                                            // Issue.record("Generation failed for config: \(config)")
+                                        }
+                                    }
+                                } else
+                                {
+                                    for sjsPreset in sjsPresets {
+                                            config = PreviewConfiguration(
+                                                targetDuration: duration,
+                                                density: density,
+                                                format: .mp4,
+                                                includeAudio: true,
+                                                outputDirectory: outputDirectory,
+                                                fullPathInName: false,
+                                                useNativeExport: usenativeTool,
+                                                sjSExportPresetName: sjsPreset,
+                                                maxResolution: resolution
+                                            )
+                                            
+                                            print("\n--------------------------------------------------")
+                                            print("test:🧪 Testing Configuration:")
+                                            print("test:  - Target Duration: \(duration)s")
+                                            
+                                            // Ensure config is set before use
+                                            guard let config = config else {
+                                                Issue.record("Configuration was not initialized for duration=\(duration), density=\(density), useNative=\(usenativeTool)")
+                                                continue
+                                            }
+                                            
+                                            print(config.debugDescription)
+                                            
+                                            
+                                            
+                                            do {
+                                                let startTime = Date()
+                                                
+                                                let outputURL = try await coordinator.generatePreview(for: videoInput, config: config) { progress in
+                                                    // Track progress if needed
+                                                    //                                            sleep(5)
+                                                    print("Progress: \(progress.status.displayLabel) - \(Int(progress.progress * 100))%")
+                                                }
+                                                
+                                                let elapsed = Date().timeIntervalSince(startTime)
+                                                
+                                                // Verify file exists and has size
+                                                let attributes = try FileManager.default.attributesOfItem(atPath: outputURL.path)
+                                                let fileSize = attributes[.size] as? Int64 ?? 0
+                                                let fileSizeMB = Double(fileSize) / 1_048_576.0
+                                                
+                                                print("test: ✅ Success!")
+                                                print("test:  - Output: \(outputURL.path)")
+                                                print("test:  - Time: \(String(format: "%.2f", elapsed))s")
+                                                print("test:  - Size: \(String(format: "%.2f", fileSizeMB)) MB")
+                                                
+                                                let asset = AVURLAsset(url: outputURL)
+                                                let actualCMTime = try await asset.load(.duration)
+                                                let actualSeconds = CMTimeGetSeconds(actualCMTime)
+                                                print("test  - Actual Duration: \(actualSeconds)s")
+                                                
+                                                results.append(RunResult(
+                                                    mode: "SJS",
+                                                    targetDuration: duration,
+                                                    density: density,
+                                                    presetLabel: "\(sjsPreset.rawValue)-\(sjsRes)",
+                                                    elapsed: elapsed,
+                                                    sizeMB: fileSizeMB,
+                                                    actualDuration: actualSeconds
+                                                ))
+                                                
+                                                successCount += 1
+                                                
+                                            } catch {
+                                                print("❌ Failed: \(error.localizedDescription)")
+                                                failureCount += 1
+                                                // Don't fail the whole test, just log it, so we can see which combinations fail
+                                                // Issue.record("Generation failed for config: \(config)")
+                                            }
+                                        }
+                                    
                                 }
-                                
-                                let elapsed = Date().timeIntervalSince(startTime)
-                                
-                                // Verify file exists and has size
-                                let attributes = try FileManager.default.attributesOfItem(atPath: outputURL.path)
-                                let fileSize = attributes[.size] as? Int64 ?? 0
-                                let fileSizeMB = Double(fileSize) / 1_048_576.0
-                                
-                                print("test: ✅ Success!")
-                                print("test:  - Output: \(outputURL.path)")
-                                print("test:  - Time: \(String(format: "%.2f", elapsed))s")
-                                print("test:  - Size: \(String(format: "%.2f", fileSizeMB)) MB")
-                                
-                                successCount += 1
-                                
-                                // Basic validation of the generated file
-                                let asset = AVURLAsset(url: outputURL)
-                                let duration = try await asset.load(.duration)
-                                print("  - Actual Duration: \(CMTimeGetSeconds(duration))s")
-                                
-                            } catch {
-                                print("❌ Failed: \(error.localizedDescription)")
-                                failureCount += 1
-                                // Don't fail the whole test, just log it, so we can see which combinations fail
-                                // Issue.record("Generation failed for config: \(config)")
                             }
                         }
                     }
@@ -157,10 +278,42 @@ struct PreviewGenerationTests {
                 
                 print("\n==================================================")
                 print("Test Summary")
-                print("Total Combinations: \(durations.count * densities.count * qualities.count)")
+         //       print("Total Combinations: \(durations.count * densities.count * qualities.count)")
                 print("Success: \(successCount)")
                 print("Failures: \(failureCount)")
                 print("==================================================")
+                
+                print("\nComparison Summary (Native vs SJS)")
+                struct GroupKey: Hashable {
+                    let target: Int
+                    let densityName: String
+                }
+                let grouped = Dictionary(grouping: results) { (r: RunResult) in
+                    GroupKey(target: Int(r.targetDuration), densityName: r.density.name)
+                }
+                for key in grouped.keys.sorted(by: { lhs, rhs in
+                    if lhs.target == rhs.target { return lhs.densityName < rhs.densityName }
+                    return lhs.target < rhs.target
+                }) {
+                    guard let bucket = grouped[key] else { continue }
+                    let target = key.target
+                    let densityName = key.densityName
+                    let natives = bucket.filter { $0.mode == "Native" }
+                    let sjses = bucket.filter { $0.mode == "SJS" }
+                    print("\n— Target: \(target)s, Density: \(densityName)")
+                    print(String(format: "%@", "Mode   | Preset                  | ActDur(s) | Time(s)     | Size(MB)   "))
+                    func pad(_ s: String, _ to: Int) -> String { let count = s.count; return s + String(repeating: " ", count: max(0, to - count)) }
+                    func line(_ r: RunResult) -> String {
+                        let mode = pad(r.mode, 6)
+                        let preset = pad(r.presetLabel, 22)
+                        let act = String(format: "%-10.1f", r.actualDuration)
+                        let time = String(format: "%-12.2f", r.elapsed)
+                        let size = String(format: "%-12.2f", r.sizeMB)
+                        return "\(mode) | \(preset) | \(act) | \(time) | \(size)"
+                    }
+                    for r in natives { print(line(r)) }
+                    for r in sjses { print(line(r)) }
+                }
                 
                 #expect(failureCount == 0, "Some preview generations failed")
            
@@ -247,3 +400,4 @@ struct PreviewGenerationTests {
         #expect(failureCount == 0, "Some preview generations failed")
     }
 }
+

@@ -21,6 +21,7 @@ public enum PreviewError: LocalizedError, Sendable {
     case insufficientVideoDuration(required: TimeInterval, actual: TimeInterval)
     case noVideoTracks
     case outputDirectoryCreationFailed(URL, Error)
+    case exportStalled(elapsedSeconds: Int)
 
     public var errorDescription: String? {
         switch self {
@@ -58,6 +59,8 @@ public enum PreviewError: LocalizedError, Sendable {
             return "Video file contains no video tracks"
         case .outputDirectoryCreationFailed(let url, let error):
             return "Failed to create output directory at \(url.path): \(error.localizedDescription)"
+        case .exportStalled(let elapsed):
+            return "Export stalled: no progress for \(elapsed) seconds"
         }
     }
 
@@ -85,6 +88,8 @@ public enum PreviewError: LocalizedError, Sendable {
             return "The file does not contain valid video data"
         case .outputDirectoryCreationFailed:
             return "Could not create the output directory"
+        case .exportStalled:
+            return "The export encoder stopped making progress"
         }
     }
 
@@ -110,6 +115,8 @@ public enum PreviewError: LocalizedError, Sendable {
             return "Verify the file is a valid video file"
         case .outputDirectoryCreationFailed:
             return "Check disk space and permissions"
+        case .exportStalled:
+            return "Try a different export preset, lower quality, or a different format"
         }
     }
 }
