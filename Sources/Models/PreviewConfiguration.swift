@@ -8,6 +8,7 @@
 import Foundation
 import AVFoundation
 import OSLog
+import SJSAssetExportSession
 
 /// Configuration for video preview generation
 @available(macOS 26, iOS 26, *)
@@ -47,8 +48,11 @@ public struct PreviewConfiguration: Codable, Sendable, Hashable {
     /// If nil, a preset is automatically selected based on ``compressionQuality`` via ``VideoFormat/exportPreset(quality:)``.
     /// Common presets: AVAssetExportPresetHighestQuality, AVAssetExportPresetHEVC1920x1080,
     /// AVAssetExportPreset1920x1080, AVAssetExportPresetMediumQuality, etc.
-    public var exportPresetName: String?
-
+    public var exportPresetName: nativeExportPreset?
+    
+    
+    public var sJSExportPresetName: SjSExportPreset?
+    public var exportMaxResolution: ExportMaxResolution?
     // MARK: - Initialization
 
     public init(
@@ -60,7 +64,9 @@ public struct PreviewConfiguration: Codable, Sendable, Hashable {
         fullPathInName: Bool = false,
         compressionQuality: Double = 0.8,
         useNativeExport: Bool = true,
-        exportPresetName: String? = nil
+        exportPresetName: nativeExportPreset? = .AVAssetExportPresetHEVC1920x1080,
+        sjSExportPresetName: SjSExportPreset? = .hevc,
+        maxResolution: ExportMaxResolution? = ._1080p
     ) {
         self.targetDuration = targetDuration
         self.density = density
@@ -71,11 +77,15 @@ public struct PreviewConfiguration: Codable, Sendable, Hashable {
         self.compressionQuality = min(max(compressionQuality, 0.0), 1.0)
         self.useNativeExport = useNativeExport
         self.exportPresetName = exportPresetName
+        self.sJSExportPresetName = sjSExportPresetName ?? .hevc
+        self.exportMaxResolution = maxResolution ?? ._1080p
     }
 
+    
+    
     /// The effective export preset: explicit ``exportPresetName`` if set, otherwise derived from quality.
     public var effectiveExportPreset: String {
-        exportPresetName ?? format.exportPreset(quality: compressionQuality)
+        exportPresetName?.rawValue ?? format.exportPreset(quality: compressionQuality)
     }
 
     // MARK: - Codable (backward-compatible decoding)
@@ -91,7 +101,9 @@ public struct PreviewConfiguration: Codable, Sendable, Hashable {
         compressionQuality = min(max(try container.decode(Double.self, forKey: .compressionQuality), 0.0), 1.0)
         // New fields with backward-compatible defaults
         useNativeExport = try container.decodeIfPresent(Bool.self, forKey: .useNativeExport) ?? true
-        exportPresetName = try container.decodeIfPresent(String.self, forKey: .exportPresetName)
+        exportPresetName = try container.decodeIfPresent(nativeExportPreset.self, forKey: .exportPresetName)
+        sJSExportPresetName = try container.decodeIfPresent(SjSExportPreset.self, forKey: .sJSExportPresetName ) ?? .hevc
+        exportMaxResolution = try container.decodeIfPresent(ExportMaxResolution.self, forKey: .exportMaxResolution) ?? ._1080p
     }
 
     // MARK: - Extract Calculation
@@ -193,11 +205,20 @@ public struct PreviewConfiguration: Codable, Sendable, Hashable {
     public func generateFilename(for videoInput: VideoInput) -> String {
         let originalFilename = videoInput.url.deletingPathExtension().lastPathComponent
 
-        // Create config hash: duration_density_format_audio
         let durationLabel = formatDuration(targetDuration)
         let audioLabel = includeAudio ? "audio" : "noaudio"
-        let quality = compressionQuality.isNaN ? "" : "_\(compressionQuality)"
-        let configHash = "\(durationLabel)_\(density.name)_\(format.rawValue)_\(audioLabel)_\(quality)"
+        let exportLabel: String
+        let resolution = exportMaxResolution?.rawValue ?? "auto"
+        if useNativeExport {
+            let preset = (exportPresetName?.displayString ?? effectiveExportPreset)
+              //  .replacingOccurrences(of: "AVAssetExportPreset", with: "")
+            exportLabel = "\(preset)_nat"
+        } else {
+            let codec = sJSExportPresetName?.displayString ?? "default"
+         //   let res = exportMaxResolution?.rawValue ?? "auto"
+            exportLabel = "\(codec)_sjs"
+        }
+        let configHash = "\(durationLabel)_\(density.name)_\(format.rawValue)_\(audioLabel)_\(exportLabel)_\(resolution)"
       
         if fullPathInName {
             // Use full path in filename
@@ -271,95 +292,18 @@ extension PreviewConfiguration {
         }
     }
 }
-
-// MARK: - Playground
-
-#Playground {
-    // MARK: Setup
-    // PreviewConfiguration.calculateExtractParameters(forVideoDuration:) decides two things:
-    //   1. extractDuration  — how many real seconds to grab from each clip
-    //   2. playbackSpeed    — the speed multiplier when stitching clips together
-    //
-    // Rules:
-    //   • minimumExtractDuration = 4 s  (each clip must be at least this long)
-    //   • maximumPlaybackSpeed   = 1.5× (never speed up more than this)
-    //
-    // When baseExtractDuration (= targetDuration / count) ≥ 4 s → play at 1×, use that duration.
-    // When it would be < 4 s → speed up playback (capped at 1.5×) and recalculate actual duration.
-
-    let config = PreviewConfiguration(targetDuration: 60, density: .m) // 60 s preview, medium density
-
-    // -------------------------------------------------------------------------
-    // Scenario 1 — Short video (5 minutes)
-    // At medium density with a short video, extract count is modest so each
-    // extract is long enough to stay at 1× speed.
-    // -------------------------------------------------------------------------
-    let shortDuration: TimeInterval = 5 * 60   // 300 s
-    let shortCount = config.extractCount(forVideoDuration: shortDuration)
-    let shortParams = config.calculateExtractParameters(forVideoDuration: shortDuration)
-    print("--- Scenario 1: Short video (5 min) ---")
-    print("  Extract count : \(shortCount)")
-    print("  Extract dur   : \(String(format: "%.2f", shortParams.extractDuration)) s")
-    print("  Playback speed: \(String(format: "%.2f", shortParams.playbackSpeed))×")
-    // Expected: speed == 1.0 because targetDuration/count is well above 4 s
-
-    // -------------------------------------------------------------------------
-    // Scenario 2 — Long video (2 hours)
-    // Duration-based adjustment adds many extra extracts, driving baseExtractDuration
-    // below 4 s → playback is sped up toward the 1.5× cap.
-    // -------------------------------------------------------------------------
-    let longDuration: TimeInterval = 2 * 60 * 60   // 7200 s
-    let longCount = config.extractCount(forVideoDuration: longDuration)
-    let longParams = config.calculateExtractParameters(forVideoDuration: longDuration)
-    print("\n--- Scenario 2: Long video (2 hours) ---")
-    print("  Extract count : \(longCount)")
-    print("  Extract dur   : \(String(format: "%.2f", longParams.extractDuration)) s")
-    print("  Playback speed: \(String(format: "%.2f", longParams.playbackSpeed))×")
-    // Expected: speed approaches (or hits) 1.5× because many extracts don't fit at 1×
-
-    // -------------------------------------------------------------------------
-    // Scenario 3 — Different target durations, same video
-    // Shorter target → fewer seconds per extract → may force speed-up sooner.
-    // -------------------------------------------------------------------------
-    let testVideoDuration: TimeInterval = 45 * 60  // 45-minute video
-    print("\n--- Scenario 3: 45-min video across target durations ---")
-    for target in [30.0, 60.0, 120.0, 300.0] {
-        let cfg = PreviewConfiguration(targetDuration: target, density: .m)
-        let count = cfg.extractCount(forVideoDuration: testVideoDuration)
-        let params = cfg.calculateExtractParameters(forVideoDuration: testVideoDuration)
-        print("  target=\(Int(target))s  count=\(count)  extractDur=\(String(format: "%.2f", params.extractDuration))s  speed=\(String(format: "%.2f", params.playbackSpeed))×")
+extension PreviewConfiguration: CustomDebugStringConvertible {
+    public var debugDescription: String {
+        let durationLabel = Self.durationLabel(for: targetDuration)
+        let audioLabel = includeAudio ? "audio" : "no audio"
+        let exportDetail: String
+        if useNativeExport {
+            exportDetail = "native(preset: \(exportPresetName?.displayString ?? effectiveExportPreset))"
+        } else {
+            let codec = sJSExportPresetName?.displayString ?? "default"
+            let res = exportMaxResolution?.rawValue ?? "auto"
+            exportDetail = "SJS(codec: \(codec), maxRes: \(res))"
+        }
+        return "PreviewConfiguration(duration: \(durationLabel), density: \(density.name), format: \(format.rawValue), \(audioLabel), export: \(exportDetail))"
     }
-
-    // -------------------------------------------------------------------------
-    // Scenario 4 — Different density levels, same video & target
-    // Higher density (XXS) → more extracts → smaller per-extract duration
-    // Lower density (XXL)  → fewer extracts → larger per-extract duration
-    // -------------------------------------------------------------------------
-    let stdVideo: TimeInterval = 30 * 60   // 30-minute video
-    let stdTarget: TimeInterval = 60       // 60-second preview
-    print("\n--- Scenario 4: 30-min video, 60 s target, varying density ---")
-    for density in DensityConfig.allCases {
-        let cfg = PreviewConfiguration(targetDuration: stdTarget, density: density)
-        let count = cfg.extractCount(forVideoDuration: stdVideo)
-        let params = cfg.calculateExtractParameters(forVideoDuration: stdVideo)
-        print("  density=\(density.name.padding(toLength: 4, withPad: " ", startingAt: 0))  count=\(String(count).padding(toLength: 4, withPad: " ", startingAt: 0))  extractDur=\(String(format: "%.2f", params.extractDuration))s  speed=\(String(format: "%.2f", params.playbackSpeed))×")
-    }
-
-    // -------------------------------------------------------------------------
-    // Scenario 5 — Edge cases
-    // -------------------------------------------------------------------------
-    print("\n--- Scenario 5: Edge cases ---")
-
-    // Very short video (< 1 min)
-    let tinyVideo: TimeInterval = 30   // 30-second video
-    let tinyCfg = PreviewConfiguration(targetDuration: 60, density: .m)
-    let tinyParams = tinyCfg.calculateExtractParameters(forVideoDuration: tinyVideo)
-    print("  30-s video, 60-s target : extractDur=\(String(format: "%.2f", tinyParams.extractDuration))s  speed=\(String(format: "%.2f", tinyParams.playbackSpeed))×")
-
-    // Very long video (5 hours)
-    let hugeVideo: TimeInterval = 5 * 60 * 60
-    let hugeCfg = PreviewConfiguration(targetDuration: 60, density: .m)
-    let hugeParams = hugeCfg.calculateExtractParameters(forVideoDuration: hugeVideo)
-    print("  5-hr video,  60-s target: extractDur=\(String(format: "%.2f", hugeParams.extractDuration))s  speed=\(String(format: "%.2f", hugeParams.playbackSpeed))×")
-    // At 1.5× cap the actual extract duration will be: 60 * 1.5 / count
 }

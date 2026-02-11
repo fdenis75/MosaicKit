@@ -63,26 +63,10 @@ public actor PreviewVideoGenerator {
     private let logger = Logger(subsystem: "com.mosaickit", category: "PreviewVideoGenerator")
     private var progressHandlers: [UUID: @Sendable (PreviewGenerationProgress) -> Void] = [:]
     private var cancellationTokens: [UUID: CancellationToken] = [:]
-    private var progressTasks: [UUID: Task<Void, Never>] = [:]
 
     // MARK: - Initialization
 
     public init() {}
-
-    // MARK: - Cleanup
-
-    /// Cancel all progress tasks for a video
-    private func cancelProgressTasks(for videoID: UUID) {
-        progressTasks[videoID]?.cancel()
-        progressTasks.removeValue(forKey: videoID)
-    }
-
-    /// Store a progress task for later cancellation
-    private func storeProgressTask(_ task: Task<Void, Never>, for videoID: UUID) {
-        // Cancel any existing progress task for this video
-        progressTasks[videoID]?.cancel()
-        progressTasks[videoID] = task
-    }
 
     // MARK: - Public Methods
 
@@ -103,7 +87,6 @@ public actor PreviewVideoGenerator {
         
         defer {
             cancellationTokens.removeValue(forKey: video.id)
-            cancelProgressTasks(for: video.id)
         }
 
         // Report analyzing status
@@ -114,13 +97,8 @@ public actor PreviewVideoGenerator {
                 for: video,
                 config: config,
                 progressHandler: { [weak self] progress, status, url, message in
-                    guard let self = self else { return }
-                    let progressTask = Task { [weak self] in
-                        guard let self = self else { return }
-                        await self.reportProgress(for: video, progress: progress, status: status, outputURL: url, message: message)
-                    }
                     Task { [weak self] in
-                        await self?.storeProgressTask(progressTask, for: video.id)
+                        await self?.reportProgress(for: video, progress: progress, status: status, outputURL: url, message: message)
                     }
                 },
                 cancellationCheck: { [token] in
@@ -153,7 +131,6 @@ public actor PreviewVideoGenerator {
     public func cancel(for video: VideoInput) {
         logger.info("Cancelling preview generation for \(video.title)")
         cancellationTokens[video.id]?.cancel()
-        cancelProgressTasks(for: video.id)
     }
 
     /// Generate a preview composition without exporting to file (for video player playback)
@@ -173,7 +150,6 @@ public actor PreviewVideoGenerator {
 
         defer {
             cancellationTokens.removeValue(forKey: video.id)
-            cancelProgressTasks(for: video.id)
         }
 
         // Report analyzing status
@@ -184,13 +160,8 @@ public actor PreviewVideoGenerator {
                 for: video,
                 config: config,
                 progressHandler: { [weak self] progress, status, url, message in
-                    guard let self = self else { return }
-                    let progressTask = Task { [weak self] in
-                        guard let self = self else { return }
-                        await self.reportProgress(for: video, progress: progress, status: status, outputURL: url, message: message)
-                    }
                     Task { [weak self] in
-                        await self?.storeProgressTask(progressTask, for: video.id)
+                        await self?.reportProgress(for: video, progress: progress, status: status, outputURL: url, message: message)
                     }
                 },
                 cancellationCheck: { [token] in
@@ -217,11 +188,6 @@ public actor PreviewVideoGenerator {
         for token in cancellationTokens.values {
             token.cancel()
         }
-        // Cancel all progress tasks
-        for task in progressTasks.values {
-            task.cancel()
-        }
-        progressTasks.removeAll()
     }
 
     // MARK: - Private Methods
@@ -295,6 +261,7 @@ struct PreviewGenerationLogic {
             extractDuration: extractDuration,
             playbackSpeed: playbackSpeed,
             includeAudio: config.includeAudio,
+            maxResolution: config.exportMaxResolution,
             video: video,
             progressHandler: progressHandler,
             cancellationCheck: cancellationCheck
@@ -304,25 +271,42 @@ struct PreviewGenerationLogic {
         
         // Export — route based on configuration
         progressHandler(0.3, .encoding, nil, "Encoding preview video...")
+        let returnURL: URL
+        let error: Error
         if config.useNativeExport {
-            return try await exportWithNativeSession(
+            do {
+                returnURL = try await exportWithNativeSession(
                 composition: videoComposition.composition,
                 audioMix: videoComposition.audioMix,
+                videoComposition: videoComposition.videoComposition,
                 config: config,
                 video: video,
                 progressHandler: progressHandler,
                 cancellationCheck: cancellationCheck
             )
+                print("awaiting return of native export")
+                return returnURL
+            }
+           
+            
         } else {
-            return try await exportWithSJSSession(
-                composition: videoComposition.composition,
-                audioMix: videoComposition.audioMix,
-                config: config,
-                video: video,
-                progressHandler: progressHandler,
-                cancellationCheck: cancellationCheck
-            )
+            do {
+                returnURL =  try await exportWithSJSSession(
+                    composition: videoComposition.composition,
+                    audioMix: videoComposition.audioMix,
+                    videoComposition: videoComposition.videoComposition,
+                    config: config,
+                    video: video,
+                    progressHandler: progressHandler,
+                    cancellationCheck: cancellationCheck
+                )
+                
+                print("awaiting return of native export")
+                
+                return returnURL
+            }
         }
+            
     }
     
     /// Generate a preview composition without exporting (for video player playback)
@@ -366,12 +350,13 @@ struct PreviewGenerationLogic {
         
         // Compose
         progressHandler(0.2, .composing, nil, "Composing \(timestamps.count) segments...")
-        let videoComposition = try await composeVideoSegments(
+        let compositionResult = try await composeVideoSegments(
             asset: asset,
             timestamps: timestamps,
             extractDuration: extractDuration,
             playbackSpeed: playbackSpeed,
             includeAudio: config.includeAudio,
+            maxResolution: config.exportMaxResolution,
             video: video,
             progressHandler: progressHandler,
             cancellationCheck: cancellationCheck
@@ -383,11 +368,17 @@ struct PreviewGenerationLogic {
         progressHandler(0.8, .composing, nil, "Creating player item...")
         
         // Note: AVMutableComposition is not Sendable in Swift 6, but it's safe to use here
-        // because it's created locally in this actor and won't be accessed concurrently
-        nonisolated(unsafe) let composition = videoComposition.composition
-        nonisolated(unsafe) let audioMix = videoComposition.audioMix
+        // because it's created locally and won't be accessed concurrently after this point
+        nonisolated(unsafe) let sendableComposition = compositionResult.composition
+        nonisolated(unsafe) let audioMix = compositionResult.audioMix
+        nonisolated(unsafe) let sendableVideoComp = compositionResult.videoComposition
         
-        let playerItem = await AVPlayerItem(asset: composition)
+        let playerItem = await AVPlayerItem(asset: sendableComposition)
+        
+        // Apply video composition for scaling
+        if let vc = sendableVideoComp {
+            playerItem.videoComposition = vc
+        }
         
         // Apply audio mix if available
         if let mix = audioMix {
@@ -498,7 +489,7 @@ struct PreviewGenerationLogic {
         
         // Sort by start time
         timestamps.sort { CMTimeCompare($0.start, $1.start) == -1 }
-
+        
         // Deduplicate timestamps that were clamped to the same start time
         var deduplicated: [(start: CMTime, duration: CMTime)] = []
         for ts in timestamps {
@@ -509,11 +500,11 @@ struct PreviewGenerationLogic {
             }
             deduplicated.append(ts)
         }
-
+        
         if deduplicated.count < timestamps.count {
             logger.info("Deduplicated timestamps: \(timestamps.count) -> \(deduplicated.count)")
         }
-
+        
         logger.info("Calculated \(deduplicated.count) extract timestamps")
         return deduplicated
     }
@@ -524,32 +515,33 @@ struct PreviewGenerationLogic {
         extractDuration: TimeInterval,
         playbackSpeed: Double,
         includeAudio: Bool,
+        maxResolution: ExportMaxResolution?,
         video: VideoInput,
         progressHandler: @escaping @Sendable (Double, PreviewGenerationStatus, URL?, String?) -> Void,
         cancellationCheck: @escaping @Sendable () -> Bool
-    ) async throws -> (composition: AVMutableComposition, audioMix: AVMutableAudioMix?) {
+    ) async throws -> (composition: AVMutableComposition, audioMix: AVMutableAudioMix?, videoComposition: AVMutableVideoComposition?) {
         logger.debug("Starting composition with \(timestamps.count) segments, playback speed: \(playbackSpeed)x")
         let composition = AVMutableComposition()
-
+        
         // Get asset duration for validation
         let assetDuration = try await asset.load(.duration)
         let assetDurationSeconds = CMTimeGetSeconds(assetDuration)
-
+        
         // Load source tracks ONCE before the loop
         let videoTracks = try await asset.loadTracks(withMediaType: .video)
         guard let videoTrack = videoTracks.first else {
             logger.error("No video tracks found in asset")
             throw PreviewError.noVideoTracks
         }
-
+        
         let audioTrack: AVAssetTrack? = includeAudio
-            ? try await asset.loadTracks(withMediaType: .audio).first
-            : nil
-
+        ? try await asset.loadTracks(withMediaType: .audio).first
+        : nil
+        
         if includeAudio && audioTrack == nil {
             logger.warning("Audio requested but no audio tracks found in asset")
         }
-
+        
         // Create composition tracks
         guard let compositionVideoTrack = composition.addMutableTrack(
             withMediaType: .video,
@@ -558,7 +550,7 @@ struct PreviewGenerationLogic {
             logger.error("Failed to create composition video track")
             throw PreviewError.compositionFailed("Failed to create composition video track", nil)
         }
-
+        
         var compositionAudioTrack: AVMutableCompositionTrack?
         if audioTrack != nil {
             compositionAudioTrack = composition.addMutableTrack(
@@ -566,37 +558,36 @@ struct PreviewGenerationLogic {
                 preferredTrackID: kCMPersistentTrackID_Invalid
             )
         }
-
+        
         // Insert segments
         var insertTime = CMTime.zero
         let progressStep = 0.5 / Double(timestamps.count)
         var skippedSegments = 0
-
+        
         for (index, timestamp) in timestamps.enumerated() {
             if cancellationCheck() {
                 logger.warning("Composition cancelled at segment \(index + 1)")
                 throw PreviewError.cancelled
             }
-
+            
             let timeRange = CMTimeRange(start: timestamp.start, duration: timestamp.duration)
             let endTime = CMTimeAdd(timestamp.start, timestamp.duration)
-
+            
             // Validate time range is within asset bounds — skip if out of range
             if CMTimeCompare(endTime, assetDuration) > 0 {
                 logger.warning("Segment \(index + 1) exceeds asset duration (\(CMTimeGetSeconds(endTime))s > \(assetDurationSeconds)s), skipping")
                 skippedSegments += 1
                 continue
             }
-
+            
             do {
                 // Insert video segment
                 try compositionVideoTrack.insertTimeRange(timeRange, of: videoTrack, at: insertTime)
-
                 // Insert audio segment from pre-loaded track
                 if let srcAudio = audioTrack, let dstAudio = compositionAudioTrack {
                     try dstAudio.insertTimeRange(timeRange, of: srcAudio, at: insertTime)
                 }
-
+                
                 // Apply time scaling on the COMPOSITION (scales all tracks atomically)
                 if playbackSpeed != 1.0 {
                     let scaledDuration = CMTime(
@@ -609,16 +600,16 @@ struct PreviewGenerationLogic {
                 } else {
                     insertTime = CMTimeAdd(insertTime, timestamp.duration)
                 }
-
+                
                 let progress = 0.2 + (progressStep * Double(index + 1))
                 progressHandler(progress, .composing, nil, "Composing segment \(index + 1)/\(timestamps.count)")
-
+                
             } catch let error as NSError {
                 logger.warning("Failed to insert segment \(index + 1)/\(timestamps.count): \(error.localizedDescription), skipping")
                 skippedSegments += 1
             }
         }
-
+        
         // Ensure we have at least some segments
         if skippedSegments > 0 {
             logger.info("Skipped \(skippedSegments)/\(timestamps.count) segments")
@@ -627,10 +618,10 @@ struct PreviewGenerationLogic {
         guard insertedCount > 0 else {
             throw PreviewError.compositionFailed("All \(timestamps.count) segments failed to insert", nil)
         }
-
+        
         let finalDuration = CMTimeGetSeconds(insertTime)
         logger.info("All segments inserted. Final composition duration: \(finalDuration)s")
-
+        
         // Validate segments on composition tracks
         if let videoSegments = compositionVideoTrack.segments {
             do {
@@ -646,7 +637,7 @@ struct PreviewGenerationLogic {
                 logger.warning("Audio track segments failed validation: \(error.localizedDescription)")
             }
         }
-
+        
         // Create audio mix if we have audio
         var audioMix: AVMutableAudioMix?
         if let compAudioTrack = compositionAudioTrack {
@@ -656,241 +647,339 @@ struct PreviewGenerationLogic {
             mix.inputParameters = [params]
             audioMix = mix
         }
-
-        return (composition, audioMix)
+        
+        // Build video composition for scaling if maxResolution requires downscaling
+        var videoComp: AVMutableVideoComposition?
+        if let maxRes = maxResolution,
+           let compVideoTrack = composition.tracks(withMediaType: .video).first {
+            let naturalSize = try await compVideoTrack.load(.naturalSize)
+            let preferredTransform = try await compVideoTrack.load(.preferredTransform)
+            let transformedSize = naturalSize.applying(preferredTransform)
+            let sourceWidth = abs(transformedSize.width)
+            let sourceHeight = abs(transformedSize.height)
+            
+            let targetMaxWidth = CGFloat(maxRes.maxWidth)
+            let targetMaxHeight = CGFloat(maxRes.maxHeight)
+            
+            // Only downscale — never upscale
+            if sourceWidth > targetMaxWidth || sourceHeight > targetMaxHeight {
+                let scaleX = targetMaxWidth / sourceWidth
+                let scaleY = targetMaxHeight / sourceHeight
+                let scale = min(scaleX, scaleY)
+                
+                let renderWidth = (sourceWidth * scale).rounded(.down)
+                let renderHeight = (sourceHeight * scale).rounded(.down)
+                let renderSize = CGSize(width: renderWidth, height: renderHeight)
+                
+                let scaleTransform = CGAffineTransform(scaleX: scale, y: scale)
+                let finalTransform = preferredTransform.concatenating(scaleTransform)
+                
+                let layerInstruction = AVMutableVideoCompositionLayerInstruction(assetTrack: compVideoTrack)
+                layerInstruction.setTransform(finalTransform, at: .zero)
+                
+                let instruction = AVMutableVideoCompositionInstruction()
+                instruction.timeRange = CMTimeRange(start: .zero, duration: composition.duration)
+                instruction.layerInstructions = [layerInstruction]
+                
+                let nominalFrameRate = try await compVideoTrack.load(.nominalFrameRate)
+                let vc = AVMutableVideoComposition()
+                vc.renderSize = renderSize
+                vc.frameDuration = CMTime(value: 1, timescale: CMTimeScale(nominalFrameRate > 0 ? nominalFrameRate : 30))
+                vc.instructions = [instruction]
+                videoComp = vc
+                
+                logger.info("Scaling composition from \(Int(sourceWidth))x\(Int(sourceHeight)) to \(Int(renderWidth))x\(Int(renderHeight))")
+            }
+        }
+        
+        return (composition, audioMix, videoComp)
     }
     
     /// Export using SJSAssetExportSession (custom exporter with fine-grained codec/bitrate control)
     private static func exportWithSJSSession(
         composition: AVMutableComposition,
         audioMix: AVMutableAudioMix?,
+        videoComposition: AVMutableVideoComposition?,
         config: PreviewConfiguration,
         video: VideoInput,
         progressHandler: @escaping @Sendable (Double, PreviewGenerationStatus, URL?, String?) -> Void,
         cancellationCheck: @escaping @Sendable () -> Bool
     ) async throws -> URL {
         logger.info("Starting SJS export for \(video.title)")
-
+        
         // Get original video dimensions from composition
         guard let compositionVideoTrack = composition.tracks(withMediaType: .video).first else {
             throw PreviewError.noVideoTracks
         }
-
+        
         let naturalSize = try await compositionVideoTrack.load(.naturalSize)
         let originalWidth = Int(naturalSize.width)
         let originalHeight = Int(naturalSize.height)
-
+        
         // Prepare output URL
         let outputURL = try prepareOutputURL(config: config, video: video)
-
+        
         let didStartAccessing = outputURL.startAccessingSecurityScopedResource()
         defer {
             if didStartAccessing {
                 outputURL.stopAccessingSecurityScopedResource()
             }
         }
-
+        
         // Remove existing file if present
         if FileManager.default.fileExists(atPath: outputURL.path) {
             try? FileManager.default.removeItem(at: outputURL)
         }
-
-        // Create export session with SJSAssetExportSession
-        let exporter = ExportSession()
-
-        // Determine video settings based on quality, using original dimensions
-        let (videoConfig, audioBitrate) = videoSettings(
-            for: config.compressionQuality,
-            format: config.format,
-            width: originalWidth,
-            height: originalHeight
-        )
-
-        logger.info("SJS export: format=\(config.format.rawValue), quality=\(config.compressionQuality), audioBitrate=\(audioBitrate)")
-
-        // Stall detection: cancel if no progress for 60 seconds
-        let stallTimeout: TimeInterval = 60
-        let progressTracker = ExportProgressTracker()
-        progressTracker.recordProgress(0)
-        let stallDetected = CancellationToken()
-
-        // Start progress monitoring task
-        let progressTask = Task {
-            for await progress in exporter.progressStream {
-                if cancellationCheck() { break }
-                let progressValue = Double(progress)
-                progressTracker.recordProgress(progressValue)
-                let exportProgress = 0.3 + (progressValue * 0.7)
-                progressHandler(exportProgress, .encoding, nil, "Encoding: \(Int(progressValue * 100))%")
-                if progressValue >= 1.0 { return }
+        var renderSize: CGSize = naturalSize
+        if let maxRes = config.exportMaxResolution,
+           let compVideoTrack = composition.tracks(withMediaType: .video).first {
+            let naturalSize = try await compVideoTrack.load(.naturalSize)
+            let preferredTransform = try await compVideoTrack.load(.preferredTransform)
+            let transformedSize = naturalSize.applying(preferredTransform)
+            let sourceWidth = abs(transformedSize.width)
+            let sourceHeight = abs(transformedSize.height)
+            renderSize = CGSize(width: sourceWidth, height: sourceHeight)
+            let targetMaxWidth = CGFloat(maxRes.maxWidth)
+            let targetMaxHeight = CGFloat(maxRes.maxHeight)
+            
+            // Only downscale — never upscale
+            if sourceWidth > targetMaxWidth || sourceHeight > targetMaxHeight {
+                let scaleX = targetMaxWidth / sourceWidth
+                let scaleY = targetMaxHeight / sourceHeight
+                let scale = min(scaleX, scaleY)
+                
+                let renderWidth = (sourceWidth * scale).rounded(.down)
+                let renderHeight = (sourceHeight * scale).rounded(.down)
+                renderSize = CGSize(width: renderWidth, height: renderHeight)
             }
         }
-
-        // Stall + cancellation monitor for SJS export
-        let stallMonitor = Task {
-            while !Task.isCancelled {
-                if cancellationCheck() { break }
-                let elapsed = progressTracker.secondsSinceLastProgress
-                if elapsed >= stallTimeout {
-                    logger.error("SJS export stalled: no progress for \(Int(elapsed))s, cancelling")
-                    stallDetected.cancel()
-                    progressTask.cancel()
-                    break
+            // Create export session with SJSAssetExportSession
+            let exporter = ExportSession()
+            
+            // Determine video settings based on quality, using original dimensions
+            let (videoConfig, audioBitrate) = videoSettings(
+                for: config.compressionQuality,
+                format: config.format,
+                presetname: config.sJSExportPresetName,
+                exportMaxResolution: config.exportMaxResolution ?? ._1080p,
+                width: originalWidth,
+                height: originalHeight,
+                renderSize: renderSize
+            )
+            
+            logger.info("SJS export: format=\(config.format.rawValue), q.uality=, audioBitrate=\(audioBitrate)")
+            
+            // Stall detection: cancel if no progress for 60 seconds
+            let stallTimeout: TimeInterval = 60
+            let progressTracker = ExportProgressTracker()
+            progressTracker.recordProgress(0)
+            let stallDetected = CancellationToken()
+            
+            // Start progress monitoring task
+            let progressTask = Task {
+                for await progress in exporter.progressStream {
+                    if cancellationCheck() { break }
+                    let progressValue = Double(progress)
+                    progressTracker.recordProgress(progressValue)
+                    let exportProgress = 0.3 + (progressValue * 0.7)
+                    progressHandler(exportProgress, .encoding, nil, "Encoding: \(Int(progressValue * 100))%")
+                    if progressValue >= 1.0 { return }
                 }
-                try? await Task.sleep(nanoseconds: 1_000_000_000) // check every 1s
+            }
+            
+            // Stall + cancellation monitor for SJS export
+            let stallMonitor = Task {
+                while !Task.isCancelled {
+                    if cancellationCheck() { break }
+                    let elapsed = progressTracker.secondsSinceLastProgress
+                    if elapsed >= stallTimeout {
+                        logger.error("SJS export stalled: no progress for \(Int(elapsed))s, cancelling")
+                        stallDetected.cancel()
+                        progressTask.cancel()
+                        break
+                    }
+                    try? await Task.sleep(nanoseconds: 1_000_000_000) // check every 1s
+                }
+            }
+            defer { stallMonitor.cancel() }
+            
+            // Perform the export
+            do {
+                nonisolated(unsafe) let compositionAsset = composition as AVAsset
+                
+                if let vc = videoComposition {
+                    // Use the raw-settings overload so we can pass our custom video composition for scaling
+                    nonisolated(unsafe) let sendableVC = vc as AVVideoComposition
+                    try await exporter.export(
+                        asset: compositionAsset,
+                        audioOutputSettings: AudioOutputSettings.default.settingsDictionary,
+                        videoOutputSettings: videoConfig.settingsDictionary,
+                        composition: sendableVC,
+                        to: outputURL,
+                        as: config.format.avFileType
+                    )
+                } else {
+                    try await exporter.export(
+                        asset: compositionAsset,
+                        audio: .default,
+                        video: videoConfig,
+                        to: outputURL,
+                        as: config.format.avFileType
+                    )
+                }
+                
+                progressTask.cancel()
+                
+                if stallDetected.isCancelled {
+                    try? FileManager.default.removeItem(at: outputURL)
+                    throw PreviewError.exportStalled(elapsedSeconds: Int(progressTracker.secondsSinceLastProgress))
+                }
+                
+                if cancellationCheck() {
+                    try? FileManager.default.removeItem(at: outputURL)
+                    throw PreviewError.cancelled
+                }
+                
+                // Verify output file exists
+                guard FileManager.default.fileExists(atPath: outputURL.path) else {
+                    throw PreviewError.encodingFailed("Export completed but output file not found", nil)
+                }
+                
+                let fileSize = (try? FileManager.default.attributesOfItem(atPath: outputURL.path)[.size] as? Int64) ?? 0
+                logger.info("SJS export completed: \(outputURL.lastPathComponent) (\(String(format: "%.2f", Double(fileSize) / 1_048_576.0)) MB)")
+                
+                progressHandler(1.0, .completed, outputURL, "Export saved")
+                return outputURL
+                
+            } catch {
+                progressTask.cancel()
+                // Clean up partial output file on failure
+                try? FileManager.default.removeItem(at: outputURL)
+                if stallDetected.isCancelled {
+                    logger.error("SJS export stalled and was cancelled")
+                    throw PreviewError.exportStalled(elapsedSeconds: Int(progressTracker.secondsSinceLastProgress))
+                }
+                logger.error("SJS export failed: \(error.localizedDescription)")
+                progressHandler(1.0, .failed, nil, error.localizedDescription)
+                throw PreviewError.encodingFailed("Export failed", error)
             }
         }
-        defer { stallMonitor.cancel() }
-
-        // Perform the export
-        do {
-            nonisolated(unsafe) let compositionAsset = composition as AVAsset
-
-            try await exporter.export(
-                asset: compositionAsset,
-                audio: .format(.aac),
-                video: videoConfig,
-                to: outputURL,
-                as: config.format.avFileType
-            )
-
-            progressTask.cancel()
-
-            if stallDetected.isCancelled {
-                try? FileManager.default.removeItem(at: outputURL)
-                throw PreviewError.exportStalled(elapsedSeconds: Int(progressTracker.secondsSinceLastProgress))
-            }
-
-            if cancellationCheck() {
-                try? FileManager.default.removeItem(at: outputURL)
-                throw PreviewError.cancelled
-            }
-
-            // Verify output file exists
-            guard FileManager.default.fileExists(atPath: outputURL.path) else {
-                throw PreviewError.encodingFailed("Export completed but output file not found", nil)
-            }
-
-            let fileSize = (try? FileManager.default.attributesOfItem(atPath: outputURL.path)[.size] as? Int64) ?? 0
-            logger.info("SJS export completed: \(outputURL.lastPathComponent) (\(String(format: "%.2f", Double(fileSize) / 1_048_576.0)) MB)")
-
-            progressHandler(1.0, .completed, outputURL, "Export saved")
-            return outputURL
-
-        } catch {
-            progressTask.cancel()
-            // Clean up partial output file on failure
-            try? FileManager.default.removeItem(at: outputURL)
-            if stallDetected.isCancelled {
-                logger.error("SJS export stalled and was cancelled")
-                throw PreviewError.exportStalled(elapsedSeconds: Int(progressTracker.secondsSinceLastProgress))
-            }
-            logger.error("SJS export failed: \(error.localizedDescription)")
-            progressHandler(1.0, .failed, nil, error.localizedDescription)
-            throw PreviewError.encodingFailed("Export failed", error)
-        }
-    }
     
-    /// Prepare the output URL: create the output directory and return the full file URL
-    private static func prepareOutputURL(config: PreviewConfiguration, video: VideoInput) throws -> URL {
-        let outputDirectory = config.generateOutputDirectory(for: video)
-
-        let didStartAccessingDir = outputDirectory.startAccessingSecurityScopedResource()
-        defer {
-            if didStartAccessingDir {
-                outputDirectory.stopAccessingSecurityScopedResource()
-            }
-        }
-
-        do {
-            try FileManager.default.createDirectory(
-                at: outputDirectory,
-                withIntermediateDirectories: true,
-                attributes: nil
-            )
-        } catch {
-            throw PreviewError.outputDirectoryCreationFailed(outputDirectory, error)
-        }
-
-        let filename = config.generateFilename(for: video)
-        return outputDirectory.appendingPathComponent(filename)
-    }
-
-    /// Determine video and audio settings based on quality level and original dimensions
-    private static func videoSettings(
-        for quality: Double,
-        format: VideoFormat,
-        width: Int,
-        height: Int
-    ) -> (video: VideoOutputSettings, audioBitrate: Int) {
-        // Use original dimensions and adjust codec/bitrate based on quality
-        // Quality ranges determine codec and bitrate, but dimensions stay original
         
-        let videoConfig: VideoOutputSettings
-        let audioBitrate: Int
-        
-        // Calculate bitrate based on resolution and quality
-        // Base formula: pixels * quality_multiplier
-        
-        
-        // Helper function to scale dimensions to a maximum resolution
-        func scaleDimensions(width: Int, height: Int, maxHeight: Int) -> (width: Int, height: Int) {
-            // Determine orientation
-            let isPortrait = height > width
+        /// Prepare the output URL: create the output directory and return the full file URL
+        private static func prepareOutputURL(config: PreviewConfiguration, video: VideoInput) throws -> URL {
+            let outputDirectory = config.generateOutputDirectory(for: video)
             
-            // If already at or below target, return original dimensions
-            if isPortrait && height <= maxHeight {
-                return (width, height)
-            } else if !isPortrait && width <= maxHeight {
-                return (width, height)
+            let didStartAccessingDir = outputDirectory.startAccessingSecurityScopedResource()
+            defer {
+                if didStartAccessingDir {
+                    outputDirectory.stopAccessingSecurityScopedResource()
+                }
             }
             
-            // Scale down maintaining aspect ratio
-            let aspectRatio = Double(width) / Double(height)
+            do {
+                try FileManager.default.createDirectory(
+                    at: outputDirectory,
+                    withIntermediateDirectories: true,
+                    attributes: nil
+                )
+            } catch {
+                throw PreviewError.outputDirectoryCreationFailed(outputDirectory, error)
+            }
             
-            if isPortrait {
-                // For portrait videos, maxHeight is the limiting dimension
-                let scaledHeight = maxHeight
-                let scaledWidth = Int(round(Double(scaledHeight) * aspectRatio))
-                return (scaledWidth, scaledHeight)
-            } else {
-                // For landscape videos, maxHeight becomes the limiting width
-                let scaledWidth = maxHeight
-                let scaledHeight = Int(round(Double(scaledWidth) / aspectRatio))
-                return (scaledWidth, scaledHeight)
+            let filename = config.generateFilename(for: video)
+            return outputDirectory.appendingPathComponent(filename)
+        }
+        
+        /// Determine video and audio settings based on quality level and original dimensions
+        private static func videoSettings(
+            for quality: Double,
+            format: VideoFormat,
+            presetname: SjSExportPreset?,
+            exportMaxResolution: ExportMaxResolution,
+            width: Int,
+            height: Int,
+            renderSize: CGSize
+        ) -> (video: VideoOutputSettings, audioBitrate: Int) {
+            // Use original dimensions and adjust codec/bitrate based on quality
+            // Quality ranges determine codec and bitrate, but dimensions stay original
+            
+            let videoConfig: VideoOutputSettings
+            let audioBitrate: Int
+            
+            // Calculate bitrate based on resolution and quality
+            // Base formula: pixels * quality_multiplier
+            
+            
+            // Helper function to scale dimensions to a maximum resolution
+            
+            func scaleDimensions(width: Int, height: Int, maxHeight: Int) -> (width: Int, height: Int) {
+                // Determine orientation
+                let isPortrait = height > width
+                
+                // If already at or below target, return original dimensions
+                if isPortrait && height <= maxHeight {
+                    return (width, height)
+                } else if !isPortrait && width <= maxHeight {
+                    return (width, height)
+                }
+                
+                // Scale down maintaining aspect ratio
+                let aspectRatio = Double(width) / Double(height)
+                
+                if isPortrait {
+                    // For portrait videos, maxHeight is the limiting dimension
+                    let scaledHeight = maxHeight
+                    let scaledWidth = Int(round(Double(scaledHeight) * aspectRatio))
+                    return (scaledWidth, scaledHeight)
+                } else {
+                    // For landscape videos, maxHeight becomes the limiting width
+                    let scaledWidth = maxHeight
+                    let scaledHeight = Int(round(Double(scaledWidth) / aspectRatio))
+                    return (scaledWidth, scaledHeight)
+                }
+            }
+            
+            let targetDimensions: (width: Int, height: Int)
+            
+            if presetname != nil {
+                //targetDimensions = scaleDimensions(width: width, height: height, maxHeight: exportMaxResolution.maxHeight)
+                videoConfig = .codec(presetname?.SJSCodec ?? .hevc, width: Int(renderSize.width), height: Int(renderSize.height))
+                audioBitrate = 128_000  // 128 kbps
+                return (videoConfig, audioBitrate)
+            }else {
+                
+                if quality == 1.0 {
+                    // Maximum resolution: 4K (3840x2160 for landscape, 2160x3840 for portrait)
+                    targetDimensions = scaleDimensions(width: width, height: height, maxHeight: 2160)
+                    videoConfig = .codec(.hevc, width: targetDimensions.width, height: targetDimensions.height)
+                    audioBitrate = 128_000  // 128 kbps
+                } else if quality == 0.75 {
+                    // Maximum resolution: 4K (3840x2160 for landscape, 2160x3840 for portrait)
+                    targetDimensions = scaleDimensions(width: width, height: height, maxHeight: 2160)
+                    videoConfig = .codec(.h264(.highAuto), width: targetDimensions.width, height: targetDimensions.height)
+                    audioBitrate = 128_000  // 128 kbps
+                } else if quality == 0.5 {
+                    // Maximum resolution: 1080p (1920x1080 for landscape, 1080x1920 for portrait)
+                    targetDimensions = scaleDimensions(width: width, height: height, maxHeight: 1920)
+                    videoConfig = .codec(.h264(.mainAuto), width: targetDimensions.width, height: targetDimensions.height)
+                    audioBitrate = 128_000  // 128 kbps
+                } else if quality == 0.25 {
+                    // Maximum resolution: 720p (1280x720 for landscape, 720x1280 for portrait)
+                    targetDimensions = scaleDimensions(width: width, height: height, maxHeight: 2160)
+                    videoConfig = .codec(.h264(.baselineAuto), width: targetDimensions.width, height: targetDimensions.height)
+                    audioBitrate = 128_000  // 128 kbps
+                } else {
+                    // Maximum resolution: 540p (960x540 for landscape, 540x960 for portrait)
+                    targetDimensions = scaleDimensions(width: width, height: height, maxHeight: 2160)
+                    videoConfig = .codec(.h264(.baselineAuto), width: targetDimensions.width, height: targetDimensions.height)
+                    audioBitrate = 128_000  // 128 kbps
+                }
+                return (videoConfig, audioBitrate)
             }
         }
-        
-        let targetDimensions: (width: Int, height: Int)
-        
-        if quality == 1.0 {
-            // Maximum resolution: 4K (3840x2160 for landscape, 2160x3840 for portrait)
-            targetDimensions = scaleDimensions(width: width, height: height, maxHeight: 2160)
-            videoConfig = .codec(.hevc, width: targetDimensions.width, height: targetDimensions.height)
-            audioBitrate = 128_000  // 128 kbps
-        } else if quality == 0.75 {
-            // Maximum resolution: 4K (3840x2160 for landscape, 2160x3840 for portrait)
-            targetDimensions = scaleDimensions(width: width, height: height, maxHeight: 2160)
-            videoConfig = .codec(.h264(.highAuto), width: targetDimensions.width, height: targetDimensions.height)
-            audioBitrate = 128_000  // 128 kbps
-        } else if quality == 0.5 {
-            // Maximum resolution: 1080p (1920x1080 for landscape, 1080x1920 for portrait)
-            targetDimensions = scaleDimensions(width: width, height: height, maxHeight: 2160)
-            videoConfig = .codec(.h264(.mainAuto), width: targetDimensions.width, height: targetDimensions.height)
-            audioBitrate = 128_000  // 128 kbps
-        } else if quality == 0.25 {
-            // Maximum resolution: 720p (1280x720 for landscape, 720x1280 for portrait)
-            targetDimensions = scaleDimensions(width: width, height: height, maxHeight: 2160)
-            videoConfig = .codec(.h264(.baselineAuto), width: targetDimensions.width, height: targetDimensions.height)
-            audioBitrate = 128_000  // 128 kbps
-        } else {
-            // Maximum resolution: 540p (960x540 for landscape, 540x960 for portrait)
-            targetDimensions = scaleDimensions(width: width, height: height, maxHeight: 2160)
-            videoConfig = .codec(.h264(.baselineAuto), width: targetDimensions.width, height: targetDimensions.height)
-            audioBitrate = 128_000  // 128 kbps
-        }
-        return (videoConfig, audioBitrate)
-    }
+    
+
     
     private static func statusDescription(_ status: AVAssetExportSession.Status) -> String {
         switch status {
@@ -904,10 +993,13 @@ struct PreviewGenerationLogic {
         }
     }
     /// Export using AVAssetExportSession (Apple's native preset-based exporter)
+    /// @MainActor ensures exportSession and its Task closures share the same isolation,
+    /// avoiding 'sending' parameter errors for the non-Sendable AVAssetExportSession.
     @MainActor
     private static func exportWithNativeSession(
         composition: AVMutableComposition,
         audioMix: AVMutableAudioMix?,
+        videoComposition: AVMutableVideoComposition?,
         config: PreviewConfiguration,
         video: VideoInput,
         progressHandler: @escaping @Sendable (Double, PreviewGenerationStatus, URL?, String?) -> Void,
@@ -960,6 +1052,11 @@ struct PreviewGenerationLogic {
         exportSession.outputFileType = config.format.avFileType
         exportSession.allowsParallelizedExport = true
         exportSession.shouldOptimizeForNetworkUse = true
+
+        // Apply video composition for resolution scaling
+        if let vc = videoComposition {
+            exportSession.videoComposition = vc
+        }
 
         // Stall detection: cancel if no progress for 60 seconds
         let stallTimeout: TimeInterval = 60

@@ -165,7 +165,7 @@ public actor PreviewGeneratorCoordinator {
                 progressHandler?(.queued(for: video))
                 activeTasks += 1
 
-                group.addTask(priority: .medium) { @Sendable in
+                group.addTask(priority: .utility) { @Sendable in
                     try Task.checkCancellation()
 
                     do {
@@ -267,7 +267,7 @@ public actor PreviewGeneratorCoordinator {
 
     /// Cancel generation for a specific video
     /// - Parameter video: The video to cancel
-    public func cancelGeneration(for video: VideoInput) {
+    public func cancelGeneration(for video: VideoInput) async {
         logger.info("Cancelling preview generation for \(video.title)")
 
         // Cancel the task
@@ -275,9 +275,7 @@ public actor PreviewGeneratorCoordinator {
         activeTasks.removeValue(forKey: video.id)
 
         // Cancel in generator
-        Task {
-            await previewGenerator.cancel(for: video)
-        }
+        await previewGenerator.cancel(for: video)
 
         // Report cancellation
         progressHandlers[video.id]?.handler(.cancelled(for: video))
@@ -285,7 +283,7 @@ public actor PreviewGeneratorCoordinator {
     }
 
     /// Cancel all active generations
-    public func cancelAllGenerations() {
+    public func cancelAllGenerations() async {
         logger.info("Cancelling all preview generations")
 
         // Cancel all tasks
@@ -295,9 +293,7 @@ public actor PreviewGeneratorCoordinator {
         activeTasks.removeAll()
 
         // Cancel in generator
-        Task {
-            await previewGenerator.cancelAll()
-        }
+        await previewGenerator.cancelAll()
 
         // Report cancellations using the stored VideoInput
         for (_, entry) in progressHandlers {
