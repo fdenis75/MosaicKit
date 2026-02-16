@@ -1,10 +1,3 @@
-//
-//  PreviewConfiguration.swift
-//  MosaicKit
-//
-//  Created by Claude Code on 2025-11-23.
-//
-
 import Foundation
 import AVFoundation
 import OSLog
@@ -36,8 +29,9 @@ public struct PreviewConfiguration: Codable, Sendable, Hashable {
     /// Whether to include full path in the output filename
     public var fullPathInName: Bool
 
-    /// Compression quality (0.0 - 1.0, where 1.0 is highest quality)
-    /// Used by the SJSAssetExportSession export path to determine codec and bitrate.
+    /// Compression quality (0.0 - 1.0, where 1.0 is highest quality).
+    /// Used by the SJSAssetExportSession export path to determine codec and bitrate,
+    /// and by the native export path for quality-based preset selection via ``VideoFormat/exportPreset(quality:)``.
     public var compressionQuality: Double
 
     /// When true, uses AVAssetExportSession (Apple's native exporter) instead of SJSAssetExportSession.
@@ -51,7 +45,10 @@ public struct PreviewConfiguration: Codable, Sendable, Hashable {
     public var exportPresetName: nativeExportPreset?
     
     
+    /// The SJSAssetExportSession preset to use when ``useNativeExport`` is false.
     public var sJSExportPresetName: SjSExportPreset?
+
+    /// Maximum output resolution for the export. Defaults to 1080p.
     public var exportMaxResolution: ExportMaxResolution?
     // MARK: - Initialization
 
@@ -124,6 +121,9 @@ public struct PreviewConfiguration: Codable, Sendable, Hashable {
         }
     }
     
+    /// Base extract count for a given density name (static variant of ``baseExtractCount``).
+    /// - Parameter density: Density name string (e.g. "XL", "M", "XXS")
+    /// - Returns: Number of extracts for the given density
     public static func exterEtractCount(density: String) -> Int
     {switch density.uppercased() {
     case "XXL": return 4
@@ -211,11 +211,9 @@ public struct PreviewConfiguration: Codable, Sendable, Hashable {
         let resolution = exportMaxResolution?.rawValue ?? "auto"
         if useNativeExport {
             let preset = (exportPresetName?.displayString ?? effectiveExportPreset)
-              //  .replacingOccurrences(of: "AVAssetExportPreset", with: "")
             exportLabel = "\(preset)_nat"
         } else {
             let codec = sJSExportPresetName?.displayString ?? "default"
-         //   let res = exportMaxResolution?.rawValue ?? "auto"
             exportLabel = "\(codec)_sjs"
         }
         let configHash = "\(durationLabel)_\(density.name)_\(format.rawValue)_\(audioLabel)_\(exportLabel)_\(resolution)"

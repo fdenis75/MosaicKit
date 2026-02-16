@@ -40,21 +40,16 @@ public final class ThumbnailProcessor: @unchecked Sendable {
         accurate: Bool = false,
         progressHandler: ((Double) -> Void)? = nil
     ) async throws -> [(image: CGImage, timestamp: String)] {
-      //  logger.debug("🎬 Starting thumbnail extraction - File: \(file.lastPathComponent)")
-    //    logger.debug("📐 \(file.lastPathComponent) - Layout details - Grid: \(layout.rows)x\(layout.cols), Size: \(layout.thumbnailSize.width)x\(layout.thumbnailSize.height)")
-        
         let state = signposter.beginInterval("Extract Thumbnails")
         defer { signposter.endInterval("Extract Thumbnails", state) }
         
         let duration = try await asset.load(.duration).seconds
         let generator = configureGenerator(for: asset, accurate: accurate, preview: preview, layout: layout)
-       // logger.debug("⚙️ Generator configured - Duration: \(duration)s, Accurate: \(accurate)")
-        
+
         let times = try await calculateExtractionTimes(
             duration: duration,
             count: layout.positions.count
         )
-        //logger.debug("⏱️ Calculated \(times.count) extraction times")
         
         var thumbnails: [Int: (CGImage, String)] = [:] // Use dictionary to track by index
         var failedIndices: [Int] = []
@@ -94,7 +89,6 @@ public final class ThumbnailProcessor: @unchecked Sendable {
                 thumbnails[index] = (image, timestamp)
                 // Report progress
                 let calculatedProgress = 0.6 + (Double(thumbnails.count) / Double(times.count)) * 0.4
-                print("prpgress of timestamp  : \(calculatedProgress)")
                 progressHandler?(calculatedProgress)
             }
         }

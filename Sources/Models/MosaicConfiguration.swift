@@ -26,6 +26,7 @@ public struct MosaicConfiguration: Codable, Sendable {
     /// The compression quality for JPEG/HEIF output (0.0 to 1.0).
     public var compressionQuality: Double
 
+    /// Optional custom output directory. When nil, uses a default derived from the video's location.
     public var outputdirectory:  URL? = nil
 
     /// Whether to include the full directory path in the filename.
@@ -42,7 +43,7 @@ public struct MosaicConfiguration: Codable, Sendable {
         includeMetadata: Bool = true,
         useAccurateTimestamps: Bool = false,
         compressionQuality: Double = 0.4,
-        outputdirectory: URL? = nil, // Corrected typo here
+        outputdirectory: URL? = nil,
         fullPathInName: Bool = false
     ) {
         self.width = width
@@ -67,7 +68,6 @@ public struct MosaicConfiguration: Codable, Sendable {
         )
     }
 
-    // Changed to an instance method (removed `static`) and marked `mutating`
     public mutating func updateAspectRatio(new: AspectRatio)
     {
         self.layout.aspectRatio = new
@@ -76,8 +76,8 @@ public struct MosaicConfiguration: Codable, Sendable {
     // MARK: - Helper Methods
 
     /// Generate a configuration hash string for folder naming
-    /// Format: "{width}_{density}_{aspectRatio}"
-    /// Example: "5120_XL_16-9"
+    /// Format: "{width}_{density}_{aspectRatio}_{layoutType}"
+    /// Example: "5120_XL_16-9_custom"
     public var configurationHash: String {
         let aspectRatioString = layout.aspectRatio.rawValue.replacingOccurrences(of: ":", with: "-")
         return "\(width)_\(density.name)_\(aspectRatioString)_\(layout.layoutType.rawValue)"
@@ -125,11 +125,6 @@ public struct MosaicConfiguration: Codable, Sendable {
     public func generateFilename(originalFilename: String, videoInput: VideoInput) -> String {
         var sanitizedName = Self.sanitizeForFilePath(originalFilename)
 
-        // Remove existing extension
-   /*     if let lastDot = sanitizedName.lastIndex(of: ".") {
-            sanitizedName = String(sanitizedName[..<lastDot])
-        }*/
-
         // Build base filename
         var filename: String
 
@@ -140,7 +135,6 @@ public struct MosaicConfiguration: Codable, Sendable {
             let sanitizedPath = pathComponents.map { Self.sanitizeForFilePath($0) }.joined(separator: "_")
             filename = "_\(sanitizedPath)_\(sanitizedName)"
         } else {
-            // Original behavior: optional post ID prefix
             if let postID = videoInput.postID {
                 filename = "\(Self.sanitizeForFilePath(postID))_\(sanitizedName)"
             } else {

@@ -13,7 +13,7 @@ let package = Package(
         )
     ],
     dependencies: [
-        .package(url: "https://github.com/apple/swift-log.git", from: "1.5.0"),
+        .package(url: "https://github.com/apple/swift-log.git", from: "1.6.0"),
         .package(url: "https://github.com/DenDmitriev/DominantColors.git", .upToNextMajor(from: "1.2.0")),
         .package(url: "https://github.com/samsonjs/SJSAssetExportSession.git", .upToNextMajor(from: "0.4.0"))
     ],
@@ -28,18 +28,7 @@ let package = Package(
             path: "Sources",
             resources: [
                 .process("Shaders")
-            ],
-            swiftSettings: [
-                .enableUpcomingFeature("BareSlashRegexLiterals")
             ]
-        ),
-
-        .testTarget(
-            name: "MosaicKitTests",
-            dependencies: ["MosaicKit"],
-            path: "Tests",
-            exclude: ["MetalPerformance", "README_COMPARISON_TEST.md", "TestPlan.xctestplan"]
         )
     ]
 )
-

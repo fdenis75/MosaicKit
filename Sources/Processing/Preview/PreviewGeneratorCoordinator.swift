@@ -1,10 +1,3 @@
-//
-//  PreviewGeneratorCoordinator.swift
-//  MosaicKit
-//
-//  Created by Claude Code on 2025-11-23.
-//
-
 import Foundation
 import OSLog
 import AVFoundation

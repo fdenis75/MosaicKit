@@ -1,14 +1,8 @@
-//
-//  VideoFormat.swift
-//  MosaicKit
-//
-//  Created by Claude Code on 2025-11-23.
-//
-
 import Foundation
 import AVFoundation
 import SJSAssetExportSession
 
+/// AVAssetExportSession presets for native video export.
 public enum nativeExportPreset: String, Codable, Sendable, CaseIterable, Identifiable {
     public var id: Self {
 
@@ -67,6 +61,7 @@ public enum nativeExportPreset: String, Codable, Sendable, CaseIterable, Identif
 }
     
 
+/// SJSAssetExportSession presets for custom video export with codec and quality control.
 public enum SjSExportPreset: String, Codable, Sendable, CaseIterable, Identifiable {
     public var id: Self {
 
@@ -114,6 +109,7 @@ public enum SjSExportPreset: String, Codable, Sendable, CaseIterable, Identifiab
     
 }
 
+/// Maximum output resolution constraint for video export.
 public enum ExportMaxResolution: String, Codable, Sendable, CaseIterable,Identifiable {
     public var id: Self {
 
@@ -151,11 +147,13 @@ public enum ExportMaxResolution: String, Codable, Sendable, CaseIterable,Identif
     }
 }
 
+/// Video codec identifier.
 public enum Codec: String, Codable, Sendable, CaseIterable {
     case hevc = "hevc"
     case h264 = "h264"
 }
 
+/// Export quality level for SJSAssetExportSession presets.
 public enum ExportQuality: String, Codable, Sendable, CaseIterable {
     case NonApplicable = "NON_APPLICABLE"
     case high = "HIGH"
@@ -210,21 +208,21 @@ public enum ExportQuality: String, Codable, Sendable, CaseIterable {
     public func exportPreset(quality: Double) -> String {
         // Higher quality -> higher resolution preset
         if quality == 1.0 {
-            return AVAssetExportPresetPassthrough // 4K HEVC
+            return AVAssetExportPresetPassthrough // Passthrough (source codec/resolution)
         } else if quality == 0.9 {
-            return AVAssetExportPresetHighestQuality // 1080p HEVC
+            return AVAssetExportPresetHighestQuality // Highest quality H.264
         } else if quality == 0.8 {
-            return AVAssetExportPresetHEVC1920x1080 // 1080p H.264
+            return AVAssetExportPresetHEVC1920x1080 // 1080p HEVC
         } else if quality == 0.7 {
             return AVAssetExportPreset1920x1080 // 1080p H.264
         }
         else if quality == 0.6 {
-            return AVAssetExportPresetMediumQuality // 1080p H.264
+            return AVAssetExportPresetMediumQuality // Medium quality H.264
         }else if quality == 0.5 {
-            return AVAssetExportPresetLowQuality // 1080p H.264
+            return AVAssetExportPresetLowQuality // Low quality H.264
         }
         else {
-            return AVAssetExportPreset960x540 // 720p H.264
+            return AVAssetExportPreset960x540 // 540p H.264
         }
     }
     

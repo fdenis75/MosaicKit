@@ -1,10 +1,6 @@
 import Foundation
 import Logging
 import CoreGraphics
-/*#if os(macOS)
-import Metal
-#endif
-*/
 /// Main entry point for MosaicKit - Video Mosaic and Preview Generation Library
 ///
 /// MosaicKit provides:
@@ -150,12 +146,7 @@ public final class MosaicGenerator {
     public init(preference: MosaicGeneratorFactory.GeneratorPreference) throws {
         self.generatorPreference = preference
 
-        if #available(macOS 15, iOS 18, *) {
-            self.internalGenerator = try MosaicGeneratorFactory.createGenerator(preference: preference)
-        } else {
-            self.internalGenerator = nil
-            throw MosaicError.invalidConfiguration("MosaicKit requires macOS 15.0+ or iOS 18.0+")
-        }
+        self.internalGenerator = try MosaicGeneratorFactory.createGenerator(preference: preference)
     }
 
     /// Generate a mosaic from a single video file
@@ -170,10 +161,6 @@ public final class MosaicGenerator {
         outputDirectory: URL
     ) async throws -> URL {
         logger.info("Generating mosaic from \(videoURL.lastPathComponent)")
-
-        guard #available(macOS 15, iOS 18, *) else {
-            throw MosaicError.invalidConfiguration("MosaicKit requires macOS 15.0+ or iOS 18.0+")
-        }
 
         guard let generator = internalGenerator as? any MosaicGeneratorProtocol else {
             throw MosaicError.invalidConfiguration("Generator not available")
@@ -222,10 +209,6 @@ public final class MosaicGenerator {
         config: MosaicConfiguration
     ) async throws -> CGImage {
         logger.info("Generating mosaic image from \(videoURL.lastPathComponent)")
-
-        guard #available(macOS 15, iOS 18, *) else {
-            throw MosaicError.invalidConfiguration("MosaicKit requires macOS 15.0+ or iOS 18.0+")
-        }
 
         guard let generator = internalGenerator as? any MosaicGeneratorProtocol else {
             throw MosaicError.invalidConfiguration("Generator not available")

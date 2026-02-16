@@ -52,7 +52,7 @@ public struct MosaicGenerationImage: Sendable {
 
 @available(macOS 26, iOS 26, *)
 public struct MosaicGenerationProgress: Sendable {
-    /// The video being VideoInput
+    /// The video being processed.
     public let video: VideoInput
     
     /// The progress value (0.0 to 1.0)

@@ -508,23 +508,6 @@ public final class MetalImageProcessor: @unchecked Sendable {
     //    logger.debug("✅ Added border at position: (\(position.x), \(position.y)), size: \(size.width)x\(size.height)")
     }
 
-    private func saveDebugImage(_ image: CGImage, step: Int, description: String) {
-        let timestamp = Int(Date().timeIntervalSince1970)
-        let filename = "step\(step)_\(timestamp)_\(description).jpg"
-        let url = URL(filePath: "/Users/francois/Desktop/Test2").appendingPathComponent(filename)
-        
-        #if canImport(AppKit)
-        let nsImage = NSImage(cgImage: image, size: .zero)
-        if let data = nsImage.jpegData(compressionQuality: 0.8) {
-            try? data.write(to: url)
-        }
-        #elseif canImport(UIKit)
-        let uiImage = UIImage(cgImage: image)
-        if let data = uiImage.jpegData(compressionQuality: 0.8) {
-            try? data.write(to: url)
-        }
-        #endif
-    }
 
     func processImagesToMTLTexture(images: [CGImage], maxColors: Int, outputSize: CGSize) -> MTLTexture? {
         guard !images.isEmpty else { return nil }
@@ -533,11 +516,6 @@ public final class MetalImageProcessor: @unchecked Sendable {
         let sampleCount = min(3, images.count)
         let step = max(1, images.count / sampleCount)
         let sampledImages = stride(from: 0, to: images.count, by: step).prefix(sampleCount).map { images[$0] }
-        
-        // Save sampled images
-        for (_, image) in sampledImages.enumerated() {
-          //  saveDebugImage(image, step: 1, description: "sampled_\(index)")
-        }
         
         // Step 2: Extract dominant colors
         var allColors: [CGColor] = []
@@ -627,11 +605,6 @@ public final class MetalImageProcessor: @unchecked Sendable {
         gradientImage = ctx!.makeImage()
         #endif
 
-        // Save gradient image
-        if let gradientImage = gradientImage {
-      //      saveDebugImage(gradientImage, step: 4, description: "gradient")
-        }
-
         guard let imageForBlur = gradientImage else { return nil }
 
         // Step 5: Apply blur
@@ -645,8 +618,6 @@ public final class MetalImageProcessor: @unchecked Sendable {
         let cropped = outputCI.cropped(to: ciImage.extent)
         guard let blurredCG = ciContext.createCGImage(cropped, from: cropped.extent) else { return nil }
         
-        // Save blurred image
-      //  saveDebugImage(blurredCG, step: 5, description: "blurred")
         do {
             let texture = try createTexture(from: blurredCG)
             return texture

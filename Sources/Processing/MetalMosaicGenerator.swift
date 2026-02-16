@@ -4,9 +4,6 @@ import CoreImage
 import OSLog
 import Metal
 import VideoToolbox
-// Explicitly import the Error type if it's from the main app module
-// Assuming HyperMovieModels is part of the main app or another accessible module
-//@preconcurrency import enum HyperMovieModels.MosaicError
 #if canImport(AppKit)
 import AppKit
 #elseif canImport(UIKit)
@@ -21,7 +18,6 @@ typealias PlatformImage = UIImage
 #endif
 
 /// A Metal-accelerated implementation of the MosaicGeneratorProtocol
-//@available(macOS )
 public actor MetalMosaicGenerator: MosaicGeneratorProtocol {
     // MARK: - Properties
     
@@ -49,9 +45,7 @@ public actor MetalMosaicGenerator: MosaicGeneratorProtocol {
         self.thumbnailProcessor = ThumbnailProcessor(config: .default)
         do {
             self.metalProcessor = try MetalImageProcessor()
-            // logger.debug("✅ Metal mosaic generator initialized with Metal processor")
         } catch {
-            // logger.error("❌ Failed to initialize Metal processor: \(error.localizedDescription)")
             throw error
         }
     }
@@ -81,14 +75,9 @@ public actor MetalMosaicGenerator: MosaicGeneratorProtocol {
     ///   - config: The configuration for mosaic generation
     /// - Returns: The URL of the generated mosaic image
     public func generate(for video: VideoInput, config: MosaicConfiguration, forIphone: Bool = false) async throws -> URL {
-        // Provide default value for optional title
-        // logger.debug("🎯 Starting Metal-accelerated mosaic generation for video: \(video.title ?? "N/A")")
-        
-        // Safely unwrap video.id
-         let videoID = video.id 
+        let videoID = video.id
 
         if let existingTask = generationTasks[videoID] {
-            // logger.debug("⚡️ Reusing existing task for video: \(videoID.uuidString)")
             return try await existingTask.value
         }
         layoutProcessor.mosaicAspectRatio = config.layout.aspectRatio.ratio
@@ -97,21 +86,14 @@ public actor MetalMosaicGenerator: MosaicGeneratorProtocol {
             defer { trackPerformance(startTime: startTime) }
             
             do {
-                // Provide default values for optional title and duration
-                // logger.debug("📊 \(video.title ?? "N/A") Video details - Duration: \(video.duration ?? 0.0)s, Size: \(video.fileSize ?? 0) bytes")
-                
-                // Safely unwrap video.url
-               let videoURL = video.url
-            // Or a more specific error
-                 //   throw MosaicError.inputNotFound // Or a more specific error
-                
-                
+                let videoURL = video.url
+
                 // Get video duration and calculate frame count
                 let asset = AVURLAsset(url: videoURL) // Use unwrapped URL
                 /*
                 let duration = try await asset.load(.duration).seconds
                 let aspectRatio = try await calculateAspectRatio(from: asset)
-              //  // logger.debug("📐 Video aspect ratio: \(aspectRatio)")*/
+                */
                 let duration = video.duration ?? 9999.99
                 if duration < 5.0 {
                     throw MosaicError.invalidVideo("video too short")
@@ -129,7 +111,6 @@ public actor MetalMosaicGenerator: MosaicGeneratorProtocol {
                     layoutType: forIphone ? .iphone : config.layout.layoutType,
                     videoAR: aspectRatio
                 )
-                // logger.debug("🖼️ \(video.title ?? "N/A") - Calculated frame count: \(frameCount)")
                 layoutProcessor.updateAspectRatio(config.layout.aspectRatio.ratio)
                 // Calculate layout
                 progressHandlers[videoID]?(MosaicGenerationProgress(
@@ -153,7 +134,6 @@ public actor MetalMosaicGenerator: MosaicGeneratorProtocol {
                 let layoutTime = CFAbsoluteTimeGetCurrent()
                 let executionTime = layoutTime - startTime
                 print("layout process in \(executionTime) seconds")
-                // logger.debug("📏 \(video.title ?? "N/A") Layout calculated - Size: \(layout.mosaicSize.width)x\(layout.mosaicSize.height), Thumbnails: \(layout.thumbCount)")
                 
                 // Extract frames using VideoToolbox for hardware acceleration
        /*         progressHandlers[videoID]?(MosaicGenerationProgress(
@@ -173,7 +153,6 @@ public actor MetalMosaicGenerator: MosaicGeneratorProtocol {
                 // If metadata is enabled, create a header image with enhanced information
                 var metadataHeader: CGImage? = nil
                 if mutableConfig.includeMetadata { // Use mutableConfig
-                 //   // logger.debug("🏷️ Creating enhanced metadata header with complete video information")
                     metadataHeader = thumbnailProcessor.createMetadataHeader(
                         for: video,
                         width: Int(layout.mosaicSize.width),
@@ -240,8 +219,6 @@ public actor MetalMosaicGenerator: MosaicGeneratorProtocol {
                         ))
                     }
                 )
-               // // logger.debug("🖼️ Metal mosaic created - Size: \(mosaic.width)x\(mosaic.height)")
-                
                 progressHandlers[videoID]?(MosaicGenerationProgress(
                     video: video,
                     progress: 0.9,
@@ -255,8 +232,6 @@ public actor MetalMosaicGenerator: MosaicGeneratorProtocol {
                     forIphone:  forIphone
                 )
                 
-                // logger.debug("💾 Saved mosaic to: \(mosaicURL.path)")
-                
                 progressHandlers[videoID]?(MosaicGenerationProgress(
                     video: video,
                     progress: 0.999,
@@ -269,15 +244,14 @@ public actor MetalMosaicGenerator: MosaicGeneratorProtocol {
                 
                 return mosaicURL
             } catch {
-                // logger.error("❌ Metal mosaic generation failed: \(error.localizedDescription)")
                 throw error
             }
         }
-        
-        generationTasks[videoID] = task // Use unwrapped ID
+
+        generationTasks[videoID] = task
         defer {
-            generationTasks[videoID] = nil // Use unwrapped ID
-            progressHandlers[videoID] = nil // Use unwrapped ID
+            generationTasks[videoID] = nil
+            progressHandlers[videoID] = nil
         }
         
         return try await task.value
@@ -290,8 +264,6 @@ public actor MetalMosaicGenerator: MosaicGeneratorProtocol {
     ///   - forIphone: Whether to use iPhone-optimized layout
     /// - Returns: The generated mosaic as a CGImage
     public func generateMosaicImage(for video: VideoInput, config: MosaicConfiguration, forIphone: Bool = false) async throws -> CGImage {
-        // logger.debug("🎯 Starting Metal-accelerated mosaic image generation for video: \(video.title ?? \"N/A\")")
-
         let videoID = video.id
         layoutProcessor.mosaicAspectRatio = config.layout.aspectRatio.ratio
 
@@ -421,7 +393,6 @@ public actor MetalMosaicGenerator: MosaicGeneratorProtocol {
 
             return mosaic
         } catch {
-            // logger.error("❌ Metal mosaic image generation failed: \(error.localizedDescription)")
             throw error
         }
     }
@@ -429,9 +400,6 @@ public actor MetalMosaicGenerator: MosaicGeneratorProtocol {
     /// Cancel mosaic generation for a specific video
     /// - Parameter video: The video to cancel mosaic generation for
     public func cancel(for video: VideoInput) {
-        // Provide default value for optional title
-        // logger.debug("❌ Cancelling Metal mosaic generation for: \(video.title ?? "N/A")")
-     
         generationTasks[video.id]?.cancel()
             generationTasks[video.id] = nil
             frameCache[video.id] = nil
@@ -440,7 +408,6 @@ public actor MetalMosaicGenerator: MosaicGeneratorProtocol {
     
     /// Cancel all ongoing mosaic generation operations
     public func cancelAll() {
-        // logger.debug("❌ Cancelling all Metal mosaic generation tasks")
         generationTasks.values.forEach { $0.cancel() }
         generationTasks.removeAll()
         frameCache.removeAll()
@@ -490,8 +457,7 @@ public actor MetalMosaicGenerator: MosaicGeneratorProtocol {
         let state = signposter.beginInterval("Extract Frames VideoToolbox")
         defer { signposter.endInterval("Extract Frames VideoToolbox", state) }
         let startTime = CFAbsoluteTimeGetCurrent()
-        // logger.debug("🎬 Starting VideoToolbox frame extraction - Count: \(count)")
-        
+
         let duration = try await asset.load(.duration).seconds
         
         let times = calculateExtractionTimes(duration: duration, count: count)
@@ -499,7 +465,6 @@ public actor MetalMosaicGenerator: MosaicGeneratorProtocol {
         // Dynamically adjust concurrency based on system capabilities
         let processorCount = ProcessInfo.processInfo.activeProcessorCount
         let concurrencyLimit = min(max(processorCount - 1, 4), 16) // At least 4, at most 16
-        // logger.debug("⚙️ Using concurrency limit of \(concurrencyLimit) based on \(processorCount) available processors")
         
         let generator = AVAssetImageGenerator(asset: asset)
         generator.appliesPreferredTrackTransform = true
@@ -513,7 +478,6 @@ public actor MetalMosaicGenerator: MosaicGeneratorProtocol {
         var nextIndexToStart = 0
         var completed = 0
         let totalFrames = times.count
-        let progressInterval = max(1, totalFrames / 10)
         var collected: [(Int, CGImage, String)] = []
         
         func startNextIfPossible() {
@@ -546,10 +510,6 @@ public actor MetalMosaicGenerator: MosaicGeneratorProtocol {
                 let result = try await task.value
                 collected.append(result)
                 completed += 1
-                if completed % progressInterval == 0 || completed == totalFrames {
-                    let progress = Double(completed) / Double(totalFrames)
-                    // logger.debug("🔄 Frame extraction progress: \(Int(progress * 100))% (\(completed)/\(totalFrames))")
-                }
                 // Start more tasks if we have remaining work
                 startNextIfPossible()
             } catch {
@@ -558,10 +518,6 @@ public actor MetalMosaicGenerator: MosaicGeneratorProtocol {
                 throw error
             }
         }
-        
-        let extractionTime = CFAbsoluteTimeGetCurrent() - startTime
-        let framesPerSecond = Double(collected.count) / extractionTime
-        // logger.debug("✅ VideoToolbox extraction complete - Extracted \(collected.count) frames in \(String(format: "%.2f", extractionTime)) seconds (\(String(format: "%.1f", framesPerSecond)) frames/sec)")
         
         return collected.sorted { $0.0 < $1.0 }.map { ($0.1, $0.2) }
     }
@@ -621,7 +577,6 @@ public actor MetalMosaicGenerator: MosaicGeneratorProtocol {
         let transform = try await track?.load(.preferredTransform) ?? .identity
         let videoSize = size.applying(transform)
         let ratio = abs(videoSize.width / videoSize.height)
-        // logger.debug("📐 Calculated aspect ratio: \(ratio) from size: \(videoSize.width)x\(videoSize.height)")
         return ratio
     }
     
@@ -649,7 +604,6 @@ public actor MetalMosaicGenerator: MosaicGeneratorProtocol {
 
         // Use structured output directory if metadata is available
         guard let rootFolder = config.outputdirectory else {
-            // logger.error("❌ No output directory specified in configuration")
             throw MosaicError.saveFailed(URL(fileURLWithPath: "/dev/null"),
                                         NSError(domain: "com.mosaickit", code: -1,
                                                userInfo: [NSLocalizedDescriptionKey: "Missing output directory"]))
@@ -672,15 +626,11 @@ public actor MetalMosaicGenerator: MosaicGeneratorProtocol {
         let filename = config.generateFilename(originalFilename: originalFilename, videoInput: video)
 
         mosaicURL = baseOutputDirectory.appendingPathComponent(filename)
-        
-        // logger.debug("💾 Saving mosaic to: \(mosaicURL.path)")
-        
+
         // Check if file exists and handle overwrite option
         if FileManager.default.fileExists(atPath: mosaicURL.path) {
-           
-                // logger.debug("🔄 Overwriting existing file at: \(mosaicURL.path)")
-                try FileManager.default.removeItem(at: mosaicURL)
-            }
+            try FileManager.default.removeItem(at: mosaicURL)
+        }
         
         
         // Convert CGImage to platform-specific image for saving
@@ -696,29 +646,22 @@ public actor MetalMosaicGenerator: MosaicGeneratorProtocol {
         case .jpeg:
             data = getJpegData(from: platformImage, quality: config.compressionQuality)
             guard let imageData = data else {
-                // logger.error("❌ Failed to create image data")
                 throw MosaicError.saveFailed(mosaicURL, NSError(domain: "com.mosaicKit", code: -1))
             }
-            
+
             try imageData.write(to: mosaicURL)
-            // logger.debug("✅ Mosaic saved successfully")
-            // logger.debug("📸 Saving as JPEG, quality: \(config.compressionQuality)")
         case .png:
             data = getPngData(from: platformImage)
             guard let imageData = data else {
-                // logger.error("❌ Failed to create image data")
                 throw MosaicError.saveFailed(mosaicURL, NSError(domain: "com.mosaicKit", code: -1))
             }
-            
+
             try imageData.write(to: mosaicURL)
-            // logger.debug("✅ Mosaic saved successfully")
-            // logger.debug("📸 Saving as PNG")
         case .heif:
             if mosaicURL.deletingLastPathComponent().startAccessingSecurityScopedResource() {
                 defer { mosaicURL.deletingLastPathComponent().stopAccessingSecurityScopedResource() }
             }
             try await saveAsHEIC(mosaic, to: mosaicURL, quality: Float(config.compressionQuality))
-            // logger.debug("📸 Saving as JPEG (HEIF fallback), quality: \(config.compressionQuality)")
         }
         
         

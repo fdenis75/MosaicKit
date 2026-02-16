@@ -71,7 +71,6 @@ public enum AspectRatio: String, Codable, Sendable {
         }
     }
     
-    // MARK: - FIX: Made findNearest a static method
     public static func findNearest(to: CGSize) -> AspectRatio {
         let targetRatio = to.width / to.height
         return Self.allCases.min(by: {
@@ -127,7 +126,7 @@ public enum BorderColor: String, Codable, Sendable {
     case black
     case gray
 
-    /// Get the color value with specified opacity
+    /// Returns the grayscale intensity (0.0–1.0) for this color. The `opacity` parameter is ignored.
     public func withOpacity(_ opacity: CGFloat) -> CGFloat {
         switch self {
         case .white: return 1.0
