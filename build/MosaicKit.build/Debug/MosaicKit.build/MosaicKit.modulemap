@@ -1,0 +1,4 @@
+module MosaicKit {
+header "MosaicKit-Swift.h"
+export *
+}

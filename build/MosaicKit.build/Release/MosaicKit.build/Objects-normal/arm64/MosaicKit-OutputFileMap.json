@@ -1,0 +1,131 @@
+{
+  "" : {
+    "const-values" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Release/MosaicKit.build/Objects-normal/arm64/MosaicKit-primary.swiftconstvalues",
+    "dependencies" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Release/MosaicKit.build/Objects-normal/arm64/MosaicKit-primary.d",
+    "diagnostics" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Release/MosaicKit.build/Objects-normal/arm64/MosaicKit-primary.dia",
+    "emit-module-dependencies" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Release/MosaicKit.build/Objects-normal/arm64/MosaicKit-primary-emit-module.d",
+    "emit-module-diagnostics" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Release/MosaicKit.build/Objects-normal/arm64/MosaicKit-primary-emit-module.dia",
+    "pch" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Release/MosaicKit.build/Objects-normal/arm64/MosaicKit-primary-Bridging-header.pch",
+    "swift-dependencies" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Release/MosaicKit.build/Objects-normal/arm64/MosaicKit-primary.swiftdeps"
+  },
+  "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/Sources/Models/DensityConfig.swift" : {
+    "index-unit-output-path" : "/MosaicKit.build/Release/MosaicKit.build/Objects-normal/arm64/DensityConfig.o",
+    "llvm-bc" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Release/MosaicKit.build/Objects-normal/arm64/DensityConfig.bc",
+    "object" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Release/MosaicKit.build/Objects-normal/arm64/DensityConfig.o"
+  },
+  "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/Sources/Models/LayoutConfiguration.swift" : {
+    "index-unit-output-path" : "/MosaicKit.build/Release/MosaicKit.build/Objects-normal/arm64/LayoutConfiguration.o",
+    "llvm-bc" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Release/MosaicKit.build/Objects-normal/arm64/LayoutConfiguration.bc",
+    "object" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Release/MosaicKit.build/Objects-normal/arm64/LayoutConfiguration.o"
+  },
+  "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/Sources/Models/MosaicConfiguration.swift" : {
+    "index-unit-output-path" : "/MosaicKit.build/Release/MosaicKit.build/Objects-normal/arm64/MosaicConfiguration.o",
+    "llvm-bc" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Release/MosaicKit.build/Objects-normal/arm64/MosaicConfiguration.bc",
+    "object" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Release/MosaicKit.build/Objects-normal/arm64/MosaicConfiguration.o"
+  },
+  "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/Sources/Models/MosaicLayout.swift" : {
+    "index-unit-output-path" : "/MosaicKit.build/Release/MosaicKit.build/Objects-normal/arm64/MosaicLayout.o",
+    "llvm-bc" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Release/MosaicKit.build/Objects-normal/arm64/MosaicLayout.bc",
+    "object" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Release/MosaicKit.build/Objects-normal/arm64/MosaicLayout.o"
+  },
+  "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/Sources/Models/PreviewConfiguration.swift" : {
+    "index-unit-output-path" : "/MosaicKit.build/Release/MosaicKit.build/Objects-normal/arm64/PreviewConfiguration.o",
+    "llvm-bc" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Release/MosaicKit.build/Objects-normal/arm64/PreviewConfiguration.bc",
+    "object" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Release/MosaicKit.build/Objects-normal/arm64/PreviewConfiguration.o"
+  },
+  "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/Sources/Models/PreviewGenerationProgress.swift" : {
+    "index-unit-output-path" : "/MosaicKit.build/Release/MosaicKit.build/Objects-normal/arm64/PreviewGenerationProgress.o",
+    "llvm-bc" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Release/MosaicKit.build/Objects-normal/arm64/PreviewGenerationProgress.bc",
+    "object" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Release/MosaicKit.build/Objects-normal/arm64/PreviewGenerationProgress.o"
+  },
+  "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/Sources/Models/VideoFormat.swift" : {
+    "index-unit-output-path" : "/MosaicKit.build/Release/MosaicKit.build/Objects-normal/arm64/VideoFormat.o",
+    "llvm-bc" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Release/MosaicKit.build/Objects-normal/arm64/VideoFormat.bc",
+    "object" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Release/MosaicKit.build/Objects-normal/arm64/VideoFormat.o"
+  },
+  "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/Sources/Models/VideoInput.swift" : {
+    "index-unit-output-path" : "/MosaicKit.build/Release/MosaicKit.build/Objects-normal/arm64/VideoInput.o",
+    "llvm-bc" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Release/MosaicKit.build/Objects-normal/arm64/VideoInput.bc",
+    "object" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Release/MosaicKit.build/Objects-normal/arm64/VideoInput.o"
+  },
+  "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/Sources/MosaicKit.swift" : {
+    "index-unit-output-path" : "/MosaicKit.build/Release/MosaicKit.build/Objects-normal/arm64/MosaicKit-73922a67f834de67646bd1623e149414.o",
+    "llvm-bc" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Release/MosaicKit.build/Objects-normal/arm64/MosaicKit-73922a67f834de67646bd1623e149414.bc",
+    "object" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Release/MosaicKit.build/Objects-normal/arm64/MosaicKit-73922a67f834de67646bd1623e149414.o"
+  },
+  "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/Sources/Processing/CoreGraphicsImageProcessor.swift" : {
+    "index-unit-output-path" : "/MosaicKit.build/Release/MosaicKit.build/Objects-normal/arm64/CoreGraphicsImageProcessor.o",
+    "llvm-bc" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Release/MosaicKit.build/Objects-normal/arm64/CoreGraphicsImageProcessor.bc",
+    "object" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Release/MosaicKit.build/Objects-normal/arm64/CoreGraphicsImageProcessor.o"
+  },
+  "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/Sources/Processing/CoreGraphicsMosaicGenerator.swift" : {
+    "index-unit-output-path" : "/MosaicKit.build/Release/MosaicKit.build/Objects-normal/arm64/CoreGraphicsMosaicGenerator.o",
+    "llvm-bc" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Release/MosaicKit.build/Objects-normal/arm64/CoreGraphicsMosaicGenerator.bc",
+    "object" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Release/MosaicKit.build/Objects-normal/arm64/CoreGraphicsMosaicGenerator.o"
+  },
+  "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/Sources/Processing/LayoutProcessor.swift" : {
+    "index-unit-output-path" : "/MosaicKit.build/Release/MosaicKit.build/Objects-normal/arm64/LayoutProcessor.o",
+    "llvm-bc" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Release/MosaicKit.build/Objects-normal/arm64/LayoutProcessor.bc",
+    "object" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Release/MosaicKit.build/Objects-normal/arm64/LayoutProcessor.o"
+  },
+  "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/Sources/Processing/MetalImageProcessor.swift" : {
+    "index-unit-output-path" : "/MosaicKit.build/Release/MosaicKit.build/Objects-normal/arm64/MetalImageProcessor.o",
+    "llvm-bc" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Release/MosaicKit.build/Objects-normal/arm64/MetalImageProcessor.bc",
+    "object" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Release/MosaicKit.build/Objects-normal/arm64/MetalImageProcessor.o"
+  },
+  "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/Sources/Processing/MetalMosaicGenerator.swift" : {
+    "index-unit-output-path" : "/MosaicKit.build/Release/MosaicKit.build/Objects-normal/arm64/MetalMosaicGenerator.o",
+    "llvm-bc" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Release/MosaicKit.build/Objects-normal/arm64/MetalMosaicGenerator.bc",
+    "object" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Release/MosaicKit.build/Objects-normal/arm64/MetalMosaicGenerator.o"
+  },
+  "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/Sources/Processing/MosaicGeneratorCoordinator.swift" : {
+    "index-unit-output-path" : "/MosaicKit.build/Release/MosaicKit.build/Objects-normal/arm64/MosaicGeneratorCoordinator.o",
+    "llvm-bc" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Release/MosaicKit.build/Objects-normal/arm64/MosaicGeneratorCoordinator.bc",
+    "object" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Release/MosaicKit.build/Objects-normal/arm64/MosaicGeneratorCoordinator.o"
+  },
+  "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/Sources/Processing/MosaicGeneratorFactory.swift" : {
+    "index-unit-output-path" : "/MosaicKit.build/Release/MosaicKit.build/Objects-normal/arm64/MosaicGeneratorFactory.o",
+    "llvm-bc" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Release/MosaicKit.build/Objects-normal/arm64/MosaicGeneratorFactory.bc",
+    "object" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Release/MosaicKit.build/Objects-normal/arm64/MosaicGeneratorFactory.o"
+  },
+  "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/Sources/Processing/MosaicGeneratorProtocol.swift" : {
+    "index-unit-output-path" : "/MosaicKit.build/Release/MosaicKit.build/Objects-normal/arm64/MosaicGeneratorProtocol.o",
+    "llvm-bc" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Release/MosaicKit.build/Objects-normal/arm64/MosaicGeneratorProtocol.bc",
+    "object" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Release/MosaicKit.build/Objects-normal/arm64/MosaicGeneratorProtocol.o"
+  },
+  "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/Sources/Processing/Preview/PreviewError.swift" : {
+    "index-unit-output-path" : "/MosaicKit.build/Release/MosaicKit.build/Objects-normal/arm64/PreviewError.o",
+    "llvm-bc" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Release/MosaicKit.build/Objects-normal/arm64/PreviewError.bc",
+    "object" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Release/MosaicKit.build/Objects-normal/arm64/PreviewError.o"
+  },
+  "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/Sources/Processing/Preview/PreviewGeneratorCoordinator.swift" : {
+    "index-unit-output-path" : "/MosaicKit.build/Release/MosaicKit.build/Objects-normal/arm64/PreviewGeneratorCoordinator.o",
+    "llvm-bc" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Release/MosaicKit.build/Objects-normal/arm64/PreviewGeneratorCoordinator.bc",
+    "object" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Release/MosaicKit.build/Objects-normal/arm64/PreviewGeneratorCoordinator.o"
+  },
+  "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/Sources/Processing/Preview/PreviewVideoGenerator.swift" : {
+    "index-unit-output-path" : "/MosaicKit.build/Release/MosaicKit.build/Objects-normal/arm64/PreviewVideoGenerator.o",
+    "llvm-bc" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Release/MosaicKit.build/Objects-normal/arm64/PreviewVideoGenerator.bc",
+    "object" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Release/MosaicKit.build/Objects-normal/arm64/PreviewVideoGenerator.o"
+  },
+  "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/Sources/Processing/ProcessingError.swift" : {
+    "index-unit-output-path" : "/MosaicKit.build/Release/MosaicKit.build/Objects-normal/arm64/ProcessingError.o",
+    "llvm-bc" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Release/MosaicKit.build/Objects-normal/arm64/ProcessingError.bc",
+    "object" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Release/MosaicKit.build/Objects-normal/arm64/ProcessingError.o"
+  },
+  "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/Sources/Processing/ThumbnailProcessor.swift" : {
+    "index-unit-output-path" : "/MosaicKit.build/Release/MosaicKit.build/Objects-normal/arm64/ThumbnailProcessor.o",
+    "llvm-bc" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Release/MosaicKit.build/Objects-normal/arm64/ThumbnailProcessor.bc",
+    "object" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Release/MosaicKit.build/Objects-normal/arm64/ThumbnailProcessor.o"
+  },
+  "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/Sources/Processing/VideoError.swift" : {
+    "index-unit-output-path" : "/MosaicKit.build/Release/MosaicKit.build/Objects-normal/arm64/VideoError.o",
+    "llvm-bc" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Release/MosaicKit.build/Objects-normal/arm64/VideoError.bc",
+    "object" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Release/MosaicKit.build/Objects-normal/arm64/VideoError.o"
+  },
+  "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Release/MosaicKit.build/DerivedSources/resource_bundle_accessor.swift" : {
+    "index-unit-output-path" : "/MosaicKit.build/Release/MosaicKit.build/Objects-normal/arm64/resource_bundle_accessor.o",
+    "llvm-bc" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Release/MosaicKit.build/Objects-normal/arm64/resource_bundle_accessor.bc",
+    "object" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Release/MosaicKit.build/Objects-normal/arm64/resource_bundle_accessor.o"
+  }
+}

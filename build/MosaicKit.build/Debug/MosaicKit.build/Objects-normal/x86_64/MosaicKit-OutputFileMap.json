@@ -1,0 +1,249 @@
+{
+  "" : {
+    "diagnostics" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/x86_64/MosaicKit-primary.dia",
+    "emit-module-dependencies" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/x86_64/MosaicKit-primary-emit-module.d",
+    "emit-module-diagnostics" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/x86_64/MosaicKit-primary-emit-module.dia",
+    "pch" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/x86_64/MosaicKit-primary-Bridging-header.pch",
+    "swift-dependencies" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/x86_64/MosaicKit-primary.swiftdeps"
+  },
+  "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/Sources/Models/DensityConfig.swift" : {
+    "const-values" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/x86_64/DensityConfig.swiftconstvalues",
+    "dependencies" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/x86_64/DensityConfig.d",
+    "diagnostics" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/x86_64/DensityConfig.dia",
+    "index-unit-output-path" : "/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/x86_64/DensityConfig.o",
+    "llvm-bc" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/x86_64/DensityConfig.bc",
+    "object" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/x86_64/DensityConfig.o",
+    "swift-dependencies" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/x86_64/DensityConfig.swiftdeps",
+    "swiftmodule" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/x86_64/DensityConfig~partial.swiftmodule"
+  },
+  "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/Sources/Models/LayoutConfiguration.swift" : {
+    "const-values" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/x86_64/LayoutConfiguration.swiftconstvalues",
+    "dependencies" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/x86_64/LayoutConfiguration.d",
+    "diagnostics" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/x86_64/LayoutConfiguration.dia",
+    "index-unit-output-path" : "/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/x86_64/LayoutConfiguration.o",
+    "llvm-bc" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/x86_64/LayoutConfiguration.bc",
+    "object" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/x86_64/LayoutConfiguration.o",
+    "swift-dependencies" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/x86_64/LayoutConfiguration.swiftdeps",
+    "swiftmodule" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/x86_64/LayoutConfiguration~partial.swiftmodule"
+  },
+  "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/Sources/Models/MosaicConfiguration.swift" : {
+    "const-values" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/x86_64/MosaicConfiguration.swiftconstvalues",
+    "dependencies" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/x86_64/MosaicConfiguration.d",
+    "diagnostics" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/x86_64/MosaicConfiguration.dia",
+    "index-unit-output-path" : "/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/x86_64/MosaicConfiguration.o",
+    "llvm-bc" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/x86_64/MosaicConfiguration.bc",
+    "object" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/x86_64/MosaicConfiguration.o",
+    "swift-dependencies" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/x86_64/MosaicConfiguration.swiftdeps",
+    "swiftmodule" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/x86_64/MosaicConfiguration~partial.swiftmodule"
+  },
+  "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/Sources/Models/MosaicLayout.swift" : {
+    "const-values" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/x86_64/MosaicLayout.swiftconstvalues",
+    "dependencies" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/x86_64/MosaicLayout.d",
+    "diagnostics" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/x86_64/MosaicLayout.dia",
+    "index-unit-output-path" : "/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/x86_64/MosaicLayout.o",
+    "llvm-bc" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/x86_64/MosaicLayout.bc",
+    "object" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/x86_64/MosaicLayout.o",
+    "swift-dependencies" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/x86_64/MosaicLayout.swiftdeps",
+    "swiftmodule" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/x86_64/MosaicLayout~partial.swiftmodule"
+  },
+  "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/Sources/Models/PreviewConfiguration.swift" : {
+    "const-values" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/x86_64/PreviewConfiguration.swiftconstvalues",
+    "dependencies" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/x86_64/PreviewConfiguration.d",
+    "diagnostics" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/x86_64/PreviewConfiguration.dia",
+    "index-unit-output-path" : "/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/x86_64/PreviewConfiguration.o",
+    "llvm-bc" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/x86_64/PreviewConfiguration.bc",
+    "object" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/x86_64/PreviewConfiguration.o",
+    "swift-dependencies" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/x86_64/PreviewConfiguration.swiftdeps",
+    "swiftmodule" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/x86_64/PreviewConfiguration~partial.swiftmodule"
+  },
+  "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/Sources/Models/PreviewGenerationProgress.swift" : {
+    "const-values" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/x86_64/PreviewGenerationProgress.swiftconstvalues",
+    "dependencies" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/x86_64/PreviewGenerationProgress.d",
+    "diagnostics" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/x86_64/PreviewGenerationProgress.dia",
+    "index-unit-output-path" : "/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/x86_64/PreviewGenerationProgress.o",
+    "llvm-bc" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/x86_64/PreviewGenerationProgress.bc",
+    "object" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/x86_64/PreviewGenerationProgress.o",
+    "swift-dependencies" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/x86_64/PreviewGenerationProgress.swiftdeps",
+    "swiftmodule" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/x86_64/PreviewGenerationProgress~partial.swiftmodule"
+  },
+  "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/Sources/Models/VideoFormat.swift" : {
+    "const-values" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/x86_64/VideoFormat.swiftconstvalues",
+    "dependencies" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/x86_64/VideoFormat.d",
+    "diagnostics" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/x86_64/VideoFormat.dia",
+    "index-unit-output-path" : "/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/x86_64/VideoFormat.o",
+    "llvm-bc" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/x86_64/VideoFormat.bc",
+    "object" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/x86_64/VideoFormat.o",
+    "swift-dependencies" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/x86_64/VideoFormat.swiftdeps",
+    "swiftmodule" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/x86_64/VideoFormat~partial.swiftmodule"
+  },
+  "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/Sources/Models/VideoInput.swift" : {
+    "const-values" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/x86_64/VideoInput.swiftconstvalues",
+    "dependencies" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/x86_64/VideoInput.d",
+    "diagnostics" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/x86_64/VideoInput.dia",
+    "index-unit-output-path" : "/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/x86_64/VideoInput.o",
+    "llvm-bc" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/x86_64/VideoInput.bc",
+    "object" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/x86_64/VideoInput.o",
+    "swift-dependencies" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/x86_64/VideoInput.swiftdeps",
+    "swiftmodule" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/x86_64/VideoInput~partial.swiftmodule"
+  },
+  "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/Sources/MosaicKit.swift" : {
+    "const-values" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/x86_64/MosaicKit-73922a67f834de67646bd1623e149414.swiftconstvalues",
+    "dependencies" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/x86_64/MosaicKit-73922a67f834de67646bd1623e149414.d",
+    "diagnostics" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/x86_64/MosaicKit-73922a67f834de67646bd1623e149414.dia",
+    "index-unit-output-path" : "/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/x86_64/MosaicKit-73922a67f834de67646bd1623e149414.o",
+    "llvm-bc" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/x86_64/MosaicKit-73922a67f834de67646bd1623e149414.bc",
+    "object" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/x86_64/MosaicKit-73922a67f834de67646bd1623e149414.o",
+    "swift-dependencies" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/x86_64/MosaicKit-73922a67f834de67646bd1623e149414.swiftdeps",
+    "swiftmodule" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/x86_64/MosaicKit-73922a67f834de67646bd1623e149414~partial.swiftmodule"
+  },
+  "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/Sources/Processing/CoreGraphicsImageProcessor.swift" : {
+    "const-values" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/x86_64/CoreGraphicsImageProcessor.swiftconstvalues",
+    "dependencies" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/x86_64/CoreGraphicsImageProcessor.d",
+    "diagnostics" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/x86_64/CoreGraphicsImageProcessor.dia",
+    "index-unit-output-path" : "/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/x86_64/CoreGraphicsImageProcessor.o",
+    "llvm-bc" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/x86_64/CoreGraphicsImageProcessor.bc",
+    "object" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/x86_64/CoreGraphicsImageProcessor.o",
+    "swift-dependencies" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/x86_64/CoreGraphicsImageProcessor.swiftdeps",
+    "swiftmodule" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/x86_64/CoreGraphicsImageProcessor~partial.swiftmodule"
+  },
+  "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/Sources/Processing/CoreGraphicsMosaicGenerator.swift" : {
+    "const-values" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/x86_64/CoreGraphicsMosaicGenerator.swiftconstvalues",
+    "dependencies" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/x86_64/CoreGraphicsMosaicGenerator.d",
+    "diagnostics" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/x86_64/CoreGraphicsMosaicGenerator.dia",
+    "index-unit-output-path" : "/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/x86_64/CoreGraphicsMosaicGenerator.o",
+    "llvm-bc" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/x86_64/CoreGraphicsMosaicGenerator.bc",
+    "object" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/x86_64/CoreGraphicsMosaicGenerator.o",
+    "swift-dependencies" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/x86_64/CoreGraphicsMosaicGenerator.swiftdeps",
+    "swiftmodule" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/x86_64/CoreGraphicsMosaicGenerator~partial.swiftmodule"
+  },
+  "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/Sources/Processing/LayoutProcessor.swift" : {
+    "const-values" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/x86_64/LayoutProcessor.swiftconstvalues",
+    "dependencies" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/x86_64/LayoutProcessor.d",
+    "diagnostics" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/x86_64/LayoutProcessor.dia",
+    "index-unit-output-path" : "/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/x86_64/LayoutProcessor.o",
+    "llvm-bc" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/x86_64/LayoutProcessor.bc",
+    "object" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/x86_64/LayoutProcessor.o",
+    "swift-dependencies" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/x86_64/LayoutProcessor.swiftdeps",
+    "swiftmodule" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/x86_64/LayoutProcessor~partial.swiftmodule"
+  },
+  "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/Sources/Processing/MetalImageProcessor.swift" : {
+    "const-values" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/x86_64/MetalImageProcessor.swiftconstvalues",
+    "dependencies" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/x86_64/MetalImageProcessor.d",
+    "diagnostics" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/x86_64/MetalImageProcessor.dia",
+    "index-unit-output-path" : "/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/x86_64/MetalImageProcessor.o",
+    "llvm-bc" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/x86_64/MetalImageProcessor.bc",
+    "object" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/x86_64/MetalImageProcessor.o",
+    "swift-dependencies" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/x86_64/MetalImageProcessor.swiftdeps",
+    "swiftmodule" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/x86_64/MetalImageProcessor~partial.swiftmodule"
+  },
+  "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/Sources/Processing/MetalMosaicGenerator.swift" : {
+    "const-values" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/x86_64/MetalMosaicGenerator.swiftconstvalues",
+    "dependencies" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/x86_64/MetalMosaicGenerator.d",
+    "diagnostics" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/x86_64/MetalMosaicGenerator.dia",
+    "index-unit-output-path" : "/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/x86_64/MetalMosaicGenerator.o",
+    "llvm-bc" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/x86_64/MetalMosaicGenerator.bc",
+    "object" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/x86_64/MetalMosaicGenerator.o",
+    "swift-dependencies" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/x86_64/MetalMosaicGenerator.swiftdeps",
+    "swiftmodule" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/x86_64/MetalMosaicGenerator~partial.swiftmodule"
+  },
+  "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/Sources/Processing/MosaicGeneratorCoordinator.swift" : {
+    "const-values" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/x86_64/MosaicGeneratorCoordinator.swiftconstvalues",
+    "dependencies" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/x86_64/MosaicGeneratorCoordinator.d",
+    "diagnostics" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/x86_64/MosaicGeneratorCoordinator.dia",
+    "index-unit-output-path" : "/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/x86_64/MosaicGeneratorCoordinator.o",
+    "llvm-bc" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/x86_64/MosaicGeneratorCoordinator.bc",
+    "object" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/x86_64/MosaicGeneratorCoordinator.o",
+    "swift-dependencies" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/x86_64/MosaicGeneratorCoordinator.swiftdeps",
+    "swiftmodule" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/x86_64/MosaicGeneratorCoordinator~partial.swiftmodule"
+  },
+  "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/Sources/Processing/MosaicGeneratorFactory.swift" : {
+    "const-values" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/x86_64/MosaicGeneratorFactory.swiftconstvalues",
+    "dependencies" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/x86_64/MosaicGeneratorFactory.d",
+    "diagnostics" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/x86_64/MosaicGeneratorFactory.dia",
+    "index-unit-output-path" : "/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/x86_64/MosaicGeneratorFactory.o",
+    "llvm-bc" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/x86_64/MosaicGeneratorFactory.bc",
+    "object" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/x86_64/MosaicGeneratorFactory.o",
+    "swift-dependencies" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/x86_64/MosaicGeneratorFactory.swiftdeps",
+    "swiftmodule" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/x86_64/MosaicGeneratorFactory~partial.swiftmodule"
+  },
+  "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/Sources/Processing/MosaicGeneratorProtocol.swift" : {
+    "const-values" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/x86_64/MosaicGeneratorProtocol.swiftconstvalues",
+    "dependencies" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/x86_64/MosaicGeneratorProtocol.d",
+    "diagnostics" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/x86_64/MosaicGeneratorProtocol.dia",
+    "index-unit-output-path" : "/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/x86_64/MosaicGeneratorProtocol.o",
+    "llvm-bc" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/x86_64/MosaicGeneratorProtocol.bc",
+    "object" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/x86_64/MosaicGeneratorProtocol.o",
+    "swift-dependencies" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/x86_64/MosaicGeneratorProtocol.swiftdeps",
+    "swiftmodule" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/x86_64/MosaicGeneratorProtocol~partial.swiftmodule"
+  },
+  "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/Sources/Processing/Preview/PreviewError.swift" : {
+    "const-values" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/x86_64/PreviewError.swiftconstvalues",
+    "dependencies" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/x86_64/PreviewError.d",
+    "diagnostics" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/x86_64/PreviewError.dia",
+    "index-unit-output-path" : "/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/x86_64/PreviewError.o",
+    "llvm-bc" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/x86_64/PreviewError.bc",
+    "object" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/x86_64/PreviewError.o",
+    "swift-dependencies" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/x86_64/PreviewError.swiftdeps",
+    "swiftmodule" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/x86_64/PreviewError~partial.swiftmodule"
+  },
+  "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/Sources/Processing/Preview/PreviewGeneratorCoordinator.swift" : {
+    "const-values" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/x86_64/PreviewGeneratorCoordinator.swiftconstvalues",
+    "dependencies" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/x86_64/PreviewGeneratorCoordinator.d",
+    "diagnostics" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/x86_64/PreviewGeneratorCoordinator.dia",
+    "index-unit-output-path" : "/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/x86_64/PreviewGeneratorCoordinator.o",
+    "llvm-bc" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/x86_64/PreviewGeneratorCoordinator.bc",
+    "object" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/x86_64/PreviewGeneratorCoordinator.o",
+    "swift-dependencies" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/x86_64/PreviewGeneratorCoordinator.swiftdeps",
+    "swiftmodule" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/x86_64/PreviewGeneratorCoordinator~partial.swiftmodule"
+  },
+  "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/Sources/Processing/Preview/PreviewVideoGenerator.swift" : {
+    "const-values" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/x86_64/PreviewVideoGenerator.swiftconstvalues",
+    "dependencies" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/x86_64/PreviewVideoGenerator.d",
+    "diagnostics" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/x86_64/PreviewVideoGenerator.dia",
+    "index-unit-output-path" : "/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/x86_64/PreviewVideoGenerator.o",
+    "llvm-bc" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/x86_64/PreviewVideoGenerator.bc",
+    "object" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/x86_64/PreviewVideoGenerator.o",
+    "swift-dependencies" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/x86_64/PreviewVideoGenerator.swiftdeps",
+    "swiftmodule" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/x86_64/PreviewVideoGenerator~partial.swiftmodule"
+  },
+  "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/Sources/Processing/ProcessingError.swift" : {
+    "const-values" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/x86_64/ProcessingError.swiftconstvalues",
+    "dependencies" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/x86_64/ProcessingError.d",
+    "diagnostics" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/x86_64/ProcessingError.dia",
+    "index-unit-output-path" : "/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/x86_64/ProcessingError.o",
+    "llvm-bc" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/x86_64/ProcessingError.bc",
+    "object" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/x86_64/ProcessingError.o",
+    "swift-dependencies" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/x86_64/ProcessingError.swiftdeps",
+    "swiftmodule" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/x86_64/ProcessingError~partial.swiftmodule"
+  },
+  "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/Sources/Processing/ThumbnailProcessor.swift" : {
+    "const-values" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/x86_64/ThumbnailProcessor.swiftconstvalues",
+    "dependencies" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/x86_64/ThumbnailProcessor.d",
+    "diagnostics" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/x86_64/ThumbnailProcessor.dia",
+    "index-unit-output-path" : "/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/x86_64/ThumbnailProcessor.o",
+    "llvm-bc" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/x86_64/ThumbnailProcessor.bc",
+    "object" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/x86_64/ThumbnailProcessor.o",
+    "swift-dependencies" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/x86_64/ThumbnailProcessor.swiftdeps",
+    "swiftmodule" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/x86_64/ThumbnailProcessor~partial.swiftmodule"
+  },
+  "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/Sources/Processing/VideoError.swift" : {
+    "const-values" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/x86_64/VideoError.swiftconstvalues",
+    "dependencies" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/x86_64/VideoError.d",
+    "diagnostics" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/x86_64/VideoError.dia",
+    "index-unit-output-path" : "/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/x86_64/VideoError.o",
+    "llvm-bc" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/x86_64/VideoError.bc",
+    "object" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/x86_64/VideoError.o",
+    "swift-dependencies" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/x86_64/VideoError.swiftdeps",
+    "swiftmodule" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/x86_64/VideoError~partial.swiftmodule"
+  },
+  "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/DerivedSources/resource_bundle_accessor.swift" : {
+    "const-values" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/x86_64/resource_bundle_accessor.swiftconstvalues",
+    "dependencies" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/x86_64/resource_bundle_accessor.d",
+    "diagnostics" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/x86_64/resource_bundle_accessor.dia",
+    "index-unit-output-path" : "/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/x86_64/resource_bundle_accessor.o",
+    "llvm-bc" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/x86_64/resource_bundle_accessor.bc",
+    "object" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/x86_64/resource_bundle_accessor.o",
+    "swift-dependencies" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/x86_64/resource_bundle_accessor.swiftdeps",
+    "swiftmodule" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/x86_64/resource_bundle_accessor~partial.swiftmodule"
+  }
+}
