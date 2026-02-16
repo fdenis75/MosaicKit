@@ -1,0 +1,23 @@
+{
+  "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/Sources/Processing/Preview/PreviewError.swift" : {
+    "const-values" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/arm64/PreviewError.swiftconstvalues",
+    "dependencies" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/arm64/PreviewError.d",
+    "diagnostics" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/arm64/PreviewError.dia",
+    "object" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/arm64/PreviewError.o",
+    "swift-dependencies" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/arm64/PreviewError.swiftdeps"
+  },
+  "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/Sources/Processing/Preview/PreviewGeneratorCoordinator.swift" : {
+    "const-values" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/arm64/PreviewGeneratorCoordinator.swiftconstvalues",
+    "dependencies" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/arm64/PreviewGeneratorCoordinator.d",
+    "diagnostics" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/arm64/PreviewGeneratorCoordinator.dia",
+    "object" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/arm64/PreviewGeneratorCoordinator.o",
+    "swift-dependencies" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/arm64/PreviewGeneratorCoordinator.swiftdeps"
+  },
+  "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/Sources/Processing/Preview/PreviewVideoGenerator.swift" : {
+    "const-values" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/arm64/PreviewVideoGenerator.swiftconstvalues",
+    "dependencies" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/arm64/PreviewVideoGenerator.d",
+    "diagnostics" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/arm64/PreviewVideoGenerator.dia",
+    "object" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/arm64/PreviewVideoGenerator.o",
+    "swift-dependencies" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/arm64/PreviewVideoGenerator.swiftdeps"
+  }
+}

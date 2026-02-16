@@ -1,0 +1,23 @@
+{
+  "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/Sources/Models/MosaicConfiguration.swift" : {
+    "const-values" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/arm64/MosaicConfiguration.swiftconstvalues",
+    "dependencies" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/arm64/MosaicConfiguration.d",
+    "diagnostics" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/arm64/MosaicConfiguration.dia",
+    "object" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/arm64/MosaicConfiguration.o",
+    "swift-dependencies" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/arm64/MosaicConfiguration.swiftdeps"
+  },
+  "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/Sources/Models/MosaicLayout.swift" : {
+    "const-values" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/arm64/MosaicLayout.swiftconstvalues",
+    "dependencies" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/arm64/MosaicLayout.d",
+    "diagnostics" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/arm64/MosaicLayout.dia",
+    "object" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/arm64/MosaicLayout.o",
+    "swift-dependencies" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/arm64/MosaicLayout.swiftdeps"
+  },
+  "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/Sources/Models/PreviewConfiguration.swift" : {
+    "const-values" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/arm64/PreviewConfiguration.swiftconstvalues",
+    "dependencies" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/arm64/PreviewConfiguration.d",
+    "diagnostics" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/arm64/PreviewConfiguration.dia",
+    "object" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/arm64/PreviewConfiguration.o",
+    "swift-dependencies" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/arm64/PreviewConfiguration.swiftdeps"
+  }
+}

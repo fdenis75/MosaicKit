@@ -1,0 +1,23 @@
+{
+  "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/Sources/Processing/ProcessingError.swift" : {
+    "const-values" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/arm64/ProcessingError.swiftconstvalues",
+    "dependencies" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/arm64/ProcessingError.d",
+    "diagnostics" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/arm64/ProcessingError.dia",
+    "object" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/arm64/ProcessingError.o",
+    "swift-dependencies" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/arm64/ProcessingError.swiftdeps"
+  },
+  "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/Sources/Processing/ThumbnailProcessor.swift" : {
+    "const-values" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/arm64/ThumbnailProcessor.swiftconstvalues",
+    "dependencies" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/arm64/ThumbnailProcessor.d",
+    "diagnostics" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/arm64/ThumbnailProcessor.dia",
+    "object" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/arm64/ThumbnailProcessor.o",
+    "swift-dependencies" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/arm64/ThumbnailProcessor.swiftdeps"
+  },
+  "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/Sources/Processing/VideoError.swift" : {
+    "const-values" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/arm64/VideoError.swiftconstvalues",
+    "dependencies" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/arm64/VideoError.d",
+    "diagnostics" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/arm64/VideoError.dia",
+    "object" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/arm64/VideoError.o",
+    "swift-dependencies" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/arm64/VideoError.swiftdeps"
+  }
+}

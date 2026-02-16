@@ -1,0 +1,23 @@
+{
+  "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/Sources/Models/PreviewGenerationProgress.swift" : {
+    "const-values" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/x86_64/PreviewGenerationProgress.swiftconstvalues",
+    "dependencies" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/x86_64/PreviewGenerationProgress.d",
+    "diagnostics" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/x86_64/PreviewGenerationProgress.dia",
+    "object" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/x86_64/PreviewGenerationProgress.o",
+    "swift-dependencies" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/x86_64/PreviewGenerationProgress.swiftdeps"
+  },
+  "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/Sources/Models/VideoFormat.swift" : {
+    "const-values" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/x86_64/VideoFormat.swiftconstvalues",
+    "dependencies" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/x86_64/VideoFormat.d",
+    "diagnostics" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/x86_64/VideoFormat.dia",
+    "object" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/x86_64/VideoFormat.o",
+    "swift-dependencies" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/x86_64/VideoFormat.swiftdeps"
+  },
+  "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/Sources/Models/VideoInput.swift" : {
+    "const-values" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/x86_64/VideoInput.swiftconstvalues",
+    "dependencies" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/x86_64/VideoInput.d",
+    "diagnostics" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/x86_64/VideoInput.dia",
+    "object" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/x86_64/VideoInput.o",
+    "swift-dependencies" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/x86_64/VideoInput.swiftdeps"
+  }
+}

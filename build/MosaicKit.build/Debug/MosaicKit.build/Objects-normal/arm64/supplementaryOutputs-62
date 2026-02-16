@@ -1,0 +1,23 @@
+{
+  "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/Sources/Processing/MosaicGeneratorCoordinator.swift" : {
+    "const-values" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/arm64/MosaicGeneratorCoordinator.swiftconstvalues",
+    "dependencies" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/arm64/MosaicGeneratorCoordinator.d",
+    "diagnostics" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/arm64/MosaicGeneratorCoordinator.dia",
+    "object" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/arm64/MosaicGeneratorCoordinator.o",
+    "swift-dependencies" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/arm64/MosaicGeneratorCoordinator.swiftdeps"
+  },
+  "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/Sources/Processing/MosaicGeneratorFactory.swift" : {
+    "const-values" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/arm64/MosaicGeneratorFactory.swiftconstvalues",
+    "dependencies" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/arm64/MosaicGeneratorFactory.d",
+    "diagnostics" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/arm64/MosaicGeneratorFactory.dia",
+    "object" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/arm64/MosaicGeneratorFactory.o",
+    "swift-dependencies" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/arm64/MosaicGeneratorFactory.swiftdeps"
+  },
+  "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/Sources/Processing/MosaicGeneratorProtocol.swift" : {
+    "const-values" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/arm64/MosaicGeneratorProtocol.swiftconstvalues",
+    "dependencies" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/arm64/MosaicGeneratorProtocol.d",
+    "diagnostics" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/arm64/MosaicGeneratorProtocol.dia",
+    "object" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/arm64/MosaicGeneratorProtocol.o",
+    "swift-dependencies" : "/Users/francois/Dev/Packages/MosaicKit/MosaicKit/build/MosaicKit.build/Debug/MosaicKit.build/Objects-normal/arm64/MosaicGeneratorProtocol.swiftdeps"
+  }
+}
