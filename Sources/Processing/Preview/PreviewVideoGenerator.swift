@@ -100,7 +100,7 @@ public actor PreviewVideoGenerator {
             )
 
             // Report completion
-            reportProgress(for: video, progress: 1.0, status: .completed)
+            reportProgress(for: video, progress: 1.0, status: .completed,outputURL: outputURL)
             logger.info("Preview generation completed: \(outputURL.lastPathComponent)")
 
             return outputURL
