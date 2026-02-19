@@ -158,7 +158,7 @@ public actor MosaicGeneratorCoordinator<Generator: MosaicGeneratorProtocol> {
     /// - Returns: The result of mosaic generation
     public func generateMosaic(for video: VideoInput, config: MosaicConfiguration, forIphone: Bool = false, progressHandler: @escaping @Sendable (MosaicGenerationProgress) -> Void) async throws -> MosaicGenerationResult {
 
-        logger.debug("🎯 Starting mosaic generation for video: \(video.title ?? "N/A")")
+        logger.debug("🎯 Starting mosaic generation for video: \(video.title)")
 
         // Safely unwrap video.id
         let videoID = video.id
@@ -202,11 +202,11 @@ public actor MosaicGeneratorCoordinator<Generator: MosaicGeneratorProtocol> {
                     outputURL: outputURL
                 ))
 
-                logger.debug("✅ Mosaic generation completed for video: \(video.title ?? "N/A")")
+                logger.debug("✅ Mosaic generation completed for video: \(video.title)")
                 return result
             } catch {
                 // Report failure
-                logger.error("❌ Mosaic generation failed for video: \(video.title ?? "N/A") - \(error.localizedDescription)")
+                logger.error("❌ Mosaic generation failed for video: \(video.title) - \(error.localizedDescription)")
                 progressHandler(MosaicGenerationProgress(
                     video: video,
                     progress: 0.0,
@@ -239,7 +239,7 @@ public actor MosaicGeneratorCoordinator<Generator: MosaicGeneratorProtocol> {
     /// - Returns: The result of mosaic image generation with CGImage
     public func generateMosaicImage(for video: VideoInput, config: MosaicConfiguration, forIphone: Bool = false, progressHandler: @escaping @Sendable (MosaicGenerationProgress) -> Void) async throws -> MosaicGenerationImage {
 
-        logger.debug("Starting mosaic image generation for video: \(video.title ?? "N/A")")
+        logger.debug("Starting mosaic image generation for video: \(video.title)")
 
         let videoID = video.id
         // Store progress handler
@@ -280,11 +280,11 @@ public actor MosaicGeneratorCoordinator<Generator: MosaicGeneratorProtocol> {
                     status: .completed
                 ))
 
-                logger.debug("Mosaic image generation completed for video: \(video.title ?? "N/A")")
+                logger.debug("Mosaic image generation completed for video: \(video.title)")
                 return result
             } catch {
                 // Report failure
-                logger.error("Mosaic image generation failed for video: \(video.title ?? "N/A") - \(error.localizedDescription)")
+                logger.error("Mosaic image generation failed for video: \(video.title) - \(error.localizedDescription)")
                 progressHandler(MosaicGenerationProgress(
                     video: video,
                     progress: 0.0,
@@ -342,8 +342,7 @@ public actor MosaicGeneratorCoordinator<Generator: MosaicGeneratorProtocol> {
     /// Cancel mosaic generation for a specific video
     /// - Parameter video: The video to cancel mosaic generation for
     public func cancelGeneration(for video: VideoInput) async {
-        // Add default value for optional title
-        logger.debug("❌ Cancelling mosaic generation for video: \(video.title ?? "N/A")")
+        logger.debug("❌ Cancelling mosaic generation for video: \(video.title)")
 
         // Safely unwrap video.id
          let videoID = video.id
@@ -407,6 +406,7 @@ public actor MosaicGeneratorCoordinator<Generator: MosaicGeneratorProtocol> {
         let signpostID = signposter.makeSignpostID()
         // Use class-level signposter for performance tracking
         let globalState = signposter.beginInterval("Starting mosaic Generation for batch", id: signpostID)
+        defer { signposter.endInterval("Starting mosaic Generation for batch", globalState) }
         let concurrencyState = signposter.beginInterval("Concurrency setup", id: signpostID)
         // Determine the effective concurrency limit for this batch
         // If concurrencyLimit is 0, calculate dynamically based on system resources
@@ -447,9 +447,8 @@ public actor MosaicGeneratorCoordinator<Generator: MosaicGeneratorProtocol> {
         var activeTasks = 0
         
         return try await withThrowingTaskGroup(of: MosaicGenerationResult.self) { group in
-            var videoIndex = 0
             let signpostVideoID = signposter.makeSignpostID()
-            for video in prioritizedVideos {
+            for (videoIndex, video) in prioritizedVideos.enumerated() {
                 if effectiveConcurrencyLimit != self.concurrencyLimit {
                     signposter.emitEvent("applying change of concurrency",id: signpostID,
                                          "Active: \(activeTasks)/\(effectiveConcurrencyLimit)")

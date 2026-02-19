@@ -79,7 +79,7 @@ public actor CoreGraphicsMosaicGenerator: MosaicGeneratorProtocol {
     ///   - forIphone: Whether to use iPhone-optimized layout
     /// - Returns: The URL of the generated mosaic image
     public func generate(for video: VideoInput, config: MosaicConfiguration, forIphone: Bool = false) async throws -> URL {
-        logger.debug("🎯 Starting Core Graphics mosaic generation for video: \(video.title ?? "N/A")")
+        logger.debug("🎯 Starting Core Graphics mosaic generation for video: \(video.title)")
 
         let videoID = video.id
 
@@ -95,7 +95,7 @@ public actor CoreGraphicsMosaicGenerator: MosaicGeneratorProtocol {
             defer { trackPerformance(startTime: startTime) }
 
             do {
-                logger.debug("📊 \(video.title ?? "N/A") Video details - Duration: \(video.duration ?? 0.0)s, Size: \(video.fileSize ?? 0) bytes")
+                logger.debug("📊 \(video.title) Video details - Duration: \(video.duration ?? 0.0)s, Size: \(video.fileSize ?? 0) bytes")
 
                 let videoURL = video.url
                 let asset = AVURLAsset(url: videoURL)
@@ -108,14 +108,14 @@ public actor CoreGraphicsMosaicGenerator: MosaicGeneratorProtocol {
                     status: .countingThumbnails
                 ))
 
-                let frameCount = await layoutProcessor.calculateThumbnailCount(
+                let frameCount = layoutProcessor.calculateThumbnailCount(
                     duration: duration,
                     width: config.width,
                     density: config.density,
                     layoutType: forIphone ? .iphone : config.layout.layoutType,
                     videoAR: aspectRatio
                 )
-                logger.debug("🖼️ \(video.title ?? "N/A") - Calculated frame count: \(frameCount)")
+                logger.debug("🖼️ \(video.title) - Calculated frame count: \(frameCount)")
 
                 layoutProcessor.updateAspectRatio(config.layout.aspectRatio.ratio)
 
@@ -126,7 +126,7 @@ public actor CoreGraphicsMosaicGenerator: MosaicGeneratorProtocol {
                     status: .computingLayout
                 ))
 
-                let layout = await layoutProcessor.calculateLayout(
+                let layout = layoutProcessor.calculateLayout(
                     originalAspectRatio: aspectRatio,
                     mosaicAspectRatio: config.layout.aspectRatio,
                     thumbnailCount: frameCount,
@@ -134,7 +134,7 @@ public actor CoreGraphicsMosaicGenerator: MosaicGeneratorProtocol {
                     density: config.density,
                     layoutType: forIphone ? .iphone : config.layout.layoutType
                 )
-                logger.debug("📏 \(video.title ?? "N/A") Layout calculated - Size: \(layout.mosaicSize.width)x\(layout.mosaicSize.height), Thumbnails: \(layout.thumbCount)")
+                logger.debug("📏 \(video.title) Layout calculated - Size: \(layout.mosaicSize.width)x\(layout.mosaicSize.height), Thumbnails: \(layout.thumbCount)")
 
                 // Extract frames using ThumbnailProcessor
                 let frames = try await thumbnailProcessor.extractThumbnails(
@@ -230,7 +230,7 @@ public actor CoreGraphicsMosaicGenerator: MosaicGeneratorProtocol {
     ///   - forIphone: Whether to use iPhone-optimized layout
     /// - Returns: The generated mosaic as a CGImage
     public func generateMosaicImage(for video: VideoInput, config: MosaicConfiguration, forIphone: Bool = false) async throws -> CGImage {
-        logger.debug("Starting Core Graphics mosaic image generation for video: \(video.title ?? "N/A")")
+        logger.debug("Starting Core Graphics mosaic image generation for video: \(video.title)")
 
         let videoID = video.id
         layoutProcessor.mosaicAspectRatio = config.layout.aspectRatio.ratio
@@ -252,7 +252,7 @@ public actor CoreGraphicsMosaicGenerator: MosaicGeneratorProtocol {
                 status: .countingThumbnails
             ))
 
-            let frameCount = await layoutProcessor.calculateThumbnailCount(
+            let frameCount = layoutProcessor.calculateThumbnailCount(
                 duration: duration,
                 width: config.width,
                 density: config.density,
@@ -269,7 +269,7 @@ public actor CoreGraphicsMosaicGenerator: MosaicGeneratorProtocol {
                 status: .computingLayout
             ))
 
-            let layout = await layoutProcessor.calculateLayout(
+            let layout = layoutProcessor.calculateLayout(
                 originalAspectRatio: aspectRatio,
                 mosaicAspectRatio: config.layout.aspectRatio,
                 thumbnailCount: frameCount,
@@ -345,7 +345,7 @@ public actor CoreGraphicsMosaicGenerator: MosaicGeneratorProtocol {
     /// Cancel mosaic generation for a specific video
     /// - Parameter video: The video to cancel mosaic generation for
     public func cancel(for video: VideoInput) {
-        logger.debug("❌ Cancelling Core Graphics mosaic generation for: \(video.title ?? "N/A")")
+        logger.debug("❌ Cancelling Core Graphics mosaic generation for: \(video.title)")
         generationTasks[video.id]?.cancel()
         generationTasks[video.id] = nil
         frameCache[video.id] = nil
@@ -429,8 +429,11 @@ public actor CoreGraphicsMosaicGenerator: MosaicGeneratorProtocol {
         // Generate structured path: {root}/{service}/{creator}/{configHash}/
         baseOutputDirectory = config.generateOutputDirectory(rootDirectory: rootFolder, videoInput: video)
 
-        if baseOutputDirectory.startAccessingSecurityScopedResource() {
-            defer { baseOutputDirectory.stopAccessingSecurityScopedResource() }
+        let didStartAccessingBaseDirectory = baseOutputDirectory.startAccessingSecurityScopedResource()
+        defer {
+            if didStartAccessingBaseDirectory {
+                baseOutputDirectory.stopAccessingSecurityScopedResource()
+            }
         }
 
         try FileManager.default.createDirectory(
@@ -487,8 +490,12 @@ public actor CoreGraphicsMosaicGenerator: MosaicGeneratorProtocol {
             logger.debug("📸 Saving as PNG")
 
         case .heif:
-            if mosaicURL.deletingLastPathComponent().startAccessingSecurityScopedResource() {
-                defer { mosaicURL.deletingLastPathComponent().stopAccessingSecurityScopedResource() }
+            let heifDirectory = mosaicURL.deletingLastPathComponent()
+            let didStartAccessingHeifDirectory = heifDirectory.startAccessingSecurityScopedResource()
+            defer {
+                if didStartAccessingHeifDirectory {
+                    heifDirectory.stopAccessingSecurityScopedResource()
+                }
             }
             try await saveAsHEIC(mosaic, to: mosaicURL, quality: Float(config.compressionQuality))
             logger.debug("📸 Saving as HEIF, quality: \(config.compressionQuality)")

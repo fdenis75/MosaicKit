@@ -139,7 +139,6 @@ public struct VideoInput: Codable, Hashable, Sendable {
         var bitrate: Int64?
         
         if let formatDescription = formatDescriptions.first {
-            let mediaType = CMFormatDescriptionGetMediaType(formatDescription)
             let mediaSubType = CMFormatDescriptionGetMediaSubType(formatDescription)
             
             // Convert FourCC code to string

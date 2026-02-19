@@ -631,9 +631,7 @@ public final class MetalImageProcessor: @unchecked Sendable {
                 logger.error("❌ Failed to create filled texture: \(error.localizedDescription)")
                 return nil
             }
-            return nil
         }
-        return nil
     }
     
         /*
@@ -718,7 +716,7 @@ public final class MetalImageProcessor: @unchecked Sendable {
         var mosaicTexture: MTLTexture
         progressHandler?(0.1)
         if config.useMovieColorsForBg {
-            guard let texture = try processImagesToMTLTexture(images: frames.map { $0.image }, maxColors: 5, outputSize: mosaicSize) else {
+            guard let texture = processImagesToMTLTexture(images: frames.map { $0.image }, maxColors: 5, outputSize: mosaicSize) else {
                 throw MetalProcessorError.textureCreationFailed
             }
             mosaicTexture = texture
@@ -880,7 +878,7 @@ public final class MetalImageProcessor: @unchecked Sendable {
             let frameImages = allFrames.map { $0.1 }
 
             // Generate gradient background from dominant colors
-            if let texture = try processImagesToMTLTexture(images: frameImages, maxColors: 5, outputSize: mosaicSize) {
+            if let texture = processImagesToMTLTexture(images: frameImages, maxColors: 5, outputSize: mosaicSize) {
                 mosaicTexture = texture
                 logger.debug("✅ Created mosaic background from dominant colors")
             } else {

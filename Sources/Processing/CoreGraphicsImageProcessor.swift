@@ -45,7 +45,7 @@ public final class CoreGraphicsImageProcessor: @unchecked Sendable {
         // Clean up buffer pool
         poolLock.lock()
         defer { poolLock.unlock() }
-        for var buffer in bufferPool {
+        for buffer in bufferPool {
             buffer.data.deallocate()
         }
         bufferPool.removeAll()

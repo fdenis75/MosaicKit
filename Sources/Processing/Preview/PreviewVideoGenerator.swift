@@ -265,10 +265,8 @@ struct PreviewGenerationLogic {
         // Export — route based on configuration
         progressHandler(0.3, .encoding, nil, "Encoding preview video...")
         let returnURL: URL
-        let error: Error
         if config.useNativeExport {
-            do {
-                returnURL = try await exportWithNativeSession(
+            returnURL = try await exportWithNativeSession(
                 composition: videoComposition.composition,
                 audioMix: videoComposition.audioMix,
                 videoComposition: videoComposition.videoComposition,
@@ -277,32 +275,23 @@ struct PreviewGenerationLogic {
                 progressHandler: progressHandler,
                 cancellationCheck: cancellationCheck
             )
-                print("awaiting return of native export")
-                return returnURL
-            }
-           
-            
         } else {
-            do {
-                returnURL =  try await exportWithSJSSession(
-                    composition: videoComposition.composition,
-                    audioMix: videoComposition.audioMix,
-                    videoComposition: videoComposition.videoComposition,
-                    config: config,
-                    video: video,
-                    progressHandler: progressHandler,
-                    cancellationCheck: cancellationCheck
-                )
-                
-                print("awaiting return of native export")
-                
-                return returnURL
-            }
+            returnURL = try await exportWithSJSSession(
+                composition: videoComposition.composition,
+                audioMix: videoComposition.audioMix,
+                videoComposition: videoComposition.videoComposition,
+                config: config,
+                video: video,
+                progressHandler: progressHandler,
+                cancellationCheck: cancellationCheck
+            )
         }
-            
+
+        return returnURL
     }
     
     /// Generate a preview composition without exporting (for video player playback)
+    @MainActor
     static func generateComposition(
         for video: VideoInput,
         config: PreviewConfiguration,
@@ -359,22 +348,16 @@ struct PreviewGenerationLogic {
         
         // Create player item from composition
         progressHandler(0.8, .composing, nil, "Creating player item...")
-        
-        // Note: AVMutableComposition is not Sendable in Swift 6, but it's safe to use here
-        // because it's created locally and won't be accessed concurrently after this point
-        nonisolated(unsafe) let sendableComposition = compositionResult.composition
-        nonisolated(unsafe) let audioMix = compositionResult.audioMix
-        nonisolated(unsafe) let sendableVideoComp = compositionResult.videoComposition
-        
-        let playerItem = await AVPlayerItem(asset: sendableComposition)
+
+        let playerItem = AVPlayerItem(asset: compositionResult.composition)
         
         // Apply video composition for scaling
-        if let vc = sendableVideoComp {
+        if let vc = compositionResult.videoComposition {
             playerItem.videoComposition = vc
         }
         
         // Apply audio mix if available
-        if let mix = audioMix {
+        if let mix = compositionResult.audioMix {
             playerItem.audioMix = mix
         }
         
@@ -512,7 +495,7 @@ struct PreviewGenerationLogic {
         video: VideoInput,
         progressHandler: @escaping @Sendable (Double, PreviewGenerationStatus, URL?, String?) -> Void,
         cancellationCheck: @escaping @Sendable () -> Bool
-    ) async throws -> (composition: AVMutableComposition, audioMix: AVMutableAudioMix?, videoComposition: AVMutableVideoComposition?) {
+    ) async throws -> (composition: AVMutableComposition, audioMix: AVMutableAudioMix?, videoComposition: AVVideoComposition?) {
         logger.debug("Starting composition with \(timestamps.count) segments, playback speed: \(playbackSpeed)x")
         let composition = AVMutableComposition()
         
@@ -642,7 +625,7 @@ struct PreviewGenerationLogic {
         }
         
         // Build video composition for scaling if maxResolution requires downscaling
-        var videoComp: AVMutableVideoComposition?
+        var videoComp: AVVideoComposition?
         if let maxRes = maxResolution,
            let compVideoTrack = composition.tracks(withMediaType: .video).first {
             let naturalSize = try await compVideoTrack.load(.naturalSize)
@@ -666,20 +649,28 @@ struct PreviewGenerationLogic {
                 
                 let scaleTransform = CGAffineTransform(scaleX: scale, y: scale)
                 let finalTransform = preferredTransform.concatenating(scaleTransform)
-                
-                let layerInstruction = AVMutableVideoCompositionLayerInstruction(assetTrack: compVideoTrack)
-                layerInstruction.setTransform(finalTransform, at: .zero)
-                
-                let instruction = AVMutableVideoCompositionInstruction()
-                instruction.timeRange = CMTimeRange(start: .zero, duration: composition.duration)
-                instruction.layerInstructions = [layerInstruction]
-                
+
+                var layerConfiguration = AVVideoCompositionLayerInstruction.Configuration(assetTrack: compVideoTrack)
+                layerConfiguration.setTransform(finalTransform, at: .zero)
+                let layerInstruction = AVVideoCompositionLayerInstruction(configuration: layerConfiguration)
+
+                let instructionConfiguration = AVVideoCompositionInstruction.Configuration(
+                    layerInstructions: [layerInstruction],
+                    timeRange: CMTimeRange(start: .zero, duration: composition.duration)
+                )
+                let instruction = AVVideoCompositionInstruction(configuration: instructionConfiguration)
+
                 let nominalFrameRate = try await compVideoTrack.load(.nominalFrameRate)
-                let vc = AVMutableVideoComposition()
-                vc.renderSize = renderSize
-                vc.frameDuration = CMTime(value: 1, timescale: CMTimeScale(nominalFrameRate > 0 ? nominalFrameRate : 30))
-                vc.instructions = [instruction]
-                videoComp = vc
+                var compositionConfiguration = try await AVVideoComposition.Configuration(
+                    for: composition,
+                    prototypeInstruction: instruction
+                )
+                compositionConfiguration.renderSize = renderSize
+                compositionConfiguration.frameDuration = CMTime(
+                    value: 1,
+                    timescale: CMTimeScale(nominalFrameRate > 0 ? nominalFrameRate : 30)
+                )
+                videoComp = AVVideoComposition(configuration: compositionConfiguration)
                 
                 logger.info("Scaling composition from \(Int(sourceWidth))x\(Int(sourceHeight)) to \(Int(renderWidth))x\(Int(renderHeight))")
             }
@@ -692,7 +683,7 @@ struct PreviewGenerationLogic {
     private static func exportWithSJSSession(
         composition: AVMutableComposition,
         audioMix: AVMutableAudioMix?,
-        videoComposition: AVMutableVideoComposition?,
+        videoComposition: AVVideoComposition?,
         config: PreviewConfiguration,
         video: VideoInput,
         progressHandler: @escaping @Sendable (Double, PreviewGenerationStatus, URL?, String?) -> Void,
@@ -802,12 +793,11 @@ struct PreviewGenerationLogic {
                 
                 if let vc = videoComposition {
                     // Use the raw-settings overload so we can pass our custom video composition for scaling
-                    nonisolated(unsafe) let sendableVC = vc as AVVideoComposition
                     try await exporter.export(
                         asset: compositionAsset,
                         audioOutputSettings: AudioOutputSettings.default.settingsDictionary,
                         videoOutputSettings: videoConfig.settingsDictionary,
-                        composition: sendableVC,
+                        composition: vc,
                         to: outputURL,
                         as: config.format.avFileType
                     )
@@ -974,17 +964,6 @@ struct PreviewGenerationLogic {
     
 
     
-    private static func statusDescription(_ status: AVAssetExportSession.Status) -> String {
-        switch status {
-        case .unknown: return "unknown"
-        case .waiting: return "waiting"
-        case .exporting: return "exporting"
-        case .completed: return "completed"
-        case .failed: return "failed"
-        case .cancelled: return "cancelled"
-        @unknown default: return "unknown(\(status.rawValue))"
-        }
-    }
     /// Export using AVAssetExportSession (Apple's native preset-based exporter)
     /// @MainActor ensures exportSession and its Task closures share the same isolation,
     /// avoiding 'sending' parameter errors for the non-Sendable AVAssetExportSession.
@@ -992,7 +971,7 @@ struct PreviewGenerationLogic {
     private static func exportWithNativeSession(
         composition: AVMutableComposition,
         audioMix: AVMutableAudioMix?,
-        videoComposition: AVMutableVideoComposition?,
+        videoComposition: AVVideoComposition?,
         config: PreviewConfiguration,
         video: VideoInput,
         progressHandler: @escaping @Sendable (Double, PreviewGenerationStatus, URL?, String?) -> Void,
@@ -1028,12 +1007,6 @@ struct PreviewGenerationLogic {
         let preset = config.effectiveExportPreset
         logger.info("Native export: preset=\(preset), format=\(config.format.rawValue), quality=\(config.compressionQuality)")
 
-        // Check compatible presets
-        let compatiblePresets = AVAssetExportSession.exportPresets(compatibleWith: composition)
-        if !compatiblePresets.contains(preset) {
-            logger.warning("Preset '\(preset)' not in compatible presets, attempting anyway")
-        }
-
         guard let exportSession = AVAssetExportSession(
             asset: composition,
             presetName: preset
@@ -1049,6 +1022,9 @@ struct PreviewGenerationLogic {
         // Apply video composition for resolution scaling
         if let vc = videoComposition {
             exportSession.videoComposition = vc
+        }
+        if let mix = audioMix {
+            exportSession.audioMix = mix
         }
 
         // Stall detection: cancel if no progress for 60 seconds
@@ -1116,9 +1092,6 @@ struct PreviewGenerationLogic {
             throw PreviewError.encodingFailed("Export failed", error)
         }
 
-        let finalStatus = exportSession.status
-        let finalError = exportSession.error
-
         if stallDetected.isCancelled {
             try? FileManager.default.removeItem(at: outputURL)
             throw PreviewError.exportStalled(elapsedSeconds: Int(progressTracker.secondsSinceLastProgress))
@@ -1127,18 +1100,6 @@ struct PreviewGenerationLogic {
         if cancellationCheck() {
             try? FileManager.default.removeItem(at: outputURL)
             throw PreviewError.cancelled
-        }
-
-        if let error = finalError {
-            try? FileManager.default.removeItem(at: outputURL)
-            throw PreviewError.encodingFailed("Export failed", error)
-        }
-
-        guard finalStatus == .completed else {
-            try? FileManager.default.removeItem(at: outputURL)
-            throw PreviewError.encodingFailed(
-                "Export finished with status: \(self.statusDescription(finalStatus))", nil
-            )
         }
 
         guard FileManager.default.fileExists(atPath: outputURL.path) else {

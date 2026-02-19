@@ -262,17 +262,12 @@ public final class LayoutProcessor {
 
     var bestLayout: MosaicLayout?
     var bestThumbDiff: Int = Int.max
-    var maxSmallRows = max(8, Int(thumbnailCount/10))
+    let maxSmallRows = max(8, Int(thumbnailCount/10))
     for smallRows in 1...maxSmallRows {
         let smallThumbHeight = (zoneHeight - verticalPadding * CGFloat(smallRows - 1)) / CGFloat(smallRows)
         let largeThumbHeight = smallThumbHeight * sizeRatio
 
         let midRows = Int((zoneHeight - verticalPadding * CGFloat(smallRows - 1)) / largeThumbHeight)
-        let actualHeight =
-            CGFloat(smallRows * 2) * smallThumbHeight +
-            CGFloat(midRows) * largeThumbHeight +
-            verticalPadding * CGFloat(smallRows * 2 + midRows - 1)
-
         // Compute how many thumbs fit per row, adjusting for padding
         let smallThumbWidth = smallThumbHeight * originalAspectRatio
         let maxSmallCols = Int((mosaicWidthF + horizontalPadding) / (smallThumbWidth + horizontalPadding))
@@ -309,7 +304,7 @@ public final class LayoutProcessor {
             let startX = (mosaicWidthF - totalLargeWidth - (CGFloat(maxLargeCols - 1) * horizontalPadding)) / 2
             var currentX = startX
             
-            for col in 0..<maxLargeCols {
+            for _ in 0..<maxLargeCols {
                 positions.append(Position(x: Int(currentX), y: Int(yCursor)))
                 sizes.append(CGSize(width: largeThumbWidth, height: exactLargeThumbHeight))
                 currentX += largeThumbWidth + horizontalPadding
@@ -455,7 +450,6 @@ public final class LayoutProcessor {
         logger.debug("🎨 Calculating dynamic layout with center emphasis")
         
         // Calculate base dimensions
-        let mosaicHeight = Int(CGFloat(mosaicWidth) / mosaicAspectRatio)
         let baseSpacing: CGFloat = 4
         
         // Calculate grid dimensions based on thumbnail count

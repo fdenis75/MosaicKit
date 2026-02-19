@@ -49,12 +49,8 @@ public struct MosaicConfiguration: Codable, Sendable {
     /// The compression quality for JPEG/HEIF output (0.0 to 1.0).
     public var compressionQuality: Double
 
-<<<<<<< HEAD:Sources/Models/Mosaic/MosaicConfiguration.swift
     /// Optional custom output directory. When nil, uses a default derived from the video's location.
     public var outputdirectory:  URL? = nil
-=======
-    public var outputdirectory: URL? = nil
->>>>>>> mosaic-config-audit-2qULK:Sources/Models/MosaicConfiguration.swift
 
     /// Whether to include the full directory path in the filename.
     public var fullPathInName: Bool
@@ -81,9 +77,6 @@ public struct MosaicConfiguration: Codable, Sendable {
         useAccurateTimestamps: Bool = false,
         compressionQuality: Double = 0.4,
         outputdirectory: URL? = nil,
-<<<<<<< HEAD:Sources/Models/Mosaic/MosaicConfiguration.swift
-        fullPathInName: Bool = false
-=======
         fullPathInName: Bool = false,
         useMovieColorsForBg: Bool = true,
         backgroundColor: MosaicColor = .defaultGray
@@ -116,7 +109,7 @@ public struct MosaicConfiguration: Codable, Sendable {
         outputdirectory: URL? = nil,
         fullPathInName: Bool = false,
         forIphone: Bool
->>>>>>> mosaic-config-audit-2qULK:Sources/Models/MosaicConfiguration.swift
+
     ) {
         self.width = width
         self.density = density
@@ -198,7 +191,7 @@ public struct MosaicConfiguration: Codable, Sendable {
     ///   - videoInput: The video input containing organizational metadata
     /// - Returns: The sanitized filename with configuration hash
     public func generateFilename(originalFilename: String, videoInput: VideoInput) -> String {
-        var sanitizedName = Self.sanitizeForFilePath(originalFilename)
+        let sanitizedName = Self.sanitizeForFilePath(originalFilename)
 
         // Build base filename
         var filename: String

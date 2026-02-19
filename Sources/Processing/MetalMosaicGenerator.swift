@@ -456,7 +456,6 @@ public actor MetalMosaicGenerator: MosaicGeneratorProtocol {
     ) async throws -> [(image: CGImage, timestamp: String)] {
         let state = signposter.beginInterval("Extract Frames VideoToolbox")
         defer { signposter.endInterval("Extract Frames VideoToolbox", state) }
-        let startTime = CFAbsoluteTimeGetCurrent()
 
         let duration = try await asset.load(.duration).seconds
         
@@ -488,7 +487,7 @@ public actor MetalMosaicGenerator: MosaicGeneratorProtocol {
                 let t = Task<(Int, CGImage, String), Error> {
                     if Task.isCancelled { throw CancellationError() }
                     let imageRef = try await generator.image(at: time)
-                    let ts = await self.formatTimestamp(seconds: imageRef.actualTime.seconds)
+                    let ts = self.formatTimestamp(seconds: imageRef.actualTime.seconds)
                     return (index, imageRef.image, ts)
                 }
                 inFlight.append(t)
@@ -595,8 +594,6 @@ public actor MetalMosaicGenerator: MosaicGeneratorProtocol {
         let state = signposter.beginInterval("Save Mosaic")
         defer { signposter.endInterval("Save Mosaic", state) }
         signposter.emitEvent("saving mosaic","name : \(video.url.lastPathComponent)")
-        // Determine output directory based on configuration
-        let dirSuffix = "_Th\(config.width)_\(config.density.name)_\(config.layout.aspectRatio)"
         
         // Determine base output directory
         var baseOutputDirectory: URL
@@ -612,8 +609,11 @@ public actor MetalMosaicGenerator: MosaicGeneratorProtocol {
         // Generate structured path: {root}/{service}/{creator}/{configHash}/
         baseOutputDirectory = config.generateOutputDirectory(rootDirectory: rootFolder, videoInput: video)
 
-        if baseOutputDirectory.startAccessingSecurityScopedResource() {
-            defer { baseOutputDirectory.stopAccessingSecurityScopedResource() }
+        let didStartAccessingBaseDirectory = baseOutputDirectory.startAccessingSecurityScopedResource()
+        defer {
+            if didStartAccessingBaseDirectory {
+                baseOutputDirectory.stopAccessingSecurityScopedResource()
+            }
         }
 
         try FileManager.default.createDirectory(at: baseOutputDirectory,
@@ -658,8 +658,12 @@ public actor MetalMosaicGenerator: MosaicGeneratorProtocol {
 
             try imageData.write(to: mosaicURL)
         case .heif:
-            if mosaicURL.deletingLastPathComponent().startAccessingSecurityScopedResource() {
-                defer { mosaicURL.deletingLastPathComponent().stopAccessingSecurityScopedResource() }
+            let heifDirectory = mosaicURL.deletingLastPathComponent()
+            let didStartAccessingHeifDirectory = heifDirectory.startAccessingSecurityScopedResource()
+            defer {
+                if didStartAccessingHeifDirectory {
+                    heifDirectory.stopAccessingSecurityScopedResource()
+                }
             }
             try await saveAsHEIC(mosaic, to: mosaicURL, quality: Float(config.compressionQuality))
         }
@@ -754,4 +758,3 @@ private func getPngData(from image: Any) -> Data? {
     #endif
     return nil
 }
-

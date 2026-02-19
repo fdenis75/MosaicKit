@@ -46,7 +46,7 @@ public final class ThumbnailProcessor: @unchecked Sendable {
         let duration = try await asset.load(.duration).seconds
         let generator = configureGenerator(for: asset, accurate: accurate, preview: preview, layout: layout)
 
-        let times = try await calculateExtractionTimes(
+        let times = calculateExtractionTimes(
             duration: duration,
             count: layout.positions.count
         )
@@ -708,10 +708,6 @@ public final class ThumbnailProcessor: @unchecked Sendable {
         let pathLine = CTLineCreateWithAttributedString(pathAttributedString)
         
         // Calculate text bounds for positioning
-        let row1Bounds = CTLineGetBoundsWithOptions(row1Line, .useOpticalBounds)
-        let row2Bounds = CTLineGetBoundsWithOptions(row2Line, .useOpticalBounds)
-        let pathBounds = CTLineGetBoundsWithOptions(pathLine, .useOpticalBounds)
-        
         // Calculate padding from the left edge
         let leftPadding: CGFloat = 20.0
         
@@ -772,7 +768,6 @@ public final class ThumbnailProcessor: @unchecked Sendable {
         
         // Use provided height or calculate based on width
         let metadataHeight = height ?? Int(round(Double(width) * 0.05))
-        let padding: CGFloat = 16.0
         let fontSize = max(12.0, CGFloat(metadataHeight) / 3.0)
         
         // Create bitmap context for the header
@@ -863,7 +858,6 @@ public final class ThumbnailProcessor: @unchecked Sendable {
         // Use the provided height or calculate a reasonable size for the header
         let metadataHeight = headerHeight ?? Int(round(Double(height) * 0.2))  // Use 1/5 of total height by default
                                                                               // This will be overridden by the thumbnailHeight in the main method
-        let padding: CGFloat = 16.0
         let fontSize = max(12.0, CGFloat(metadataHeight) / 3.0)
         
         // Draw a semi-transparent background bar at the top
@@ -1004,9 +998,6 @@ public final class ThumbnailProcessor: @unchecked Sendable {
         //context.restoreGState()
         
         // Add subtle vignette effect for depth (Apple design often uses this)
-        let vignetteWidth = CGFloat(image.width) * 0.15
-        let vignetteHeight = CGFloat(image.height) * 0.15
-        
         // Create gradient for vignette
         let components: [CGFloat] = [
             0.0, 0.0, 0.0, 0.0,   // Transparent at center
