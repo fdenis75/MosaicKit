@@ -1,6 +1,29 @@
 import Foundation
 import CoreGraphics
 
+/// A platform-independent, Codable color representation for mosaic backgrounds.
+public struct MosaicColor: Codable, Sendable, Equatable {
+    public var red: Double
+    public var green: Double
+    public var blue: Double
+    public var alpha: Double
+
+    public init(red: Double, green: Double, blue: Double, alpha: Double = 1.0) {
+        self.red = red
+        self.green = green
+        self.blue = blue
+        self.alpha = alpha
+    }
+
+    /// Mid-gray — the default solid background color.
+    public static let defaultGray = MosaicColor(red: 0.5, green: 0.5, blue: 0.5)
+
+    /// Converts to a CGColor for use in Core Graphics rendering.
+    public var cgColor: CGColor {
+        CGColor(red: red, green: blue, blue: blue, alpha: alpha)
+    }
+}
+
 /// Configuration for mosaic generation.
 public struct MosaicConfiguration: Codable, Sendable {
     // MARK: - Properties
@@ -26,11 +49,25 @@ public struct MosaicConfiguration: Codable, Sendable {
     /// The compression quality for JPEG/HEIF output (0.0 to 1.0).
     public var compressionQuality: Double
 
+<<<<<<< HEAD:Sources/Models/Mosaic/MosaicConfiguration.swift
     /// Optional custom output directory. When nil, uses a default derived from the video's location.
     public var outputdirectory:  URL? = nil
+=======
+    public var outputdirectory: URL? = nil
+>>>>>>> mosaic-config-audit-2qULK:Sources/Models/MosaicConfiguration.swift
 
     /// Whether to include the full directory path in the filename.
     public var fullPathInName: Bool
+
+    /// Whether to derive the background color from the movie's dominant colors.
+    /// When `true` (default), a blurred gradient built from the video's dominant
+    /// colors is used as the mosaic background.
+    /// When `false`, `backgroundColor` is used instead.
+    public var useMovieColorsForBg: Bool
+
+    /// The solid background color used when `useMovieColorsForBg` is `false`.
+    /// Ignored when `useMovieColorsForBg` is `true`.
+    public var backgroundColor: MosaicColor
 
     // MARK: - Initialization
 
@@ -44,7 +81,12 @@ public struct MosaicConfiguration: Codable, Sendable {
         useAccurateTimestamps: Bool = false,
         compressionQuality: Double = 0.4,
         outputdirectory: URL? = nil,
+<<<<<<< HEAD:Sources/Models/Mosaic/MosaicConfiguration.swift
         fullPathInName: Bool = false
+=======
+        fullPathInName: Bool = false,
+        useMovieColorsForBg: Bool = true,
+        backgroundColor: MosaicColor = .defaultGray
     ) {
         self.width = width
         self.density = density
@@ -55,6 +97,39 @@ public struct MosaicConfiguration: Codable, Sendable {
         self.compressionQuality = compressionQuality
         self.outputdirectory = outputdirectory
         self.fullPathInName = fullPathInName
+        self.useMovieColorsForBg = useMovieColorsForBg
+        self.backgroundColor = backgroundColor
+    }
+
+    /// Creates a MosaicConfiguration instance.
+    /// - Note: The `forIphone` parameter no longer controls the background color.
+    ///   Use `useMovieColorsForBg` and `backgroundColor` instead.
+    @available(*, deprecated, renamed: "init(width:density:format:layout:includeMetadata:useAccurateTimestamps:compressionQuality:outputdirectory:fullPathInName:useMovieColorsForBg:backgroundColor:)")
+    public init(
+        width: Int = 5120,
+        density: DensityConfig = .default,
+        format: OutputFormat = .heif,
+        layout: LayoutConfiguration = .default,
+        includeMetadata: Bool = true,
+        useAccurateTimestamps: Bool = false,
+        compressionQuality: Double = 0.4,
+        outputdirectory: URL? = nil,
+        fullPathInName: Bool = false,
+        forIphone: Bool
+>>>>>>> mosaic-config-audit-2qULK:Sources/Models/MosaicConfiguration.swift
+    ) {
+        self.width = width
+        self.density = density
+        self.format = format
+        self.layout = layout
+        self.includeMetadata = includeMetadata
+        self.useAccurateTimestamps = useAccurateTimestamps
+        self.compressionQuality = compressionQuality
+        self.outputdirectory = outputdirectory
+        self.fullPathInName = fullPathInName
+        // forIphone == true previously meant solid gray; map that to the new params
+        self.useMovieColorsForBg = !forIphone
+        self.backgroundColor = .defaultGray
     }
 
     /// Default configuration for mosaic generation

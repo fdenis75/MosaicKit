@@ -714,18 +714,18 @@ public final class MetalImageProcessor: @unchecked Sendable {
             mosaicSize.height += CGFloat(metadataHeight)
     
         }
-        // if for Iphone is true, use a light grey color for the mosaic
+        // Background: use movie-derived dominant colors or the configured solid color
         var mosaicTexture: MTLTexture
         progressHandler?(0.1)
-        if forIphone {
-            let color = SIMD4<Float>(0.5, 0.5, 0.5, 1.0)
-            let texture = try createFilledTexture(size: mosaicSize, color: color) 
-            mosaicTexture = texture
-        } else {
+        if config.useMovieColorsForBg {
             guard let texture = try processImagesToMTLTexture(images: frames.map { $0.image }, maxColors: 5, outputSize: mosaicSize) else {
                 throw MetalProcessorError.textureCreationFailed
             }
             mosaicTexture = texture
+        } else {
+            let bg = config.backgroundColor
+            let color = SIMD4<Float>(Float(bg.red), Float(bg.green), Float(bg.blue), Float(bg.alpha))
+            mosaicTexture = try createFilledTexture(size: mosaicSize, color: color)
         }
         progressHandler?(0.2)
         // If we have a metadata header, composite it at the top of the mosaic
@@ -875,11 +875,7 @@ public final class MetalImageProcessor: @unchecked Sendable {
         var mosaicTexture: MTLTexture
         progressHandler?(0.15)
 
-        if forIphone {
-            // iPhone: use solid gray background
-            let color = SIMD4<Float>(0.5, 0.5, 0.5, 1.0)
-            mosaicTexture = try createFilledTexture(size: mosaicSize, color: color)
-        } else {
+        if config.useMovieColorsForBg {
             // Extract images for dominant color sampling
             let frameImages = allFrames.map { $0.1 }
 
@@ -893,6 +889,11 @@ public final class MetalImageProcessor: @unchecked Sendable {
                 mosaicTexture = try createFilledTexture(size: mosaicSize, color: color)
                 logger.warning("⚠️ Falling back to solid color background")
             }
+        } else {
+            // Use the configured solid background color
+            let bg = config.backgroundColor
+            let color = SIMD4<Float>(Float(bg.red), Float(bg.green), Float(bg.blue), Float(bg.alpha))
+            mosaicTexture = try createFilledTexture(size: mosaicSize, color: color)
         }
 
         progressHandler?(0.25)
