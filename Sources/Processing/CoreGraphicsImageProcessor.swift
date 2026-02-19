@@ -359,10 +359,7 @@ public final class CoreGraphicsImageProcessor: @unchecked Sendable {
         // Create background image
         progressHandler?(0.1)
         var mosaicImage: CGImage
-        if forIphone {
-            let color = SIMD4<Float>(0.5, 0.5, 0.5, 1.0)
-            mosaicImage = try createFilledImage(size: mosaicSize, color: color)
-        } else {
+        if config.useMovieColorsForBg {
             if let background = processImagesToBackground(
                 images: frames.map { $0.image },
                 maxColors: 5,
@@ -374,6 +371,11 @@ public final class CoreGraphicsImageProcessor: @unchecked Sendable {
                 let color = SIMD4<Float>(0.5, 0.5, 0.5, 1.0)
                 mosaicImage = try createFilledImage(size: mosaicSize, color: color)
             }
+        } else {
+            // Use the configured solid background color
+            let bg = config.backgroundColor
+            let color = SIMD4<Float>(Float(bg.red), Float(bg.green), Float(bg.blue), Float(bg.alpha))
+            mosaicImage = try createFilledImage(size: mosaicSize, color: color)
         }
         progressHandler?(0.2)
 
