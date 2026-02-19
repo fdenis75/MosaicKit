@@ -1,10 +1,3 @@
-//
-//  PreviewVideoGenerator.swift
-//  MosaicKit
-//
-//  Created by Claude Code on 2025-11-23.
-//
-
 import Foundation
 import AVFoundation
 import OSLog
@@ -107,7 +100,7 @@ public actor PreviewVideoGenerator {
             )
 
             // Report completion
-            reportProgress(for: video, progress: 1.0, status: .completed)
+            reportProgress(for: video, progress: 1.0, status: .completed,outputURL: outputURL)
             logger.info("Preview generation completed: \(outputURL.lastPathComponent)")
 
             return outputURL

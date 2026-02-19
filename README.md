@@ -2,8 +2,8 @@
 
 A high-performance Swift package for generating video mosaics with Metal-accelerated image processing. Extract frames from videos and arrange them into beautiful, customizable mosaic layouts with optional metadata headers.
 
-![Platform](https://img.shields.io/badge/platform-macOS%2014%2B%20%7C%20iOS%2017%2B-blue)
-![Swift](https://img.shields.io/badge/Swift-6.2-orange)
+![Platform](https://img.shields.io/badge/platform-macOS%2026%2B%20%7C%20iOS%2026%2B-blue)
+![Swift](https://img.shields.io/badge/Swift-6.1-orange)
 ![License](https://img.shields.io/badge/license-MIT-green)
 
 ## Features
@@ -18,9 +18,9 @@ A high-performance Swift package for generating video mosaics with Metal-acceler
 
 ## Requirements
 
-- macOS 14.0+ or iOS 17.0+
-- Xcode 15.0+
-- Swift 6.2+
+- macOS 26.0+ or iOS 26.0+
+- Xcode 26.0+
+- Swift 6.1+
 - Metal-capable device
 
 ## Installation
@@ -186,8 +186,9 @@ config.format = .png
 Process multiple videos with intelligent concurrency:
 
 ```swift
+let generator = try MetalMosaicGenerator()
 let coordinator = MosaicGeneratorCoordinator(
-    modelContext: modelContext,
+    mosaicGenerator: generator,
     concurrencyLimit: 4
 )
 
@@ -214,30 +215,17 @@ for result in results {
 
 ### Progress Tracking
 
-Monitor generation progress in real-time:
+Monitor generation progress in real-time using `MosaicGeneratorCoordinator`:
 
 ```swift
-try await generator.generate(
+let result = try await coordinator.generateMosaic(
     for: video,
     config: config
 ) { progress in
-    DispatchQueue.main.async {
-        // Update UI
-        progressBar.doubleValue = progress
-    }
+    // progress.progress is 0.0–1.0
+    // progress.status indicates the current phase
+    print("Progress: \(Int(progress.progress * 100))% - \(progress.status)")
 }
-```
-
-### iPhone-Optimized Layout
-
-Generate vertical scrolling mosaics optimized for mobile viewing:
-
-```swift
-let mosaicURL = try await generator.generate(
-    for: video,
-    config: config,
-    forIphone: true  // Fixed 1200px width, vertical layout
-)
 ```
 
 ### Custom Video Input
@@ -381,24 +369,6 @@ config.outputdirectory = outputDir
 let mosaicURL = try await generator.generate(for: video, config: config)
 ```
 
-### Example 4: Mobile-Optimized Mosaic
-
-```swift
-var config = MosaicConfiguration(
-    width: 1200,  // This will be overridden for iPhone layout
-    density: .s,
-    format: .heif,
-    compressionQuality: 0.4
-)
-config.outputdirectory = outputDir
-
-let mosaicURL = try await generator.generate(
-    for: video,
-    config: config,
-    forIphone: true
-)
-```
-
 ## Performance Tips
 
 1. **Use HEIF format** - Best compression with good quality
@@ -454,8 +424,9 @@ Batch processing automatically adjusts concurrency based on:
 
 ```swift
 // Configure custom concurrency limit
+let generator = try MetalMosaicGenerator()
 let coordinator = MosaicGeneratorCoordinator(
-    modelContext: modelContext,
+    mosaicGenerator: generator,
     concurrencyLimit: 8  // Max 8 videos processed simultaneously
 )
 ```
@@ -464,7 +435,7 @@ let coordinator = MosaicGeneratorCoordinator(
 
 ### "Metal is not supported"
 - Ensure you're running on a Metal-capable device
-- Check minimum OS requirements (macOS 14+ / iOS 17+)
+- Check minimum OS requirements (macOS 26+ / iOS 26+)
 
 ### Out of memory errors
 - Reduce mosaic width

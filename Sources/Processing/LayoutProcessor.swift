@@ -128,7 +128,6 @@ public final class LayoutProcessor {
             )
         }
         
- //       logger.debug("✅ Layout calculated - Size: \(layout.mosaicSize.width)x\(layout.mosaicSize.height), Grid: \(layout.rows)x\(layout.cols)")
         return layout
     }
     
@@ -231,120 +230,8 @@ public final class LayoutProcessor {
             mosaicWidth: Int(screenSize.width)
         )
     }
-    /*
+
     private func calculateCustomLayout(
-        originalAspectRatio: CGFloat,
-        thumbnailCount: Int,
-        mosaicWidth: Int,
-        mosaicAspectRatio: AspectRatio,
-        density: String
-    ) -> MosaicLayout {
-        let state = signposter.beginInterval("Calculate Custom Layout")
-        defer { signposter.endInterval("Calculate Custom Layout", state) }
-        
-        logger.debug("🎨 Calculating custom layout - Count: \(thumbnailCount)")
-        
-        // Calculate initial mosaic height to match target aspect ratio
-        let targetAspectRatio = mosaicAspectRatio.ratio
-        let mosaicHeight = Int(CGFloat(mosaicWidth) / targetAspectRatio)
-        
-        // Calculate optimal grid dimensions
-        func calculateGrid() -> (smallRows: Int, largeRows: Int, smallCols: Int, largeCols: Int) {
-            // Base calculation on target aspect ratio and thumbnail count
-            let isPortrait = originalAspectRatio < 1.0
-            let targetGridAspectRatio = targetAspectRatio * (isPortrait ? 0.8 : 1.2) // Adjust for video orientation
-            
-            // Calculate initial grid size
-            let totalArea = Double(thumbnailCount)
-            let idealCols = Int(sqrt(totalArea * Double(targetGridAspectRatio)))
-            let idealRows = Int(ceil(Double(thumbnailCount) / Double(idealCols)))
-            
-            // Adjust for video aspect ratio
-            let baseSmallCols = min(max(4, idealCols), isPortrait ? 12 : 8)
-            
-            // Determine rows distribution (1/3 for large thumbnails)
-            let totalRows = idealRows
-            let largeRows = max(1, totalRows / 3)
-            let smallRows = totalRows - largeRows
-            
-            // Calculate columns for large thumbnails
-            let largeCols = max(2, baseSmallCols / 2)
-            
-            return (smallRows, largeRows, baseSmallCols, largeCols)
-        }
-        
-        let (smallRows, largeRows, smallCols, largeCols) = calculateGrid()
-        
-        // Calculate thumbnail sizes
-        let smallThumbWidth = CGFloat(mosaicWidth) / CGFloat(smallCols)
-        let smallThumbHeight = smallThumbWidth / originalAspectRatio
-        let largeThumbWidth = smallThumbWidth * 2
-        let largeThumbHeight = largeThumbWidth / originalAspectRatio
-        
-        // Generate positions with small thumbnails at top and bottom
-        var positions: [(x: Int, y: Int)] = []
-        var thumbnailSizes: [CGSize] = []
-        var currentY: CGFloat = 0
-        var remainingThumbnails = thumbnailCount
-        
-        // Helper function to add a row of thumbnails
-        func addRow(isSmall: Bool) -> Int {
-            let cols = isSmall ? smallCols : largeCols
-            let thumbWidth = isSmall ? smallThumbWidth : largeThumbWidth
-            let thumbHeight = isSmall ? smallThumbHeight : largeThumbHeight
-            var currentX: CGFloat = 0
-            var addedCount = 0
-            
-            // Calculate spacing to center thumbnails in row
-            let totalWidth = thumbWidth * CGFloat(min(cols, remainingThumbnails))
-            let startX = (CGFloat(mosaicWidth) - totalWidth) / 2
-            currentX = startX
-            
-            for _ in 0..<cols {
-                if remainingThumbnails > 0 {
-                    positions.append((x: Int(currentX), y: Int(currentY)))
-                    thumbnailSizes.append(CGSize(width: thumbWidth, height: thumbHeight))
-                    currentX += thumbWidth
-                    remainingThumbnails -= 1
-                    addedCount += 1
-                }
-            }
-            currentY += thumbHeight
-            return addedCount
-        }
-        
-        // Add top small rows
-        let topSmallRows = smallRows / 2
-        for _ in 0..<topSmallRows {
-            _ = addRow(isSmall: true)
-        }
-        
-        // Add middle large rows
-        for _ in 0..<largeRows {
-            _ = addRow(isSmall: false)
-        }
-        
-        // Add remaining small rows
-        let bottomSmallRows = smallRows - topSmallRows
-        for _ in 0..<bottomSmallRows {
-            _ = addRow(isSmall: true)
-        }
-        
-        // Calculate final dimensions
-        let finalHeight = Int(currentY)
-        
-        return MosaicLayout(
-            rows: smallRows + largeRows,
-            cols: max(smallCols, largeCols),
-            thumbnailSize: CGSize(width: smallThumbWidth, height: smallThumbHeight),
-            positions: positions,
-            thumbCount: thumbnailCount,
-            thumbnailSizes: thumbnailSizes,
-            mosaicSize: CGSize(width: mosaicWidth, height: finalHeight)
-        )
-    }
-    */
-   private func calculateCustomLayout(
     originalAspectRatio: CGFloat,
     thumbnailCount: Int,
     mosaicWidth: Int,
@@ -376,14 +263,11 @@ public final class LayoutProcessor {
     var bestLayout: MosaicLayout?
     var bestThumbDiff: Int = Int.max
     var maxSmallRows = max(8, Int(thumbnailCount/10))
-   // print("maxsmallRows: \(maxSmallRows)")
     for smallRows in 1...maxSmallRows {
-     //   print("smallRows: \(smallRows)")
         let smallThumbHeight = (zoneHeight - verticalPadding * CGFloat(smallRows - 1)) / CGFloat(smallRows)
         let largeThumbHeight = smallThumbHeight * sizeRatio
 
         let midRows = Int((zoneHeight - verticalPadding * CGFloat(smallRows - 1)) / largeThumbHeight)
-   //     print("midRows: \(midRows)")
         let actualHeight =
             CGFloat(smallRows * 2) * smallThumbHeight +
             CGFloat(midRows) * largeThumbHeight +
@@ -391,28 +275,17 @@ public final class LayoutProcessor {
 
         // Compute how many thumbs fit per row, adjusting for padding
         let smallThumbWidth = smallThumbHeight * originalAspectRatio
-//        print("smallThumbWidth: \(smallThumbWidth)")
         let maxSmallCols = Int((mosaicWidthF + horizontalPadding) / (smallThumbWidth + horizontalPadding))
-  //      print("maxSmallCols: \(maxSmallCols)")
         let exactSmallThumbWidth = (mosaicWidthF - (CGFloat(maxSmallCols - 1) * horizontalPadding)) / CGFloat(maxSmallCols)
-    //    print("exactSmallThumbWidth: \(exactSmallThumbWidth)")
         let exactSmallThumbHeight = exactSmallThumbWidth / originalAspectRatio
-      //  print("exactSmallThumbHeight: \(exactSmallThumbHeight)")
         let largeThumbWidth = exactSmallThumbWidth * sizeRatio
-        //    print("largeThumbWidth: \(largeThumbWidth)")
         let exactLargeThumbHeight = largeThumbWidth / originalAspectRatio
-   //     print("exactLargeThumbHeight: \(exactLargeThumbHeight)")
         let maxLargeCols = Int((mosaicWidthF + horizontalPadding) / (largeThumbWidth + horizontalPadding))
-     //   print("maxLargeCols: \(maxLargeCols)")
         // Total thumbnails
         let smallThumbCount = maxSmallCols * smallRows * 2
-      //  print("smallThumbCount: \(smallThumbCount)")
         let largeThumbCount = maxLargeCols * midRows
-     //   print("largeThumbCount: \(largeThumbCount)")
         let totalCount = smallThumbCount + largeThumbCount
-        //  print("totalCount: \(totalCount)")
         if !targetCountRange.contains(totalCount) { continue }
-       // print("totalCount is in target range")
         var positions: [Position] = []
         var sizes: [CGSize] = []
 
@@ -455,12 +328,9 @@ public final class LayoutProcessor {
         }
 
         let thumbDiff = abs(totalCount - thumbnailCount)
-   //     print("thumbDiff: \(thumbDiff)")
         if thumbDiff < bestThumbDiff {
-     //       print("thumbDiff is less than bestThumbDiff")
             bestThumbDiff = thumbDiff
-            //     print("bestThumbDiff: \(bestThumbDiff)")
-            
+
             bestLayout = MosaicLayout(
                 rows: smallRows * 2 + midRows,
                 cols: max(maxSmallCols, maxLargeCols),
@@ -470,7 +340,6 @@ public final class LayoutProcessor {
                 thumbnailSizes: sizes,
                 mosaicSize: CGSize(width: CGFloat(Int(mosaicWidthF)), height: CGFloat(Int(yCursor - verticalPadding)))
             )
-       //     print("bestLayout: \(bestLayout)")
         }
     }
     if (bestLayout == nil)
@@ -694,63 +563,7 @@ public final class LayoutProcessor {
     }
     
     // MARK: - Helper Methods
-    /*
-    private func getInitialLayoutParams(_ density: String, aspectRatio: AspectRatio) -> (largeCols: Int, largeRows: Int, smallCols: Int, smallRows: Int) {
-        switch density.uppercased() {           
-        case "XXL":
-            switch aspectRatio {
-            case .widescreen:
-                return (2, 1, 4, 2)
-            case .standard:
-                return (3, 1, 6, 2)
-            case .square:
-                return (4, 1, 8, 2)
-            case .ultrawide:
-                return (5, 1, 10, 2)
-        case "XL":
-            return (3, 1, 6, 2)
-        case "L":
-            return (3, 2, 6, 4)
-        case "M":
-            return (4, 2, 8, 4)
-        case "S":
-            return (6, 2, 12, 4)
-        case "XS":
-            return (8, 2, 16, 4)
-        case "XXS":
-            return (9, 4, 18, 8)
-        default:
-            return (4, 2, 8, 4)
-        }
-    }
-    
-    private func generateRowConfigs(
-        largeCols: Int,
-        largeRows: Int,
-        smallCols: Int,
-        smallRows: Int
-    ) -> [(smallCount: Int, largeCount: Int)] {
-        var configs: [(Int, Int)] = []
-        let halfSmallRows = smallRows / 2
-        
-        // Add top small rows
-        for _ in 0..<halfSmallRows {
-            configs.append((smallCols, 0))
-        }
-        
-        // Add large rows
-        for _ in 0..<largeRows {
-            configs.append((0, largeCols))
-        }
-        
-        // Add bottom small rows
-        for _ in 0..<halfSmallRows {
-            configs.append((smallCols, 0))
-        }
-        
-        return configs
-    }
-    */
+
     private func adjustPortraitLayout(
         smallCols: Int,
         largeCols: Int,

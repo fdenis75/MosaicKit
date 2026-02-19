@@ -111,7 +111,7 @@ public struct VideoInput: Codable, Hashable, Sendable {
     /// - Throws: Error if video cannot be accessed or metadata cannot be extracted
     public init(from url: URL, serviceName: String? = nil, creatorName: String? = nil, postID: String? = nil) async throws {
         guard url.startAccessingSecurityScopedResource() else {
-            throw MosaicError.invalidVideo("No video track found")
+            throw MosaicError.invalidVideo("Failed to access security-scoped resource")
         }
         
         
@@ -126,7 +126,6 @@ public struct VideoInput: Codable, Hashable, Sendable {
         // Extract basic properties
         let duration = try await asset.load(.duration).seconds
         let (naturalSize,nominalFrameRate,formatDescriptions,estimatedDataRate) = try await videoTrack.load(.naturalSize, .nominalFrameRate,.formatDescriptions,.estimatedDataRate)
-        // let nominalFrameRate = try await videoTrack.load(.nominalFrameRate)
         
         // Get file size
         var fileSize: Int64?
@@ -139,7 +138,6 @@ public struct VideoInput: Codable, Hashable, Sendable {
         var codec: String?
         var bitrate: Int64?
         
-        //  let formatDescriptions = try await videoTrack.load(.formatDescriptions)
         if let formatDescription = formatDescriptions.first {
             let mediaType = CMFormatDescriptionGetMediaType(formatDescription)
             let mediaSubType = CMFormatDescriptionGetMediaSubType(formatDescription)
@@ -155,9 +153,7 @@ public struct VideoInput: Codable, Hashable, Sendable {
         }
         
         // Try to get bitrate
-        // if let estimatedDataRate = try? await videoTrack.load(.estimatedDataRate) {
         bitrate = Int64(estimatedDataRate)
-        //}
         
         self.init(
             url: url,
@@ -172,33 +168,4 @@ public struct VideoInput: Codable, Hashable, Sendable {
             postID: postID
         )
     }
-   
-    
 }
-
-// MARK: - Error Type
-/*
-public enum MosaicError: LocalizedError {
-    case invalidVideo(String)
-    case processingFailed(String)
-    case fileSystemError(String)
-    case metalNotSupported
-    case generationFailed(String)
-    case contextCreationFailed
-    case inputNotFound
-    case saveFailed(String)
-    case fileExists(String)
-    /// Failed to create the mosaic layout.
-    case layoutCreationFailed(Error)
-    /// Failed to generate the mosaic image.
-    case imageGenerationFailed(Error)
-    /// Failed to save the mosaic image.
-    case saveFailed(URL, Error)
-    /// The mosaic dimensions are invalid.
-    case invalidDimensions(CGSize)
-    /// The mosaic configuration is invalid.
-    case invalidConfiguration(String)
-    /// A general error occurred during mosaic generation.
-    /// The file already exists at the specified location.
- 
-}*/
