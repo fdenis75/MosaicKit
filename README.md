@@ -3,7 +3,7 @@
 A high-performance Swift package for generating video mosaics with Metal-accelerated image processing. Extract frames from videos and arrange them into beautiful, customizable mosaic layouts with optional metadata headers.
 
 ![Platform](https://img.shields.io/badge/platform-macOS%2026%2B%20%7C%20iOS%2026%2B-blue)
-![Swift](https://img.shields.io/badge/Swift-6.1-orange)
+![Swift](https://img.shields.io/badge/Swift-6.2-orange)
 ![License](https://img.shields.io/badge/license-MIT-green)
 
 ## Features
@@ -20,7 +20,7 @@ A high-performance Swift package for generating video mosaics with Metal-acceler
 
 - macOS 26.0+ or iOS 26.0+
 - Xcode 26.0+
-- Swift 6.1+
+- Swift 6.2+
 - Metal-capable device
 
 ## Installation
@@ -31,7 +31,7 @@ Add MosaicKit to your `Package.swift`:
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/yourusername/MosaicKit.git", from: "1.0.0")
+    .package(url: "https://github.com/fdenis75/MosaicKit.git", from: "1.0.0")
 ]
 ```
 

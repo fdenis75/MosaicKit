@@ -11,7 +11,8 @@ By the end of this tutorial, you'll have:
 
 ## Prerequisites
 
-- Xcode 15.0+
+- Xcode 26.0+
+- Swift 6.2+
 - macOS 26.0+ or iOS 26.0+
 - A video file to test with (any common format: MP4, MOV, M4V)
 
@@ -22,7 +23,7 @@ Add MosaicKit via Swift Package Manager:
 ```swift
 // Package.swift
 dependencies: [
-    .package(url: "https://github.com/yourusername/MosaicKit", from: "1.0.0")
+    .package(url: "https://github.com/fdenis75/MosaicKit.git", from: "1.0.0")
 ]
 ```
 

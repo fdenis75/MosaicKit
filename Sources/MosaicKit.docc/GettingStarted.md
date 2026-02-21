@@ -17,7 +17,7 @@ MosaicKit makes it easy to create beautiful video mosaics with just a few lines 
 Add MosaicKit to your project using Swift Package Manager:
 
 1. In Xcode, select **File → Add Package Dependencies**
-2. Enter the repository URL: `https://github.com/yourusername/MosaicKit`
+2. Enter the repository URL: `https://github.com/fdenis75/MosaicKit`
 3. Select the version you want to use
 4. Click **Add Package**
 
@@ -25,7 +25,7 @@ Alternatively, add it to your `Package.swift`:
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/yourusername/MosaicKit", from: "1.0.0")
+    .package(url: "https://github.com/fdenis75/MosaicKit.git", from: "1.0.0")
 ]
 ```
 
