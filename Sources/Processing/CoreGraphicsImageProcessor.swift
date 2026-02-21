@@ -407,26 +407,29 @@ public final class CoreGraphicsImageProcessor: @unchecked Sendable {
 
                 let position = layout.positions[actualIndex]
                 let size = layout.thumbnailSizes[actualIndex]
-
-                // Adjust position to account for metadata header
-                let adjustedY = position.y + (hasMetadata ? Int(metadataHeight) : 0)
+                let frameRect = renderRect(
+                    for: position,
+                    size: size,
+                    spacing: config.layout.spacing,
+                    metadataHeight: hasMetadata ? CGFloat(metadataHeight) : 0
+                )
 
                 // Scale the frame if needed
                 let scaledFrame: CGImage
-                if frame.image.width != Int(size.width) || frame.image.height != Int(size.height) {
+                if frame.image.width != Int(frameRect.width) || frame.image.height != Int(frameRect.height) {
                     scaledFrame = try scaleImage(
                         frame.image,
-                        to: CGSize(width: size.width, height: size.height)
+                        to: frameRect.size
                     )
                 } else {
                     scaledFrame = frame.image
                 }
 
-                // Composite the frame onto the mosaic at adjusted position
-                mosaicImage = try compositeImage(
+                mosaicImage = try compositeFrame(
                     scaledFrame,
                     onto: mosaicImage,
-                    at: CGPoint(x: position.x, y: adjustedY)
+                    in: frameRect,
+                    visual: config.layout.visual
                 )
 
                 // Update progress based on frame completion
@@ -459,6 +462,84 @@ public final class CoreGraphicsImageProcessor: @unchecked Sendable {
     }
 
     // MARK: - Private Methods
+
+    private func renderRect(
+        for position: Position,
+        size: CGSize,
+        spacing: CGFloat,
+        metadataHeight: CGFloat
+    ) -> CGRect {
+        let baselineSpacing = max(0, LayoutConfiguration.default.spacing)
+        let extraSpacing = max(0, spacing - baselineSpacing)
+        let maxInset = max(0, (min(size.width, size.height) - 1) / 2)
+        let inset = min(extraSpacing / 2.0, maxInset)
+
+        return CGRect(
+            x: CGFloat(position.x) + inset,
+            y: CGFloat(position.y) + metadataHeight + inset,
+            width: max(1, size.width - (inset * 2)),
+            height: max(1, size.height - (inset * 2))
+        )
+    }
+
+    private func compositeFrame(
+        _ sourceImage: CGImage,
+        onto destinationImage: CGImage,
+        in rect: CGRect,
+        visual: VisualSettings
+    ) throws -> CGImage {
+        let destWidth = destinationImage.width
+        let destHeight = destinationImage.height
+
+        guard let context = CGContext(
+            data: nil,
+            width: destWidth,
+            height: destHeight,
+            bitsPerComponent: 8,
+            bytesPerRow: destWidth * 4,
+            space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ) else {
+            throw CoreGraphicsProcessorError.contextCreationFailed
+        }
+
+        context.draw(destinationImage, in: CGRect(x: 0, y: 0, width: destWidth, height: destHeight))
+
+        if visual.addShadow, let shadowSettings = visual.shadowSettings, shadowSettings.opacity > 0 {
+            context.saveGState()
+            context.setShadow(
+                offset: shadowSettings.offset,
+                blur: max(0, shadowSettings.radius),
+                color: CGColor(gray: 0, alpha: max(0, min(1, shadowSettings.opacity)))
+            )
+            context.draw(sourceImage, in: rect)
+            context.restoreGState()
+        } else {
+            context.draw(sourceImage, in: rect)
+        }
+
+        if visual.addBorder {
+            let maxBorderWidth = min(rect.width, rect.height) / 2.0
+            let borderWidth = min(max(0, visual.borderWidth), maxBorderWidth)
+            if borderWidth > 0 {
+                context.setStrokeColor(borderColor(for: visual.borderColor))
+                context.setLineWidth(borderWidth)
+                let strokeRect = rect.insetBy(dx: borderWidth / 2.0, dy: borderWidth / 2.0)
+                context.stroke(strokeRect)
+            }
+        }
+
+        guard let compositedImage = context.makeImage() else {
+            throw CoreGraphicsProcessorError.cgImageCreationFailed
+        }
+
+        return compositedImage
+    }
+
+    private func borderColor(for color: BorderColor) -> CGColor {
+        let grayscale = color.withOpacity(1.0)
+        return CGColor(gray: grayscale, alpha: 1.0)
+    }
 
     /// Create a vImage buffer from a CGImage
     private func createVImageBuffer(from cgImage: CGImage) throws -> vImage_Buffer {

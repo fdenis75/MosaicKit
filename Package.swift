@@ -29,6 +29,11 @@ let package = Package(
             resources: [
                 .process("Shaders")
             ]
+        ),
+        .testTarget(
+            name: "MosaicKitTests",
+            dependencies: ["MosaicKit"],
+            path: "Tests/MosaicKitTests"
         )
     ]
 )

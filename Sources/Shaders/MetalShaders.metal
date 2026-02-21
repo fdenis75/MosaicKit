@@ -31,7 +31,7 @@ kernel void scaleTexture(texture2d<float, access::sample> inputTexture [[texture
 // Kernel for compositing images onto a canvas
 kernel void compositeTextures(texture2d<float, access::read> sourceTexture [[texture(0)]],
                               texture2d<float, access::read_write> destinationTexture [[texture(1)]],
-                              constant uint2 *position [[buffer(0)]],
+                              constant int2 *position [[buffer(0)]],
                               uint2 gid [[thread_position_in_grid]]) {
     // Check if we're within the source texture bounds
     if (gid.x >= sourceTexture.get_width() || gid.y >= sourceTexture.get_height()) {
@@ -39,16 +39,19 @@ kernel void compositeTextures(texture2d<float, access::read> sourceTexture [[tex
     }
     
     // Calculate destination position
-    uint2 destPos = gid + *position;
+    int2 destPos = int2(gid) + *position;
     
     // Check if we're within the destination texture bounds
-    if (destPos.x >= destinationTexture.get_width() || destPos.y >= destinationTexture.get_height()) {
+    if (destPos.x < 0 || destPos.y < 0 ||
+        destPos.x >= int(destinationTexture.get_width()) ||
+        destPos.y >= int(destinationTexture.get_height())) {
         return;
     }
     
     // Read source and destination pixels
     float4 sourceColor = sourceTexture.read(gid);
-    float4 destColor = destinationTexture.read(destPos);
+    uint2 writePos = uint2(destPos);
+    float4 destColor = destinationTexture.read(writePos);
 
     // Perform premultiplied alpha blending
     // Since textures use premultipliedFirst/Last format, colors are already premultiplied
@@ -56,7 +59,7 @@ kernel void compositeTextures(texture2d<float, access::read> sourceTexture [[tex
     float4 blendedColor = sourceColor + destColor * (1.0 - sourceColor.a);
 
     // Write blended color to destination
-    destinationTexture.write(blendedColor, destPos);
+    destinationTexture.write(blendedColor, writePos);
 }
 
 // Timestamp functionality is now handled directly in ThumbnailProcessor using CoreGraphics

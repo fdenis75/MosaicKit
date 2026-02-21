@@ -365,8 +365,8 @@ public final class MetalImageProcessor: @unchecked Sendable {
         encoder.setTexture(sourceTexture, index: 0)
         encoder.setTexture(destinationTexture, index: 1)
 
-        var positionValue = SIMD2<UInt32>(UInt32(position.x), UInt32(position.y))
-        encoder.setBytes(&positionValue, length: MemoryLayout<SIMD2<UInt32>>.size, index: 0)
+        var positionValue = SIMD2<Int32>(Int32(position.x.rounded()), Int32(position.y.rounded()))
+        encoder.setBytes(&positionValue, length: MemoryLayout<SIMD2<Int32>>.size, index: 0)
 
         // Calculate threadgroup size
         let threadgroupSize = calculateThreadgroupSize(pipeline: compositePipeline)
@@ -758,33 +758,14 @@ public final class MetalImageProcessor: @unchecked Sendable {
             for (index, frame) in batchFrames.enumerated() {
                 let actualIndex = batchStart + index
                 guard actualIndex < layout.positions.count else { break }
-
-                let position = layout.positions[actualIndex]
-                let size = layout.thumbnailSizes[actualIndex]
-
-                // Adjust position to account for metadata header
-                let adjustedY = position.y + (hasMetadata ? Int(metadataHeight) : 0)
-
-                // Convert CGImage to Metal texture
-                let frameTexture = try createTexture(from: frame.image)
-
-                // Scale the frame if needed (using shared command buffer)
-                let scaledTexture: MTLTexture
-                if frameTexture.width != Int(size.width) || frameTexture.height != Int(size.height) {
-                    scaledTexture = try scaleTexture(
-                        frameTexture,
-                        to: CGSize(width: size.width, height: size.height),
-                        commandBuffer: batchCommandBuffer
-                    )
-                } else {
-                    scaledTexture = frameTexture
-                }
-
-                // Composite the frame onto the mosaic at adjusted position (using shared command buffer)
-                try compositeTexture(
-                    scaledTexture,
-                    onto: mosaicTexture,
-                    at: CGPoint(x: position.x, y: adjustedY),
+                try renderFrame(
+                    frame.image,
+                    at: actualIndex,
+                    into: mosaicTexture,
+                    layout: layout,
+                    visual: config.layout.visual,
+                    spacing: config.layout.spacing,
+                    metadataHeight: CGFloat(metadataHeight),
                     commandBuffer: batchCommandBuffer
                 )
 
@@ -916,7 +897,15 @@ public final class MetalImageProcessor: @unchecked Sendable {
             let batchEnd = min(batchStart + batchSize, allFrames.count)
             let batch = Array(allFrames[batchStart..<batchEnd])
 
-            try processBatch(batch, into: mosaicTexture, layout: layout, hasMetadata: hasMetadata, metadataHeight: CGFloat(metadataHeight))
+            try processBatch(
+                batch,
+                into: mosaicTexture,
+                layout: layout,
+                visual: config.layout.visual,
+                spacing: config.layout.spacing,
+                hasMetadata: hasMetadata,
+                metadataHeight: CGFloat(metadataHeight)
+            )
             processedCount += batch.count
 
             // Progress from 0.25 to 0.95
@@ -939,6 +928,8 @@ public final class MetalImageProcessor: @unchecked Sendable {
         _ batch: [(Int, CGImage)],
         into mosaicTexture: MTLTexture,
         layout: MosaicLayout,
+        visual: VisualSettings,
+        spacing: CGFloat,
         hasMetadata: Bool,
         metadataHeight: CGFloat
     ) throws {
@@ -948,33 +939,174 @@ public final class MetalImageProcessor: @unchecked Sendable {
         
         for (index, image) in batch {
             guard index < layout.positions.count else { continue }
-            
-            let position = layout.positions[index]
-            let size = layout.thumbnailSizes[index]
-            let adjustedY = position.y + (hasMetadata ? Int(metadataHeight) : 0)
-            
-            let frameTexture = try createTexture(from: image)
-            
-            let scaledTexture: MTLTexture
-            if frameTexture.width != Int(size.width) || frameTexture.height != Int(size.height) {
-                scaledTexture = try scaleTexture(
-                    frameTexture,
-                    to: CGSize(width: size.width, height: size.height),
-                    commandBuffer: batchCommandBuffer
-                )
-            } else {
-                scaledTexture = frameTexture
-            }
-            
-            try compositeTexture(
-                scaledTexture,
-                onto: mosaicTexture,
-                at: CGPoint(x: position.x, y: adjustedY),
+
+            try renderFrame(
+                image,
+                at: index,
+                into: mosaicTexture,
+                layout: layout,
+                visual: visual,
+                spacing: spacing,
+                metadataHeight: hasMetadata ? metadataHeight : 0,
                 commandBuffer: batchCommandBuffer
             )
         }
         
         batchCommandBuffer.commit()
+    }
+
+    private func renderFrame(
+        _ image: CGImage,
+        at index: Int,
+        into mosaicTexture: MTLTexture,
+        layout: MosaicLayout,
+        visual: VisualSettings,
+        spacing: CGFloat,
+        metadataHeight: CGFloat,
+        commandBuffer: MTLCommandBuffer
+    ) throws {
+        let position = layout.positions[index]
+        let size = layout.thumbnailSizes[index]
+        let frameRect = renderRect(
+            for: position,
+            size: size,
+            spacing: spacing,
+            metadataHeight: metadataHeight
+        )
+
+        let targetSize = frameRect.size
+
+        if visual.addShadow, let shadowSettings = visual.shadowSettings, shadowSettings.opacity > 0 {
+            let shadowedFrame = try createShadowedImage(
+                from: image,
+                targetSize: targetSize,
+                settings: shadowSettings
+            )
+            let shadowTexture = try createTexture(from: shadowedFrame.image)
+            try compositeTexture(
+                shadowTexture,
+                onto: mosaicTexture,
+                at: CGPoint(
+                    x: frameRect.origin.x + shadowedFrame.offset.x,
+                    y: frameRect.origin.y + shadowedFrame.offset.y
+                ),
+                commandBuffer: commandBuffer
+            )
+        } else {
+            let frameTexture = try createTexture(from: image)
+            let scaledTexture: MTLTexture
+            if frameTexture.width != Int(targetSize.width) || frameTexture.height != Int(targetSize.height) {
+                scaledTexture = try scaleTexture(
+                    frameTexture,
+                    to: targetSize,
+                    commandBuffer: commandBuffer
+                )
+            } else {
+                scaledTexture = frameTexture
+            }
+
+            try compositeTexture(
+                scaledTexture,
+                onto: mosaicTexture,
+                at: frameRect.origin,
+                commandBuffer: commandBuffer
+            )
+        }
+
+        if visual.addBorder {
+            let maxBorderWidth = Float(min(frameRect.width, frameRect.height) / 2.0)
+            let requestedBorderWidth = max(0, Float(visual.borderWidth))
+            let borderWidth = min(requestedBorderWidth, maxBorderWidth)
+
+            if borderWidth > 0 {
+                try addBorder(
+                    to: mosaicTexture,
+                    at: frameRect.origin,
+                    size: frameRect.size,
+                    color: borderColor(for: visual.borderColor),
+                    width: borderWidth,
+                    commandBuffer: commandBuffer
+                )
+            }
+        }
+    }
+
+    private func renderRect(
+        for position: Position,
+        size: CGSize,
+        spacing: CGFloat,
+        metadataHeight: CGFloat
+    ) -> CGRect {
+        let baselineSpacing = max(0, LayoutConfiguration.default.spacing)
+        let extraSpacing = max(0, spacing - baselineSpacing)
+        let maxInset = max(0, (min(size.width, size.height) - 1) / 2)
+        let inset = min(extraSpacing / 2.0, maxInset)
+
+        return CGRect(
+            x: CGFloat(position.x) + inset,
+            y: CGFloat(position.y) + metadataHeight + inset,
+            width: max(1, size.width - (inset * 2)),
+            height: max(1, size.height - (inset * 2))
+        )
+    }
+
+    private func borderColor(for color: BorderColor) -> SIMD4<Float> {
+        let grayscale = Float(color.withOpacity(1.0))
+        return SIMD4<Float>(grayscale, grayscale, grayscale, 1.0)
+    }
+
+    private func createShadowedImage(
+        from image: CGImage,
+        targetSize: CGSize,
+        settings: ShadowSettings
+    ) throws -> (image: CGImage, offset: CGPoint) {
+        let targetWidth = max(1, Int(targetSize.width.rounded(.toNearestOrAwayFromZero)))
+        let targetHeight = max(1, Int(targetSize.height.rounded(.toNearestOrAwayFromZero)))
+        let radius = max(0, settings.radius)
+        let paddingX = ceil(abs(settings.offset.width) + (radius * 2))
+        let paddingY = ceil(abs(settings.offset.height) + (radius * 2))
+
+        let canvasWidth = targetWidth + Int(paddingX * 2)
+        let canvasHeight = targetHeight + Int(paddingY * 2)
+        let bytesPerRow = canvasWidth * 4
+
+        guard let context = CGContext(
+            data: nil,
+            width: canvasWidth,
+            height: canvasHeight,
+            bitsPerComponent: 8,
+            bytesPerRow: bytesPerRow,
+            space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ) else {
+            throw MetalProcessorError.contextCreationFailed
+        }
+
+        context.interpolationQuality = .high
+        let alpha = max(0, min(1, settings.opacity))
+        context.setShadow(
+            offset: settings.offset,
+            blur: radius,
+            color: CGColor(gray: 0, alpha: alpha)
+        )
+        context.draw(
+            image,
+            in: CGRect(
+                x: paddingX,
+                y: paddingY,
+                width: CGFloat(targetWidth),
+                height: CGFloat(targetHeight)
+            )
+        )
+
+        guard let shadowedImage = context.makeImage() else {
+            throw MetalProcessorError.cgImageCreationFailed
+        }
+
+        return (
+            image: shadowedImage,
+            offset: CGPoint(x: -paddingX, y: -paddingY)
+        )
     }
     
     /// Get performance metrics for the Metal processor
