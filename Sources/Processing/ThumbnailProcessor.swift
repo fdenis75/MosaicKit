@@ -534,7 +534,7 @@ public final class ThumbnailProcessor: @unchecked Sendable {
         logger.debug("🏷️ Creating enhanced metadata header image - Width: \(width)")
 
         // Format resolution using video dimensions from metadata
-        let resolution = "\(video.metadata.custom["width"] ?? "0")×\(video.metadata.custom["height"] ?? "0")"
+        let resolution = "\(Int(video.width ?? 0.0))×\(Int(video.height ?? 0.0))"
 
         let padding: CGFloat = 8.0
 
@@ -621,7 +621,8 @@ public final class ThumbnailProcessor: @unchecked Sendable {
         
         // Get filepath
         // Safely unwrap url before accessing path
-        let filePath = "Path: \(video.url.path)"
+      //  let filePath = "Path: \(video.url.path)"
+        let filePath = ""
         
         // Set up text attributes using CoreText with enhanced styling
         let font = CTFontCreateWithName("Helvetica-Bold" as CFString, fontSize, nil)

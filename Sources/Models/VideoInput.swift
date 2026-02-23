@@ -18,61 +18,61 @@ public struct VideoMetadata: Codable, Hashable, Sendable {
 /// A simplified video input model for mosaic generation
 public struct VideoInput: Codable, Hashable, Sendable {
     // MARK: - Properties
-
+    
     /// Unique identifier
     public let id: UUID
-
+    
     /// URL to the video file
     public let url: URL
-
+    
     /// Optional title (defaults to filename)
     public let title: String
-
+    
     /// Video duration in seconds
     public let duration: TimeInterval?
-
+    
     /// Video width in pixels
     public let width: Double?
-
+    
     /// Video height in pixels
     public let height: Double?
-
+    
     /// Video frame rate
     public let frameRate: Double?
-
+    
     /// File size in bytes
     public let fileSize: Int64?
-
+    
     /// Video metadata (codec, bitrate, etc.)
     public let metadata: VideoMetadata
-
+    
     // MARK: - Organizational Metadata
-
+    
     /// Service name (e.g., "onlyfans", "fansly", "candfans")
     public let serviceName: String?
-
+    
     /// Creator name for organizing output
     public let creatorName: String?
-
+    
     /// Post ID for file naming
     public let postID: String?
-
+    
     // MARK: - Computed Properties
-
+    
     /// Video resolution as CGSize
     public var resolution: CGSize? {
         guard let width = width, let height = height else { return nil }
         return CGSize(width: width, height: height)
     }
-
+    
     /// Aspect ratio (width / height)
     public var aspectRatio: Double? {
         guard let width = width, let height = height, height > 0 else { return nil }
         return width / height
     }
-
+    
     // MARK: - Initialization
-
+    
     /// Initialize with explicit values
     public init(
         id: UUID = UUID(),
@@ -87,21 +87,40 @@ public struct VideoInput: Codable, Hashable, Sendable {
         serviceName: String? = nil,
         creatorName: String? = nil,
         postID: String? = nil
-    ) {
-        self.id = id
-        self.url = url
-        self.title = title ?? url.deletingPathExtension().lastPathComponent
-        self.duration = duration
-        self.width = width
-        self.height = height
-        self.frameRate = frameRate
-        self.fileSize = fileSize
-        self.metadata = metadata
-        self.serviceName = serviceName
-        self.creatorName = creatorName
-        self.postID = postID
+    ) async  {
+        
+        do {
+            let extractor = VideoMetadataExtractor()
+            let videodata = try await extractor.extractMetadataValues(from: url)
+            self.id = id
+            self.url = url
+            self.title = title ?? url.deletingPathExtension().lastPathComponent
+            self.duration = videodata.duration
+            self.width = videodata.width
+            self.height = videodata.height
+            self.frameRate = videodata.frameRate
+            self.fileSize = videodata.fileSize
+            self.metadata = VideoMetadata(codec: videodata.videoCodec, bitrate: videodata.bitrate)
+            self.serviceName = serviceName
+            self.creatorName = creatorName
+            self.postID = postID
+        } catch {
+           
+            self.id = id
+            self.url = url
+            self.title = url.deletingPathExtension().lastPathComponent
+            self.duration = 00.00
+            self.width = 00.00
+            self.height = 00.00
+            self.frameRate = 00.00
+            self.fileSize = 00
+            self.metadata = VideoMetadata(codec: "unknwon", bitrate: 00)
+            self.serviceName = serviceName
+            self.creatorName = creatorName
+            self.postID = postID
+        }
     }
-
+    
     /// Initialize from URL and extract metadata
     /// - Parameters:
     ///   - url: URL to the video file
@@ -113,58 +132,23 @@ public struct VideoInput: Codable, Hashable, Sendable {
         guard url.startAccessingSecurityScopedResource() else {
             throw MosaicError.invalidVideo("Failed to access security-scoped resource")
         }
+        let extractor = VideoMetadataExtractor()
+        
+        let videodata = try await extractor.extractMetadataValues(from: url)
         
         
-        let asset = AVURLAsset(url: url)
-        
-        // Load all tracks
-        let tracks = try await asset.loadTracks(withMediaType: .video)
-        guard let videoTrack = tracks.first else {
-            throw MosaicError.invalidVideo("No video track found")
-        }
-        
-        // Extract basic properties
-        let duration = try await asset.load(.duration).seconds
-        let (naturalSize,nominalFrameRate,formatDescriptions,estimatedDataRate) = try await videoTrack.load(.naturalSize, .nominalFrameRate,.formatDescriptions,.estimatedDataRate)
-        
-        // Get file size
-        var fileSize: Int64?
-        if url.isFileURL {
-            let attributes = try? FileManager.default.attributesOfItem(atPath: url.path)
-            fileSize = attributes?[.size] as? Int64
-        }
-        
-        // Extract codec and bitrate
-        var codec: String?
-        var bitrate: Int64?
-        
-        if let formatDescription = formatDescriptions.first {
-            let mediaSubType = CMFormatDescriptionGetMediaSubType(formatDescription)
-            
-            // Convert FourCC code to string
-            let chars = [
-                UInt8((mediaSubType >> 24) & 0xFF),
-                UInt8((mediaSubType >> 16) & 0xFF),
-                UInt8((mediaSubType >> 8) & 0xFF),
-                UInt8(mediaSubType & 0xFF)
-            ]
-            codec = String(bytes: chars, encoding: .utf8)
-        }
-        
-        // Try to get bitrate
-        bitrate = Int64(estimatedDataRate)
-        
-        self.init(
+        try await self.init(
             url: url,
-            duration: duration,
-            width: Double(naturalSize.width),
-            height: Double(naturalSize.height),
-            frameRate: Double(nominalFrameRate),
-            fileSize: fileSize,
-            metadata: VideoMetadata(codec: codec, bitrate: bitrate),
+            duration: videodata.duration,
+            width: videodata.width,
+            height: videodata.height,
+            frameRate: videodata.frameRate,
+            fileSize: videodata.fileSize,
+            metadata: VideoMetadata(codec: videodata.videoCodec, bitrate: videodata.bitrate),
             serviceName: serviceName,
             creatorName: creatorName,
             postID: postID
         )
+        
     }
 }
