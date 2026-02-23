@@ -1,0 +1,12 @@
+.DS_Store
+**/.DS_Store
+/.build
+build/
+/Packages
+xcuserdata/
+*.xcuserstate
+DerivedData/
+.swiftpm/
+.claude/
+.netrc
+other/

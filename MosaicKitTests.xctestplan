@@ -1,0 +1,37 @@
+{
+  "configurations" : [
+    {
+      "id" : "08BC8756-E7DF-43DC-ADDE-FB73F5935BB8",
+      "name" : "Test Scheme Action",
+      "options" : {
+
+      }
+    },
+    {
+      "id" : "386117EE-10B6-46B8-A2A4-E748F2B4C131",
+      "name" : "folder",
+      "options" : {
+        "environmentVariableEntries" : [
+          {
+            "key" : " MOSAICKIT_SUITE_MODE",
+            "value" : "folder"
+          }
+        ]
+      }
+    }
+  ],
+  "defaultOptions" : {
+    "codeCoverage" : false,
+    "performanceAntipatternCheckerEnabled" : true
+  },
+  "testTargets" : [
+    {
+      "target" : {
+        "containerPath" : "container:",
+        "identifier" : "MosaicKitTests",
+        "name" : "MosaicKitTests"
+      }
+    }
+  ],
+  "version" : 1
+}

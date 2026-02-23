@@ -1,0 +1,65 @@
+name: MosaicKit Tests
+
+on:
+  push:
+    branches:
+      - main
+      - master
+  pull_request:
+    branches:
+      - main
+      - master
+  workflow_dispatch:
+
+concurrency:
+  group: mosaickit-tests-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  swift-test:
+    name: Test on ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # macOS 15: verifies the package builds and tests pass without the
+        # ExportMaxResolution / AVVideoComposition.Configuration code path
+        # (those are gated behind #available(macOS 26, iOS 26, *)).
+        # macOS 26: exercises the full code path including resolution downscaling.
+        os: [macos-26]
+    runs-on: ${{ matrix.os }}
+    env:
+      MOSAICKIT_SUITE_MODE: none
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Swift 6.2
+        uses: swift-actions/setup-swift@v2
+        with:
+          swift-version: "6.2.0"
+
+      - name: Show toolchain versions
+        run: |
+          swift --version
+          xcodebuild -version
+
+      - name: Cache SwiftPM artifacts
+        uses: actions/cache@v4
+        with:
+          path: |
+            .build
+            ~/.swiftpm
+            ~/Library/Caches/org.swift.swiftpm
+          key: ${{ runner.os }}-${{ matrix.os }}-spm-${{ hashFiles('Package.swift', 'Package.resolved') }}
+          restore-keys: |
+            ${{ runner.os }}-${{ matrix.os }}-spm-
+
+      - name: Build
+        run: swift build -v
+
+      - name: Run tests
+        run: swift test --parallel

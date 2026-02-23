@@ -1,0 +1,33 @@
+{
+  "originHash" : "b46cab3f18d962a698ac430426bd68a2ba13d91e9710985998bba5214ee21bac",
+  "pins" : [
+    {
+      "identity" : "dominantcolors",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/DenDmitriev/DominantColors.git",
+      "state" : {
+        "revision" : "a05327d36092c47e9ddc77ce565eb35a5b4a4a6e",
+        "version" : "1.2.2"
+      }
+    },
+    {
+      "identity" : "sjsassetexportsession",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/samsonjs/SJSAssetExportSession.git",
+      "state" : {
+        "revision" : "c77c3cacd7373704dc0e69927ac2aac023904418",
+        "version" : "0.4.0"
+      }
+    },
+    {
+      "identity" : "swift-log",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/apple/swift-log.git",
+      "state" : {
+        "revision" : "bbd81b6725ae874c69e9b8c8804d462356b55523",
+        "version" : "1.10.1"
+      }
+    }
+  ],
+  "version" : 3
+}
