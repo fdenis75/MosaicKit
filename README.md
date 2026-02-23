@@ -2,7 +2,7 @@
 
 A high-performance Swift package for generating video mosaics with Metal-accelerated image processing. Extract frames from videos and arrange them into beautiful, customizable mosaic layouts with optional metadata headers.
 
-![Platform](https://img.shields.io/badge/platform-macOS%2026%2B%20%7C%20iOS%2026%2B-blue)
+![Platform](https://img.shields.io/badge/platform-macOS%2015%2B%20%7C%20iOS%2015%2B-blue)
 ![Swift](https://img.shields.io/badge/Swift-6.2-orange)
 ![License](https://img.shields.io/badge/license-MIT-green)
 
@@ -15,11 +15,12 @@ A high-performance Swift package for generating video mosaics with Metal-acceler
 - 🔄 **Batch Processing** - Intelligent concurrency management for processing multiple videos
 - 🎯 **Hardware-Accelerated Frame Extraction** - Uses VideoToolbox for optimal performance
 - 📊 **Metadata Headers** - Optional metadata overlay with video information
+- 🎬 **Video Preview Generation** - Create short highlight reels from any video, either exported to file or as a live `AVPlayerItem` composition
 
 ## Requirements
 
 - macOS 15.0+ or iOS 15.0+
-- Xcode 26.0+
+- Xcode 16.0+
 - Swift 6.2+
 - Metal-capable device
 
@@ -271,6 +272,116 @@ await generator.cancelAll()
 
 // Or cancel batch operations
 await coordinator.cancelAllGenerations()
+```
+
+## Video Preview Generation
+
+MosaicKit can generate short highlight-reel previews from any video. A preview stitches together evenly-distributed clips from across the video into a single condensed output.
+
+Two delivery modes are available:
+
+| Mode | API | Use case |
+|------|-----|----------|
+| **Export to file** | `PreviewVideoGenerator.generate(for:config:)` | Share, upload, or store the preview |
+| **Composition** | `PreviewVideoGenerator.generateComposition(for:config:)` | Instant playback in `AVPlayer` — no file written |
+
+### Basic Preview Export
+
+```swift
+import MosaicKit
+
+let video = try await VideoInput(from: URL(fileURLWithPath: "/path/to/video.mp4"))
+
+let config = PreviewConfiguration(
+    targetDuration: 60,          // ~60-second preview
+    density: .m,                 // 16 clips
+    format: .mp4,
+    includeAudio: true,
+    outputDirectory: URL(fileURLWithPath: "/path/to/output"),
+    compressionQuality: 0.8
+)
+
+let generator = PreviewVideoGenerator()
+let previewURL = try await generator.generate(for: video, config: config)
+print("Preview saved to: \(previewURL.path)")
+```
+
+### Instant Composition (No Export)
+
+Generate a ready-to-play `AVPlayerItem` without writing any file — significantly faster than exporting:
+
+```swift
+let playerItem = try await generator.generateComposition(for: video, config: config)
+
+let player = AVPlayer(playerItem: playerItem)
+player.play()
+```
+
+### Preview Configuration
+
+```swift
+public struct PreviewConfiguration {
+    var targetDuration: TimeInterval  // Target preview length in seconds
+    var density: DensityConfig        // Number of clips (same levels as mosaic)
+    var format: VideoFormat           // .mp4, .mov, .hevc, etc.
+    var includeAudio: Bool            // Include audio track in preview
+    var outputDirectory: URL?         // Output folder (nil = video's parent directory)
+    var fullPathInName: Bool          // Embed full source path in filename
+    var compressionQuality: Double    // 0.0–1.0
+    var useNativeExport: Bool         // AVAssetExportSession vs SJSAssetExportSession
+}
+```
+
+Clip count scales automatically with video duration. Use `extractCount(forVideoDuration:)` to inspect the calculated value:
+
+```swift
+let count = config.extractCount(forVideoDuration: video.duration)
+print("Clips to extract: \(count)")
+```
+
+### Resolution Cap (macOS 26+ / iOS 26+)
+
+On macOS 26 and iOS 26, you can cap the output resolution to reduce file size:
+
+```swift
+if #available(macOS 26, iOS 26, *) {
+    config.exportMaxResolution = ._1080p   // or ._720p, ._4K, etc.
+}
+```
+
+On earlier OS versions the setting is silently ignored and the full source resolution is used.
+
+### Preview with Progress Tracking
+
+```swift
+let coordinator = PreviewGeneratorCoordinator()
+
+let playerItem = try await coordinator.generatePreviewComposition(
+    for: video,
+    config: config
+) { progress in
+    print("\(Int(progress.progress * 100))% — \(progress.status.displayLabel)")
+}
+```
+
+### Batch Preview Generation
+
+```swift
+let coordinator = PreviewGeneratorCoordinator(concurrencyLimit: 2)
+
+let results = try await coordinator.generatePreviewCompositionsForBatch(
+    videos: [video1, video2, video3],
+    config: config
+) { progress in
+    print("\(progress.video.filename): \(progress.status.displayLabel)")
+}
+
+let succeeded = results.filter(\.isSuccess)
+print("Generated \(succeeded.count)/\(results.count) previews")
+
+if let first = succeeded.first, let playerItem = first.playerItem {
+    AVPlayer(playerItem: playerItem).play()
+}
 ```
 
 ## Layout Algorithm Details
