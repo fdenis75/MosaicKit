@@ -6,7 +6,7 @@ import OSLog
 
 
 /// A factory for creating mosaic generators with platform-specific implementations
-@available(macOS 26, iOS 26, *)
+// @available(macOS 26, iOS 26, *)
 public enum MosaicGeneratorFactory {
     /// The type of mosaic generator to create
     public enum GeneratorType: String, Codable {

@@ -31,7 +31,7 @@ By participating in this project, you agree to maintain a respectful and inclusi
 
 ### Requirements
 
-- macOS 26.0+ or iOS 26.0+
+- macOS 15.0+ or iOS 15.0+
 - Xcode 16.0+
 - Swift 6.2+
 - Metal-capable device (for macOS testing)

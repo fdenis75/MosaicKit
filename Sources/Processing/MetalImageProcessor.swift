@@ -15,7 +15,7 @@ typealias XImage = NSImage
 #endif
 
 /// A Metal-based image processor for high-performance mosaic generation
-@available(macOS 26, iOS 26, *)
+// @available(macOS 26, iOS 26, *)
 public final class MetalImageProcessor: @unchecked Sendable {
     // MARK: - Properties
     

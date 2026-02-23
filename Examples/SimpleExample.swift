@@ -38,7 +38,7 @@ struct SimpleExample {
 
 // MARK: - Even Simpler with Custom Configuration
 
-@available(macOS 26, iOS 26, *)
+// @available(macOS 26, iOS 26, *)
 struct SimplestExample {
     static func run() async throws {
         // The absolute simplest example - 5 lines!
@@ -54,7 +54,7 @@ struct SimplestExample {
 
 // MARK: - Simple with Custom Settings
 
-@available(macOS 26, iOS 26, *)
+// @available(macOS 26, iOS 26, *)
 struct SimpleWithConfig {
     static func run() async throws {
         print("🎬 Simple Example with Custom Settings\n")
@@ -80,7 +80,7 @@ struct SimpleWithConfig {
 
 // MARK: - Simple Batch Processing
 
-@available(macOS 26, iOS 26, *)
+// @available(macOS 26, iOS 26, *)
 struct SimpleBatch {
     static func run() async throws {
         print("🎬 Simple Batch Processing\n")

@@ -5,7 +5,7 @@ import PackageDescription
 
 let package = Package(
     name: "MosaicKit",
-    platforms: [.macOS(.v26), .iOS(.v26), .macCatalyst(.v26)],
+    platforms: [.macOS(.v15), .iOS(.v15), .macCatalyst(.v15)],
     products: [
         .library(
             name: "MosaicKit",
@@ -33,7 +33,10 @@ let package = Package(
         .testTarget(
             name: "MosaicKitTests",
             dependencies: ["MosaicKit"],
-            path: "Tests/MosaicKitTests"
+            path: "Tests/MosaicKitTests",
+            resources: [
+                .process("embeddedAsset")
+            ]
         )
     ]
 )

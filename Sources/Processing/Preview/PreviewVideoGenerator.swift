@@ -48,7 +48,7 @@ class ExportProgressTracker: @unchecked Sendable {
 }
 
 /// Actor responsible for generating preview videos from source videos
-@available(macOS 26, iOS 26, *)
+// @available(macOS 26, iOS 26, *)
 public actor PreviewVideoGenerator {
 
     // MARK: - Properties
@@ -204,7 +204,7 @@ public actor PreviewVideoGenerator {
 }
 
 /// Logic for preview generation, isolated to MainActor to ensure AVFoundation safety
-@available(macOS 26, iOS 26, *)
+// @available(macOS 26, iOS 26, *)
 struct PreviewGenerationLogic {
     private static let logger = Logger(subsystem: "com.mosaickit", category: "PreviewGenerationLogic")
     
@@ -254,7 +254,7 @@ struct PreviewGenerationLogic {
             extractDuration: extractDuration,
             playbackSpeed: playbackSpeed,
             includeAudio: config.includeAudio,
-            maxResolution: config.exportMaxResolution,
+            maxResolutionRaw: config.exportMaxResolutionRaw,
             video: video,
             progressHandler: progressHandler,
             cancellationCheck: cancellationCheck
@@ -338,7 +338,7 @@ struct PreviewGenerationLogic {
             extractDuration: extractDuration,
             playbackSpeed: playbackSpeed,
             includeAudio: config.includeAudio,
-            maxResolution: config.exportMaxResolution,
+            maxResolutionRaw: config.exportMaxResolutionRaw,
             video: video,
             progressHandler: progressHandler,
             cancellationCheck: cancellationCheck
@@ -485,13 +485,17 @@ struct PreviewGenerationLogic {
         return deduplicated
     }
     
+    /// - Parameter maxResolutionRaw: Raw `String` value of an `ExportMaxResolution` case, or `nil`.
+    ///   Passed as a plain `String` so this function is callable on macOS 15+.
+    ///   The actual downscaling (`AVVideoComposition.Configuration` & friends) is gated
+    ///   behind `#available(macOS 26, iOS 26, *)` inside the function body.
     private static func composeVideoSegments(
         asset: AVAsset,
         timestamps: [(start: CMTime, duration: CMTime)],
         extractDuration: TimeInterval,
         playbackSpeed: Double,
         includeAudio: Bool,
-        maxResolution: ExportMaxResolution?,
+        maxResolutionRaw: String?,
         video: VideoInput,
         progressHandler: @escaping @Sendable (Double, PreviewGenerationStatus, URL?, String?) -> Void,
         cancellationCheck: @escaping @Sendable () -> Bool
@@ -624,9 +628,15 @@ struct PreviewGenerationLogic {
             audioMix = mix
         }
         
-        // Build video composition for scaling if maxResolution requires downscaling
+        // Build video composition for resolution downscaling.
+        //
+        // `AVVideoComposition.Configuration`, `AVVideoCompositionLayerInstruction.Configuration`,
+        // and `AVVideoCompositionInstruction.Configuration` are only available on macOS 26+ / iOS 26+.
+        // On earlier OS versions `videoComp` stays nil and the full source resolution is preserved.
         var videoComp: AVVideoComposition?
-        if let maxRes = maxResolution,
+        if #available(macOS 26, iOS 26, *),
+           let rawRes = maxResolutionRaw,
+           let maxRes = ExportMaxResolution(rawValue: rawRes),
            let compVideoTrack = composition.tracks(withMediaType: .video).first {
             let naturalSize = try await compVideoTrack.load(.naturalSize)
             let preferredTransform = try await compVideoTrack.load(.preferredTransform)
@@ -714,8 +724,12 @@ struct PreviewGenerationLogic {
         if FileManager.default.fileExists(atPath: outputURL.path) {
             try? FileManager.default.removeItem(at: outputURL)
         }
+        // Resolution capping for the SJS render size.
+        // `ExportMaxResolution.maxWidth/maxHeight` require macOS 26+ / iOS 26+.
+        // On earlier OS versions renderSize stays at naturalSize (full source resolution).
         var renderSize: CGSize = naturalSize
-        if let maxRes = config.exportMaxResolution,
+        if #available(macOS 26, iOS 26, *),
+           let maxRes = config.exportMaxResolution,
            let compVideoTrack = composition.tracks(withMediaType: .video).first {
             let naturalSize = try await compVideoTrack.load(.naturalSize)
             let preferredTransform = try await compVideoTrack.load(.preferredTransform)
@@ -725,13 +739,13 @@ struct PreviewGenerationLogic {
             renderSize = CGSize(width: sourceWidth, height: sourceHeight)
             let targetMaxWidth = CGFloat(maxRes.maxWidth)
             let targetMaxHeight = CGFloat(maxRes.maxHeight)
-            
+
             // Only downscale — never upscale
             if sourceWidth > targetMaxWidth || sourceHeight > targetMaxHeight {
                 let scaleX = targetMaxWidth / sourceWidth
                 let scaleY = targetMaxHeight / sourceHeight
                 let scale = min(scaleX, scaleY)
-                
+
                 let renderWidth = (sourceWidth * scale).rounded(.down)
                 let renderHeight = (sourceHeight * scale).rounded(.down)
                 renderSize = CGSize(width: renderWidth, height: renderHeight)
@@ -745,7 +759,6 @@ struct PreviewGenerationLogic {
                 for: config.compressionQuality,
                 format: config.format,
                 presetname: config.sJSExportPresetName,
-                exportMaxResolution: config.exportMaxResolution ?? ._1080p,
                 width: originalWidth,
                 height: originalHeight,
                 renderSize: renderSize
@@ -874,12 +887,14 @@ struct PreviewGenerationLogic {
             return outputDirectory.appendingPathComponent(filename)
         }
         
-        /// Determine video and audio settings based on quality level and original dimensions
+        /// Determine video and audio settings based on quality level and original dimensions.
+        ///
+        /// Resolution capping is handled by the caller via `renderSize`; this function
+        /// does not reference `ExportMaxResolution` directly and is available on all OS versions.
         private static func videoSettings(
             for quality: Double,
             format: VideoFormat,
             presetname: SjSExportPreset?,
-            exportMaxResolution: ExportMaxResolution,
             width: Int,
             height: Int,
             renderSize: CGSize

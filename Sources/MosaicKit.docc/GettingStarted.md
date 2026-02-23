@@ -31,8 +31,8 @@ dependencies: [
 
 ## Platform Requirements
 
-- **macOS 26.0+** (uses Metal GPU acceleration by default)
-- **iOS 26.0+** (uses Core Graphics with vImage optimization)
+- **macOS 15.0+** (uses Metal GPU acceleration by default)
+- **iOS 15.0+** (uses Core Graphics with vImage optimization)
 - **Swift 6.2+**
 
 ## Basic Usage

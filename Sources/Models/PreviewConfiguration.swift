@@ -4,7 +4,7 @@ import OSLog
 import SJSAssetExportSession
 
 /// Configuration for video preview generation
-@available(macOS 26, iOS 26, *)
+// @available(macOS 26, iOS 26, *)
 public struct PreviewConfiguration: Codable, Sendable, Hashable {
 
     private static let logger = Logger(subsystem: "com.mosaickit", category: "PreviewConfiguration")
@@ -48,12 +48,86 @@ public struct PreviewConfiguration: Codable, Sendable, Hashable {
     /// The SJSAssetExportSession preset to use when ``useNativeExport`` is false.
     public var sJSExportPresetName: SjSExportPreset?
 
+    /// Backing store for `exportMaxResolution`.
+    ///
+    /// Stored as a raw `String?` so `PreviewConfiguration` remains fully `Codable`
+    /// on macOS 15+ even though `ExportMaxResolution` itself requires macOS 26+.
+    /// Defaults to `"1080p"` (mirrors `ExportMaxResolution._1080p`).
+    private var _exportMaxResolutionRaw: String? = "1080p"
+
+    /// Internal accessor for the raw resolution value, used by the video-generation
+    /// pipeline to pass the preference through without requiring an `#available` context.
+    var exportMaxResolutionRaw: String? { _exportMaxResolutionRaw }
+
     /// Maximum output resolution for the export. Defaults to 1080p.
-    public var exportMaxResolution: ExportMaxResolution?
+    ///
+    /// Only effective on macOS 26+ / iOS 26+. The underlying downscaling relies on
+    /// `AVVideoComposition.Configuration` and related AVFoundation types introduced
+    /// in macOS 26 / iOS 26. On earlier OS versions the value is persisted and
+    /// round-trips correctly through `Codable`, but the export uses full source resolution.
+    ///
+    /// Wrap all read/write access in `if #available(macOS 26, iOS 26, *)`.
+    @available(macOS 26, iOS 26, *)
+    public var exportMaxResolution: ExportMaxResolution? {
+        get { _exportMaxResolutionRaw.flatMap(ExportMaxResolution.init(rawValue:)) }
+        set { _exportMaxResolutionRaw = newValue?.rawValue }
+    }
+
+    // MARK: - CodingKeys
+
+    private enum CodingKeys: String, CodingKey {
+        case targetDuration, density, format, includeAudio, outputDirectory
+        case fullPathInName, compressionQuality, useNativeExport
+        case exportPresetName, sJSExportPresetName
+        /// Encodes/decodes as `"exportMaxResolution"` for backward compatibility
+        /// even though the backing stored property is `_exportMaxResolutionRaw`.
+        case exportMaxResolution
+    }
+
     // MARK: - Initialization
 
+    /// Creates a `PreviewConfiguration` for all supported OS versions (macOS 15+).
+    ///
+    /// To set a maximum export resolution on macOS 26+, assign `exportMaxResolution`
+    /// after construction:
+    /// ```swift
+    /// var config = PreviewConfiguration()
+    /// if #available(macOS 26, iOS 26, *) {
+    ///     config.exportMaxResolution = ._1080p
+    /// }
+    /// ```
     public init(
-        targetDuration: TimeInterval = 60, // 1 minute default
+        targetDuration: TimeInterval = 60,
+        density: DensityConfig = .m,
+        format: VideoFormat = .mp4,
+        includeAudio: Bool = true,
+        outputDirectory: URL? = nil,
+        fullPathInName: Bool = false,
+        compressionQuality: Double = 0.8,
+        useNativeExport: Bool = true,
+        exportPresetName: nativeExportPreset? = .AVAssetExportPresetHEVC1920x1080,
+        sjSExportPresetName: SjSExportPreset? = .hevc
+    ) {
+        self.targetDuration = targetDuration
+        self.density = density
+        self.format = format
+        self.includeAudio = includeAudio
+        self.outputDirectory = outputDirectory
+        self.fullPathInName = fullPathInName
+        self.compressionQuality = min(max(compressionQuality, 0.0), 1.0)
+        self.useNativeExport = useNativeExport
+        self.exportPresetName = exportPresetName
+        self.sJSExportPresetName = sjSExportPresetName ?? .hevc
+        // _exportMaxResolutionRaw defaults to "1080p" via the property declaration
+    }
+
+    /// Creates a `PreviewConfiguration` with an explicit maximum export resolution.
+    ///
+    /// Requires macOS 26+ / iOS 26+ because `ExportMaxResolution` relies on
+    /// `AVVideoComposition.Configuration` (introduced in macOS 26 / iOS 26).
+    @available(macOS 26, iOS 26, *)
+    public init(
+        targetDuration: TimeInterval = 60,
         density: DensityConfig = .m,
         format: VideoFormat = .mp4,
         includeAudio: Bool = true,
@@ -75,7 +149,7 @@ public struct PreviewConfiguration: Codable, Sendable, Hashable {
         self.useNativeExport = useNativeExport
         self.exportPresetName = exportPresetName
         self.sJSExportPresetName = sjSExportPresetName ?? .hevc
-        self.exportMaxResolution = maxResolution ?? ._1080p
+        self._exportMaxResolutionRaw = (maxResolution ?? ._1080p).rawValue
     }
 
     
@@ -85,7 +159,7 @@ public struct PreviewConfiguration: Codable, Sendable, Hashable {
         exportPresetName?.rawValue ?? format.exportPreset(quality: compressionQuality)
     }
 
-    // MARK: - Codable (backward-compatible decoding)
+    // MARK: - Codable
 
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
@@ -96,11 +170,28 @@ public struct PreviewConfiguration: Codable, Sendable, Hashable {
         outputDirectory = try container.decodeIfPresent(URL.self, forKey: .outputDirectory)
         fullPathInName = try container.decode(Bool.self, forKey: .fullPathInName)
         compressionQuality = min(max(try container.decode(Double.self, forKey: .compressionQuality), 0.0), 1.0)
-        // New fields with backward-compatible defaults
         useNativeExport = try container.decodeIfPresent(Bool.self, forKey: .useNativeExport) ?? true
         exportPresetName = try container.decodeIfPresent(nativeExportPreset.self, forKey: .exportPresetName)
-        sJSExportPresetName = try container.decodeIfPresent(SjSExportPreset.self, forKey: .sJSExportPresetName ) ?? .hevc
-        exportMaxResolution = try container.decodeIfPresent(ExportMaxResolution.self, forKey: .exportMaxResolution) ?? ._1080p
+        sJSExportPresetName = try container.decodeIfPresent(SjSExportPreset.self, forKey: .sJSExportPresetName) ?? .hevc
+        // Decoded as String? so this round-trips correctly on all OS versions.
+        // ExportMaxResolution itself requires macOS 26+; storing as a raw value keeps
+        // PreviewConfiguration Codable on macOS 15+.
+        _exportMaxResolutionRaw = try container.decodeIfPresent(String.self, forKey: .exportMaxResolution) ?? "1080p"
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(targetDuration, forKey: .targetDuration)
+        try container.encode(density, forKey: .density)
+        try container.encode(format, forKey: .format)
+        try container.encode(includeAudio, forKey: .includeAudio)
+        try container.encodeIfPresent(outputDirectory, forKey: .outputDirectory)
+        try container.encode(fullPathInName, forKey: .fullPathInName)
+        try container.encode(compressionQuality, forKey: .compressionQuality)
+        try container.encode(useNativeExport, forKey: .useNativeExport)
+        try container.encodeIfPresent(exportPresetName, forKey: .exportPresetName)
+        try container.encodeIfPresent(sJSExportPresetName, forKey: .sJSExportPresetName)
+        try container.encodeIfPresent(_exportMaxResolutionRaw, forKey: .exportMaxResolution)
     }
 
     // MARK: - Extract Calculation
@@ -208,7 +299,7 @@ public struct PreviewConfiguration: Codable, Sendable, Hashable {
         let durationLabel = formatDuration(targetDuration)
         let audioLabel = includeAudio ? "audio" : "noaudio"
         let exportLabel: String
-        let resolution = exportMaxResolution?.rawValue ?? "auto"
+        let resolution = _exportMaxResolutionRaw ?? "auto"
         if useNativeExport {
             let preset = (exportPresetName?.displayString ?? effectiveExportPreset)
             exportLabel = "\(preset)_nat"
@@ -259,7 +350,7 @@ public struct PreviewConfiguration: Codable, Sendable, Hashable {
 
 // MARK: - Predefined Durations
 
-@available(macOS 26, iOS 26, *)
+// @available(macOS 26, iOS 26, *)
 extension PreviewConfiguration {
     /// Common preview durations (30 second increments from 30s to 5m)
     public static let standardDurations: [TimeInterval] = [
@@ -299,7 +390,7 @@ extension PreviewConfiguration: CustomDebugStringConvertible {
             exportDetail = "native(preset: \(exportPresetName?.displayString ?? effectiveExportPreset))"
         } else {
             let codec = sJSExportPresetName?.displayString ?? "default"
-            let res = exportMaxResolution?.rawValue ?? "auto"
+            let res = _exportMaxResolutionRaw ?? "auto"
             exportDetail = "SJS(codec: \(codec), maxRes: \(res))"
         }
         return "PreviewConfiguration(duration: \(durationLabel), density: \(density.name), format: \(format.rawValue), \(audioLabel), export: \(exportDetail))"

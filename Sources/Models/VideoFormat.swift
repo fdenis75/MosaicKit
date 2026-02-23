@@ -110,6 +110,15 @@ public enum SjSExportPreset: String, Codable, Sendable, CaseIterable, Identifiab
 }
 
 /// Maximum output resolution constraint for video export.
+///
+/// Only available on macOS 26+ and iOS 26+ because the actual downscaling is performed
+/// using `AVVideoComposition.Configuration`, `AVVideoCompositionLayerInstruction.Configuration`,
+/// and `AVVideoCompositionInstruction.Configuration` — all APIs introduced in macOS 26 / iOS 26.
+///
+/// On earlier OS versions the setting is stored but silently ignored; the full source
+/// resolution is used during export. Use `#available(macOS 26, iOS 26, *)` guards whenever
+/// you read or write this value.
+@available(macOS 26, iOS 26, *)
 public enum ExportMaxResolution: String, Codable, Sendable, CaseIterable,Identifiable {
     public var id: Self {
 
@@ -162,7 +171,7 @@ public enum ExportQuality: String, Codable, Sendable, CaseIterable {
 }
 
 /// Supported video output formats for preview generation
-@available(macOS 26, iOS 26, *)
+// @available(macOS 26, iOS 26, *)
     public enum VideoFormat: String, Codable, Sendable, CaseIterable, CustomDebugStringConvertible {
         case mp4 = "mp4"
         case mov = "mov"

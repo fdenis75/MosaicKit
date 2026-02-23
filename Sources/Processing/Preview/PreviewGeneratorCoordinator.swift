@@ -4,7 +4,7 @@ import AVFoundation
 
 
 /// Coordinator for batch preview video generation with concurrency management
-@available(macOS 26, iOS 26, *)
+// @available(macOS 26, iOS 26, *)
 public actor PreviewGeneratorCoordinator {
 
     // MARK: - Properties
@@ -333,7 +333,7 @@ public actor PreviewGeneratorCoordinator {
 
 // MARK: - Performance Metrics
 
-@available(macOS 26, iOS 26, *)
+// @available(macOS 26, iOS 26, *)
 extension PreviewGeneratorCoordinator {
     /// Get performance metrics
     public func getPerformanceMetrics() -> [String: Any] {

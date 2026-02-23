@@ -94,8 +94,8 @@ struct MosaicConfigurationTests {
     }
 
     @Test("MosaicConfiguration output path and filename combinations are deterministic")
-    func pathAndFilenameCombinations() {
-        let video = makeVideoInput(
+    func pathAndFilenameCombinations() async {
+        let video = await makeVideoInput(
             filePath: "/Volumes/volname/test/test.mp4",
             serviceName: "Test1",
             creatorName: "Test2",
@@ -155,13 +155,13 @@ struct MosaicConfigurationTests {
         #expect(nonIphoneConfig.backgroundColor == .defaultGray)
     }
 
-    private func makeVideoInput (
+    private func makeVideoInput(
         filePath: String,
         serviceName: String?,
         creatorName: String?,
         postID: String?
-    ) -> VideoInput {
-        VideoInput(
+    ) async -> VideoInput {
+        await VideoInput(
             url: URL(fileURLWithPath: filePath),
             serviceName: serviceName,
             creatorName: creatorName,

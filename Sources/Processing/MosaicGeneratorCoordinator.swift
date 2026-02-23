@@ -2,7 +2,7 @@
 import OSLog
 @preconcurrency import CoreImage
 
-@available(macOS 26, iOS 26, *)
+// @available(macOS 26, iOS 26, *)
 public struct MosaicGenerationResult: Sendable {
     /// The video that was processed
     public let video: VideoInput
@@ -26,7 +26,7 @@ public struct MosaicGenerationResult: Sendable {
     }
 }
 
-@available(macOS 26, iOS 26, *)
+// @available(macOS 26, iOS 26, *)
 public struct MosaicGenerationImage: Sendable {
     /// The video that was processed
     public let video: VideoInput
@@ -50,7 +50,7 @@ public struct MosaicGenerationImage: Sendable {
     }
 }
 
-@available(macOS 26, iOS 26, *)
+// @available(macOS 26, iOS 26, *)
 public struct MosaicGenerationProgress: Sendable {
     /// The video being processed.
     public let video: VideoInput
@@ -84,7 +84,7 @@ public struct MosaicGenerationProgress: Sendable {
 }
 
 /// Status of mosaic generation
-@available(macOS 26, iOS 26, *)
+// @available(macOS 26, iOS 26, *)
 public enum MosaicGenerationStatus: Sendable {
     /// Generation is queued
     case queued
@@ -109,7 +109,7 @@ public enum MosaicGenerationStatus: Sendable {
 }
 /// Coordinator for mosaic generation operations
 /// Generic over Generator type to eliminate existential container overhead
-@available(macOS 26, iOS 26, *)
+// @available(macOS 26, iOS 26, *)
 public actor MosaicGeneratorCoordinator<Generator: MosaicGeneratorProtocol> {
 
 
@@ -604,7 +604,6 @@ public actor MosaicGeneratorCoordinator<Generator: MosaicGeneratorProtocol> {
 /// - Parameter concurrencyLimit: Maximum number of concurrent generation tasks
 /// - Returns: A coordinator with Metal generator for maximum performance
 #if os(macOS)
-@available(macOS 26, *)
 public func createMosaicCoordinatorWithMetal(concurrencyLimit: Int = 0) throws -> MosaicGeneratorCoordinator<MetalMosaicGenerator> {
     let generator = try MetalMosaicGenerator()
     return MosaicGeneratorCoordinator(mosaicGenerator: generator, concurrencyLimit: concurrencyLimit)
@@ -614,7 +613,7 @@ public func createMosaicCoordinatorWithMetal(concurrencyLimit: Int = 0) throws -
 /// Creates a coordinator with Core Graphics generator (cross-platform)
 /// - Parameter concurrencyLimit: Maximum number of concurrent generation tasks
 /// - Returns: A coordinator with Core Graphics generator
-@available(macOS 26, iOS 26, *)
+// @available(macOS 26, iOS 26, *)
 public func createMosaicCoordinatorWithCoreGraphics(concurrencyLimit: Int = 0) throws -> MosaicGeneratorCoordinator<CoreGraphicsMosaicGenerator> {
     let generator = try CoreGraphicsMosaicGenerator()
     return MosaicGeneratorCoordinator(mosaicGenerator: generator, concurrencyLimit: concurrencyLimit)
@@ -624,12 +623,10 @@ public func createMosaicCoordinatorWithCoreGraphics(concurrencyLimit: Int = 0) t
 /// - Parameter concurrencyLimit: Maximum number of concurrent generation tasks
 /// - Returns: A coordinator with the optimal generator for this platform
 #if os(macOS)
-@available(macOS 26, *)
 public func createDefaultMosaicCoordinator(concurrencyLimit: Int = 0) throws -> MosaicGeneratorCoordinator<MetalMosaicGenerator> {
     try createMosaicCoordinatorWithMetal(concurrencyLimit: concurrencyLimit)
 }
 #else
-@available(iOS 26, *)
 public func createDefaultMosaicCoordinator(concurrencyLimit: Int = 0) throws -> MosaicGeneratorCoordinator<CoreGraphicsMosaicGenerator> {
     try createMosaicCoordinatorWithCoreGraphics(concurrencyLimit: concurrencyLimit)
 }

@@ -26,10 +26,10 @@ struct PreviewConfigurationTests {
     }
 
     @Test("PreviewConfiguration combinations are codable and produce valid filenames")
-    func codableAndFilenameCombinations() throws {
+    func codableAndFilenameCombinations() async throws {
         let encoder = JSONEncoder()
         let decoder = JSONDecoder()
-        let video = makeVideoInput(path: "/tmp/preview-tests/source clip.mov")
+        let video = await makeVideoInput(path: "/tmp/preview-tests/source clip.mov")
 
         let formats = VideoFormat.allCases
         let bools = [true, false]
@@ -45,7 +45,9 @@ struct PreviewConfigurationTests {
                         for useNativeExport in bools {
                             for quality in qualityValues {
                                 for duration in durations {
-                                    let config = PreviewConfiguration(
+                                    // ExportMaxResolution requires macOS 26+; use the
+                                    // base init and set the property conditionally.
+                                    var config = PreviewConfiguration(
                                         targetDuration: duration,
                                         density: density,
                                         format: format,
@@ -55,9 +57,11 @@ struct PreviewConfigurationTests {
                                         compressionQuality: quality,
                                         useNativeExport: useNativeExport,
                                         exportPresetName: useNativeExport ? .AVAssetExportPresetHighestQuality : nil,
-                                        sjSExportPresetName: useNativeExport ? .hevc : .h264_HighAutoLevel,
-                                        maxResolution: useNativeExport ? ._1080p : ._720p
+                                        sjSExportPresetName: useNativeExport ? .hevc : .h264_HighAutoLevel
                                     )
+                                    if #available(macOS 26, iOS 26, *) {
+                                        config.exportMaxResolution = useNativeExport ? ._1080p : ._720p
+                                    }
 
                                     let data = try encoder.encode(config)
                                     let decoded = try decoder.decode(PreviewConfiguration.self, from: data)
@@ -120,8 +124,8 @@ struct PreviewConfigurationTests {
         #expect(PreviewConfiguration.durationLabel(for: 90) == "1:30")
     }
 
-    private func makeVideoInput(path: String) -> VideoInput {
-        VideoInput(
+    private func makeVideoInput(path: String) async -> VideoInput {
+        await VideoInput(
             url: URL(fileURLWithPath: path),
             title: "Preview Source",
             duration: 600,

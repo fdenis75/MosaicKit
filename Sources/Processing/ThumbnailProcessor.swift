@@ -12,7 +12,7 @@ import UIKit
 
 
 /// A processor for extracting and managing video thumbnails
-@available(macOS 26, iOS 26, *)
+// @available(macOS 26, iOS 26, *)
 public final class ThumbnailProcessor: @unchecked Sendable {
     private let logger = Logger(subsystem: "com.mosaicKit", category: "thumbnail-processor")
     private let config: MosaicConfiguration

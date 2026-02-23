@@ -1,7 +1,7 @@
 import Foundation
 
 /// Errors related to video processing and metadata extraction.
-@available(macOS 26, iOS 26, *)
+// @available(macOS 26, iOS 26, *)
 public enum VideoError: Error, LocalizedError, Equatable {
     /// The video track could not be found in the asset.
     case videoTrackNotFound(URL)

@@ -11,9 +11,9 @@ By the end of this tutorial, you'll have:
 
 ## Prerequisites
 
-- Xcode 26.0+
+- Xcode 16.0+
 - Swift 6.2+
-- macOS 26.0+ or iOS 26.0+
+- macOS 15.0+ or iOS 15.0+
 - A video file to test with (any common format: MP4, MOV, M4V)
 
 ## Step 1: Add MosaicKit to Your Project

@@ -91,6 +91,39 @@ struct MosaicGeneratorCoordinatorTests {
         }
     }
 
+    @Test("Coordinator generates mosaic from embedded test video")
+    func coordinatorSingleVideoFromEmbeddedAsset() async throws {
+        let videoURL = try embeddedVideoURL
+        let video = try await VideoInput(from: videoURL)
+
+        let outputDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("MosaicKitTests-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: outputDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: outputDir) }
+
+        let coordinator = try createDefaultMosaicCoordinator(concurrencyLimit: 1)
+        let config = makeTestConfiguration(outputDirectory: outputDir)
+
+        let result = try await coordinator.generateMosaic(for: video, config: config) { _ in }
+
+        #expect(result.isSuccess)
+        if let outputURL = result.outputURL {
+            #expect(FileManager.default.fileExists(atPath: outputURL.path))
+            let attrs = try FileManager.default.attributesOfItem(atPath: outputURL.path)
+            let size = attrs[FileAttributeKey.size] as? Int ?? 0
+            #expect(size > 0)
+        }
+    }
+
+    private var embeddedVideoURL: URL {
+        get throws {
+            guard let url = Bundle.module.url(forResource: "test_video", withExtension: "mp4") else {
+                throw MediaAccessError.noVideosFound("embedded asset test_video.mp4 not found in bundle")
+            }
+            return url
+        }
+    }
+
     private func withAccessibleMediaFolder<T>(
         _ operation: (URL) async throws -> T
     ) async throws -> T {

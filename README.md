@@ -18,7 +18,7 @@ A high-performance Swift package for generating video mosaics with Metal-acceler
 
 ## Requirements
 
-- macOS 26.0+ or iOS 26.0+
+- macOS 15.0+ or iOS 15.0+
 - Xcode 26.0+
 - Swift 6.2+
 - Metal-capable device
@@ -435,7 +435,7 @@ let coordinator = MosaicGeneratorCoordinator(
 
 ### "Metal is not supported"
 - Ensure you're running on a Metal-capable device
-- Check minimum OS requirements (macOS 26+ / iOS 26+)
+- Check minimum OS requirements (macOS 15+ / iOS 15+)
 
 ### Out of memory errors
 - Reduce mosaic width

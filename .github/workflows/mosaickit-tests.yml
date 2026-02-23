@@ -20,7 +20,16 @@ permissions:
 
 jobs:
   swift-test:
-    runs-on: macos-latest
+    name: Test on ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # macOS 15: verifies the package builds and tests pass without the
+        # ExportMaxResolution / AVVideoComposition.Configuration code path
+        # (those are gated behind #available(macOS 26, iOS 26, *)).
+        # macOS 26: exercises the full code path including resolution downscaling.
+        os: [macos-15, macos-26]
+    runs-on: ${{ matrix.os }}
     env:
       MOSAICKIT_SUITE_MODE: none
 
@@ -28,10 +37,10 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Select Xcode
-        uses: maxim-lobanov/setup-xcode@v1
+      - name: Setup Swift 6.2
+        uses: swift-actions/setup-swift@v2
         with:
-          xcode-version: latest-stable
+          swift-version: "6.2.0"
 
       - name: Show toolchain versions
         run: |
@@ -45,9 +54,12 @@ jobs:
             .build
             ~/.swiftpm
             ~/Library/Caches/org.swift.swiftpm
-          key: ${{ runner.os }}-spm-${{ hashFiles('Package.swift', 'Package.resolved') }}
+          key: ${{ runner.os }}-${{ matrix.os }}-spm-${{ hashFiles('Package.swift', 'Package.resolved') }}
           restore-keys: |
-            ${{ runner.os }}-spm-
+            ${{ runner.os }}-${{ matrix.os }}-spm-
+
+      - name: Build
+        run: swift build -v
 
       - name: Run tests
         run: swift test --parallel

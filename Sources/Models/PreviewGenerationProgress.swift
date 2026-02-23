@@ -9,7 +9,7 @@
 @preconcurrency import AVFoundation
 
 /// Status of preview video generation
-@available(macOS 26, iOS 26, *)
+// @available(macOS 26, iOS 26, *)
 public enum PreviewGenerationStatus: String, Codable, Sendable {
     case queued
     case analyzing
@@ -57,7 +57,7 @@ public enum PreviewGenerationStatus: String, Codable, Sendable {
 }
 
 /// Progress information for preview video generation
-@available(macOS 26, iOS 26, *)
+// @available(macOS 26, iOS 26, *)
 public struct PreviewGenerationProgress: Sendable {
     /// The video being processed
     public let video: VideoInput
@@ -133,7 +133,7 @@ public struct PreviewGenerationProgress: Sendable {
 }
 
 /// Result of preview video generation
-@available(macOS 26, iOS 26, *)
+// @available(macOS 26, iOS 26, *)
 public struct PreviewGenerationResult: Sendable {
     /// The video that was processed
     public let video: VideoInput
@@ -167,7 +167,7 @@ public struct PreviewGenerationResult: Sendable {
 }
 
 /// Result of preview composition generation (for video player playback)
-@available(macOS 26, iOS 26, *)
+// @available(macOS 26, iOS 26, *)
 public struct PreviewCompositionResult: Sendable {
     /// The video that was processed
     public let video: VideoInput

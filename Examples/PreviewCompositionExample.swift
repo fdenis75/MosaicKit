@@ -9,7 +9,7 @@ import Foundation
 import AVFoundation
 import MosaicKit
 
-@available(macOS 26, iOS 26, *)
+// @available(macOS 26, iOS 26, *)
 func generatePreviewComposition() async throws {
     // 1. Set up video input
     let videoURL = URL(fileURLWithPath: "/path/to/your/video.mp4")
@@ -54,7 +54,7 @@ func generatePreviewComposition() async throws {
     try await Task.sleep(for: .seconds(60))
 }
 
-@available(macOS 26, iOS 26, *)
+// @available(macOS 26, iOS 26, *)
 func observePlayerStatus(player: AVPlayer) {
     // Observe player status
     player.addObserver(
@@ -76,7 +76,7 @@ func observePlayerStatus(player: AVPlayer) {
 
 // MARK: - Coordinator Examples
 
-@available(macOS 26, iOS 26, *)
+// @available(macOS 26, iOS 26, *)
 func exampleWithCoordinator() async throws {
     let videoURL = URL(fileURLWithPath: "/path/to/video.mp4")
     let video = try await VideoInput(from: videoURL)
@@ -99,7 +99,7 @@ func exampleWithCoordinator() async throws {
     player.play()
 }
 
-@available(macOS 26, iOS 26, *)
+// @available(macOS 26, iOS 26, *)
 func exampleBatchCompositions() async throws {
     let videoURLs = [
         URL(fileURLWithPath: "/path/to/video1.mp4"),
@@ -140,7 +140,7 @@ func exampleBatchCompositions() async throws {
 
 // MARK: - Example Usage Scenarios
 
-@available(macOS 26, iOS 26, *)
+// @available(macOS 26, iOS 26, *)
 func exampleWithCustomConfiguration() async throws {
     let videoURL = URL(fileURLWithPath: "/path/to/video.mp4")
     let video = try await VideoInput(from: videoURL)
@@ -161,7 +161,7 @@ func exampleWithCustomConfiguration() async throws {
     player.play()
 }
 
-@available(macOS 26, iOS 26, *)
+// @available(macOS 26, iOS 26, *)
 func exampleWithLoop() async throws {
     let videoURL = URL(fileURLWithPath: "/path/to/video.mp4")
     let video = try await VideoInput(from: videoURL)
@@ -187,7 +187,7 @@ func exampleWithLoop() async throws {
 
 // MARK: - Comparison: Export vs Composition
 
-@available(macOS 26, iOS 26, *)
+// @available(macOS 26, iOS 26, *)
 func compareExportVsComposition() async throws {
     let videoURL = URL(fileURLWithPath: "/path/to/video.mp4")
     let video = try await VideoInput(from: videoURL)
@@ -219,7 +219,7 @@ func compareExportVsComposition() async throws {
 
 // MARK: - Main Entry Point
 
-@available(macOS 26, iOS 26, *)
+// @available(macOS 26, iOS 26, *)
 @main
 struct PreviewCompositionApp {
     static func main() async throws {
