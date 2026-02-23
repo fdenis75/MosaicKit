@@ -96,9 +96,9 @@ struct MosaicConfigurationTests {
     @Test("MosaicConfiguration output path and filename combinations are deterministic")
     func pathAndFilenameCombinations() {
         let video = makeVideoInput(
-            filePath: "/Volumes/Ext-Photos5/91T/DDSC-045 .mp4",
-            serviceName: "OnlyFans",
-            creatorName: "Creator Name",
+            filePath: "/Volumes/volname/test/test.mp4",
+            serviceName: "Test1",
+            creatorName: "Test2",
             postID: "POST:123"
         )
 
@@ -118,12 +118,12 @@ struct MosaicConfigurationTests {
         )
 
         let outputDirectory = config.generateOutputDirectory(rootDirectory: root, videoInput: video)
-        #expect(outputDirectory.path.contains("OnlyFans"))
-        #expect(outputDirectory.path.contains("Creator_Name"))
+        #expect(outputDirectory.path.contains("Test1"))
+        #expect(outputDirectory.path.contains("Test2"))
         #expect(outputDirectory.path.contains(config.configurationHash))
 
-        let defaultFilename = config.generateFilename(originalFilename: "DDSC-045 ", videoInput: video)
-        #expect(defaultFilename.contains("POST_123_DDSC-045"))
+        let defaultFilename = config.generateFilename(originalFilename: "test", videoInput: video)
+        #expect(defaultFilename.contains("POST_123_test"))
         #expect(defaultFilename.hasSuffix(".png"))
 
         let fullPathConfig = MosaicConfiguration(
@@ -139,8 +139,8 @@ struct MosaicConfigurationTests {
             useMovieColorsForBg: config.useMovieColorsForBg,
             backgroundColor: config.backgroundColor
         )
-        let fullPathFilename = fullPathConfig.generateFilename(originalFilename: "DDSC-045 ", videoInput: video)
-        #expect(fullPathFilename.hasPrefix("_Volumes_Ext-Photos5_91T"))
+        let fullPathFilename = fullPathConfig.generateFilename(originalFilename: "test", videoInput: video)
+        #expect(fullPathFilename.hasPrefix("_Volumes_volname_test"))
         #expect(fullPathFilename.hasSuffix(".png"))
     }
 

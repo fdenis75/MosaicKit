@@ -3,11 +3,11 @@ import Testing
 @testable import MosaicKit
 
 struct MosaicGeneratorCoordinatorTests {
-    private static let defaultMediaFolderPath = "/Volumes/Ext-Photos5/testVids"
+    private static let defaultMediaFolderPath = "/Volumes/volname/test/"
     private static let folderPathEnvKey = "MOSAICKIT_TEST_VIDEOS_DIR"
     private static let supportedExtensions: Set<String> = ["mp4", "mov", "m4v", "avi", "mkv"]
 
-    @Test("Coordinator single test using media from /Volumes/Ext-Photos5/testVids")
+    @Test("Coordinator single test using media from /Volumes/volname/test/")
     func coordinatorSingleVideoFromFolder() async throws {
         guard currentMode() == .single else { return }
 
@@ -40,7 +40,7 @@ struct MosaicGeneratorCoordinatorTests {
         }
     }
 
-    @Test("Coordinator batch test using all videos in /Volumes/Ext-Photos5/testVids")
+    @Test("Coordinator batch test using all videos in /Volumes/volname/test/")
     func coordinatorBatchFromFolder() async throws {
         guard currentMode() == .folder else { return }
 
@@ -180,7 +180,7 @@ struct MosaicGeneratorCoordinatorTests {
     }
 
     private func currentMode() -> SuiteMode {
-        let rawValue = ProcessInfo.processInfo.environment["MOSAICKIT_SUITE_MODE"] ?? "single"
+        let rawValue = ProcessInfo.processInfo.environment["MOSAICKIT_SUITE_MODE"] ?? "none"
         return SuiteMode(rawValue: rawValue.lowercased()) ?? .single
     }
 }
