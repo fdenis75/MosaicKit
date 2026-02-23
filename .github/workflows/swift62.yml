@@ -12,7 +12,7 @@ on:
 jobs:
   build:
 
-    runs-on: macos-latest
+    runs-on: macos-26-large
 
     steps:
     - uses: swift-actions/setup-swift@v2
