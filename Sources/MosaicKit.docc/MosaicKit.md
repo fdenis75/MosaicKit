@@ -4,8 +4,8 @@ High-performance video mosaic generation with platform-optimized image processin
 
 @Metadata {
     @TechnologyRoot
-    @Available(macOS, introduced: "26.0")
-    @Available(iOS, introduced: "26.0")
+    @Available(macOS, introduced: "15.0")
+    @Available(iOS, introduced: "15.0")
 }
 
 ## Overview
