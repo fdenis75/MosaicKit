@@ -115,6 +115,32 @@ struct MosaicGeneratorCoordinatorTests {
         }
     }
 
+    /// Exercises the metadata header path (previously always bypassed in CI because
+    /// `makeTestConfiguration` used `includeMetadata: false`).
+    @Test("Coordinator generates mosaic with metadata header and frame labels from embedded video")
+    func coordinatorEmbeddedAssetWithMetadata() async throws {
+        let videoURL = try embeddedVideoURL
+        let video = try await VideoInput(from: videoURL)
+
+        let outputDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("MosaicKitTests-Meta-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: outputDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: outputDir) }
+
+        let coordinator = try createDefaultMosaicCoordinator(concurrencyLimit: 1)
+        let config = makeTestConfigurationWithMetadata(outputDirectory: outputDir)
+
+        let result = try await coordinator.generateMosaic(for: video, config: config) { _ in }
+
+        #expect(result.isSuccess)
+        if let outputURL = result.outputURL {
+            #expect(FileManager.default.fileExists(atPath: outputURL.path))
+            let attrs = try FileManager.default.attributesOfItem(atPath: outputURL.path)
+            let fileSize = attrs[FileAttributeKey.size] as? Int ?? 0
+            #expect(fileSize > 0)
+        }
+    }
+
     private var embeddedVideoURL: URL {
         get throws {
             guard let url = Bundle.module.url(forResource: "test_video", withExtension: "mp4") else {
@@ -209,6 +235,32 @@ struct MosaicGeneratorCoordinatorTests {
             fullPathInName: false,
             useMovieColorsForBg: false,
             backgroundColor: .defaultGray
+        )
+    }
+
+    private func makeTestConfigurationWithMetadata(outputDirectory: URL) -> MosaicConfiguration {
+        MosaicConfiguration(
+            width: 1200,
+            density: .xxl,
+            format: .png,
+            layout: LayoutConfiguration(
+                aspectRatio: .widescreen,
+                spacing: 4,
+                layoutType: .classic
+            ),
+            includeMetadata: true,
+            useAccurateTimestamps: false,
+            compressionQuality: 0.5,
+            outputdirectory: outputDirectory,
+            fullPathInName: false,
+            useMovieColorsForBg: false,
+            backgroundColor: .defaultGray,
+            overlay: OverlayConfiguration(
+                frameLabel: FrameLabelConfig(show: true, format: .timestamp, position: .bottomRight),
+                header: HeaderConfig(fields: [.title, .duration, .resolution], height: .fixed(60)),
+                watermark: nil,
+                colorDNA: ColorDNAConfig(show: false)
+            )
         )
     }
 
