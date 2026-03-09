@@ -129,6 +129,7 @@ public struct MosaicConfiguration: Codable, Sendable {
         // forIphone == true previously meant solid gray; map that to the new params
         self.useMovieColorsForBg = !forIphone
         self.backgroundColor = .defaultGray
+        self.overlay = .default
     }
 
     /// Default configuration for mosaic generation
