@@ -68,7 +68,7 @@ public struct FrameLabelConfig: Codable, Sendable {
 
 /// Height rule for the metadata header band.
 public enum HeaderHeight: Codable, Sendable, Equatable {
-    /// 50 % of the first thumbnail row height — the original calculation.
+    /// Automatically sizes the band to fit the rendered header content.
     case auto
     /// An exact pixel height.
     case fixed(Int)

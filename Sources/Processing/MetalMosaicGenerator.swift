@@ -172,7 +172,6 @@ public actor MetalMosaicGenerator: MosaicGeneratorProtocol {
                     metadataHeader = thumbnailProcessor.createMetadataHeader(
                         for: video,
                         width: Int(layout.mosaicSize.width),
-                        height: Int(layout.thumbnailSize.height * 0.5),
                         forIphone: forIphone,
                         headerConfig: overlayConfig.header
                     ) as CGImage?
@@ -366,7 +365,6 @@ public actor MetalMosaicGenerator: MosaicGeneratorProtocol {
                 metadataHeader = thumbnailProcessor.createMetadataHeader(
                     for: video,
                     width: Int(layout.mosaicSize.width),
-                    height: Int(layout.thumbnailSize.height * 0.5),
                     forIphone: forIphone,
                     headerConfig: overlayConfig.header
                 ) as CGImage?

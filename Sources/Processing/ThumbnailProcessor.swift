@@ -527,7 +527,7 @@ public final class ThumbnailProcessor: @unchecked Sendable {
     /// - Parameters:
     ///   - video: The video object containing metadata information
     ///   - width: The width of the mosaic
-    ///   - height: The height of the metadata header (matching first row of thumbnails)
+    ///   - height: Optional height override for the metadata header
     ///   - backgroundColor: Optional background color (if nil, platform-specific default will be used)
     /// - Returns: A CGImage containing the metadata header
     public func createMetadataHeader(
@@ -555,30 +555,58 @@ public final class ThumbnailProcessor: @unchecked Sendable {
             #endif
         }
 
-        let padding: CGFloat = 8.0
-        let baseFontSize: CGFloat = forIphone ? 6.0 : 16.0
-        var fontSize = max(baseFontSize, CGFloat(width) * 0.05)
-
-        // Build ordered rows of text from headerConfig.fields (3 fields per row)
+        let padding: CGFloat = 4.0
+        let baseFontSize: CGFloat = forIphone ? 6.0 : 8.0
+        let videoAspectRatio = max(0.2, video.aspectRatio ?? 1.0)
+        let layoutAspectRatio = max(0.2, Double(config.layout.aspectRatio.ratio))
+        let videoVerticality = min(2.0, max(0.6, 1.0 / videoAspectRatio))
+        let outputVerticality = min(2.0, max(0.6, 1.0 / layoutAspectRatio))
+        let verticalityScale = CGFloat(sqrt(videoVerticality * outputVerticality))
+        var fontSize = max(baseFontSize, (CGFloat(width) * 0.01) * verticalityScale)
+        // Build ordered rows of text from headerConfig.fields. The file path is
+        // always promoted to its own line so it can use a smaller fitted font.
         let textFields = headerConfig.fields.filter {
             if case .colorPalette = $0 { return false }
             return true
         }
-        let fieldStrings: [String] = textFields.compactMap { field -> String? in
-            formatHeaderField(field, video: video)
+        var primaryFieldStrings: [String] = []
+        var filePathRowText: String?
+        for field in textFields {
+            guard let fieldText = formatHeaderField(field, video: video) else { continue }
+            if case .filePath = field {
+                filePathRowText = fieldText
+            } else {
+                primaryFieldStrings.append(fieldText)
+            }
         }
-        // Group into rows of max 3 fields
-        var rowTexts: [String] = stride(from: 0, to: fieldStrings.count, by: 3).map { start in
-            let end = min(start + 3, fieldStrings.count)
-            return fieldStrings[start..<end].joined(separator: " | ")
-        }
-        // Ensure we always have at least one row to avoid empty headers
-        if rowTexts.isEmpty { rowTexts = [""] }
-        let numberOfLines = CGFloat(rowTexts.count)
 
+        var rowSpecs: [HeaderRowSpec] = stride(from: 0, to: primaryFieldStrings.count, by: 3).map { start in
+            let end = min(start + 3, primaryFieldStrings.count)
+            return HeaderRowSpec(
+                text: primaryFieldStrings[start..<end].joined(separator: " | "),
+                preferredScale: 1.0,
+                minimumScale: 0.75,
+                shrinkToFit: false
+            )
+        }
+        if let filePathRowText {
+            rowSpecs.append(
+                HeaderRowSpec(
+                    text: filePathRowText,
+                    preferredScale: 0.78,
+                    minimumScale: 0.45,
+                    shrinkToFit: true
+                )
+            )
+        }
+        if rowSpecs.isEmpty {
+            rowSpecs = [HeaderRowSpec(text: "", preferredScale: 1.0, minimumScale: 1.0, shrinkToFit: false)]
+        }
+        let totalPreferredLineScale = rowSpecs.reduce(CGFloat.zero) { $0 + $1.preferredScale }
+        
         // Determine header height
-        let estimatedLineHeight = fontSize * 1.5
-        let calculatedHeight = Int(estimatedLineHeight * numberOfLines + padding * 4)
+        let estimatedLineHeight = fontSize * 1.2
+        let calculatedHeight = Int(estimatedLineHeight * totalPreferredLineScale + padding * 4)
         let metadataHeight: Int
         switch headerConfig.height {
         case .auto:    metadataHeight = height ?? calculatedHeight
@@ -587,7 +615,7 @@ public final class ThumbnailProcessor: @unchecked Sendable {
 
         // Clamp font size to fit the available height
         let availableHeight = CGFloat(metadataHeight) - (padding * 4)
-        let maxFontByHeight = numberOfLines > 0 ? availableHeight / (numberOfLines * 1.5) : fontSize
+        let maxFontByHeight = totalPreferredLineScale > 0 ? availableHeight / (totalPreferredLineScale * 1.5) : fontSize
         fontSize = min(fontSize, maxFontByHeight)
         fontSize = max(baseFontSize, fontSize)
 
@@ -637,30 +665,37 @@ public final class ThumbnailProcessor: @unchecked Sendable {
         }
         #endif
 
+        let leftPadding: CGFloat = 20.0
+        let rightPadding: CGFloat = 20.0
+        let availableTextWidth = max(0, CGFloat(width) - leftPadding - rightPadding)
         let paragraphStyle = NSMutableParagraphStyle()
         paragraphStyle.alignment = .left
         paragraphStyle.lineSpacing = forIphone ? 1.0 : 2.0
 
-        let mainFont  = CTFontCreateWithName("Helvetica-Bold" as CFString, fontSize, nil)
+        let rowLayouts = rowSpecs.map {
+            makeHeaderRowLayout(
+                for: $0,
+                textColor: textNSColor,
+                paragraphStyle: paragraphStyle,
+                baseFontSize: fontSize,
+                maxWidth: availableTextWidth
+            )
+        }
+        let rowSpacing = max(4.0, fontSize * (forIphone ? 0.20 : 0.28))
+        let totalTextHeight = rowLayouts.reduce(CGFloat.zero) { $0 + $1.metrics.height }
+            + (CGFloat(max(0, rowLayouts.count - 1)) * rowSpacing)
+        let contentTopInset = padding * 2
+        let extraVerticalSpace = max(0, availableHeight - totalTextHeight)
+        var currentTopY = CGFloat(metadataHeight) - contentTopInset - (extraVerticalSpace / 2)
 
-        let rowAttributes: [NSAttributedString.Key: Any] = [
-            .font: mainFont,
-            .foregroundColor: textNSColor,
-            .paragraphStyle: paragraphStyle
-        ]
-
-        // Draw rows evenly distributed within the header height
-        let leftPadding: CGFloat = 20.0
-        for (i, rowText) in rowTexts.enumerated() {
-            // Distribute rows evenly: position fraction = (i+1) / (count+1)
-            let yPos = CGFloat(metadataHeight) * (1.0 - CGFloat(i + 1) / (numberOfLines + 1))
-            let attrStr = NSAttributedString(string: rowText, attributes: rowAttributes)
-            let line = CTLineCreateWithAttributedString(attrStr)
+        for rowLayout in rowLayouts {
+            let yPos = currentTopY - rowLayout.metrics.ascent
             context.saveGState()
             context.textMatrix = CGAffineTransform.identity
-            context.translateBy(x: leftPadding, y: yPos)
-            CTLineDraw(line, context)
+            context.textPosition = CGPoint(x: leftPadding, y: yPos)
+            CTLineDraw(rowLayout.line, context)
             context.restoreGState()
+            currentTopY = yPos - rowLayout.metrics.descent - rowSpacing
         }
 
         // Colour palette swatches (if requested and colours are available)
@@ -1047,10 +1082,7 @@ public final class ThumbnailProcessor: @unchecked Sendable {
             return visualOnly
         }
 
-        // Calculate font size based on thumbnail height for consistent sizing
-        // Use 8% of thumbnail height, ensuring good readability across all sizes
-        // Previously calculated based on width which caused inconsistencies
-        let fontSize = max(10.0, min(24.0, size.height * 0.08)) * 1.5
+        let fontSize = overlayFontSize(for: size)
 
         // Use a system font with bold weight for better readability
         #if canImport(AppKit)
@@ -1315,7 +1347,78 @@ public final class ThumbnailProcessor: @unchecked Sendable {
         context.restoreGState()
     }
 
-    private func textLayoutMetrics(for line: CTLine) -> (bounds: CGRect, width: CGFloat, height: CGFloat, ascent: CGFloat, descent: CGFloat) {
+    private struct HeaderRowSpec {
+        let text: String
+        let preferredScale: CGFloat
+        let minimumScale: CGFloat
+        let shrinkToFit: Bool
+    }
+
+    private struct HeaderRowLayout {
+        let line: CTLine
+        let metrics: TextLineMetrics
+    }
+
+    private struct TextLineMetrics {
+        let bounds: CGRect
+        let width: CGFloat
+        let height: CGFloat
+        let ascent: CGFloat
+        let descent: CGFloat
+    }
+
+    private func overlayFontSize(for size: CGSize) -> CGFloat {
+        let referenceDimension = size.width >= size.height ? size.width : size.height
+        return max(10.0, min(24.0, referenceDimension * 0.08)) * 1.5
+    }
+
+    private func makeHeaderRowLayout(
+        for spec: HeaderRowSpec,
+        textColor: Any,
+        paragraphStyle: NSParagraphStyle,
+        baseFontSize: CGFloat,
+        maxWidth: CGFloat
+    ) -> HeaderRowLayout {
+        let minimumFontSize = max(6.0, baseFontSize * spec.minimumScale)
+        var currentFontSize = max(minimumFontSize, baseFontSize * spec.preferredScale)
+        var line = makeHeaderLine(
+            text: spec.text,
+            textColor: textColor,
+            paragraphStyle: paragraphStyle,
+            fontSize: currentFontSize
+        )
+        var metrics = textLayoutMetrics(for: line)
+
+        while spec.shrinkToFit, metrics.width > maxWidth, currentFontSize > minimumFontSize {
+            currentFontSize = max(minimumFontSize, currentFontSize - 0.5)
+            line = makeHeaderLine(
+                text: spec.text,
+                textColor: textColor,
+                paragraphStyle: paragraphStyle,
+                fontSize: currentFontSize
+            )
+            metrics = textLayoutMetrics(for: line)
+        }
+
+        return HeaderRowLayout(line: line, metrics: metrics)
+    }
+
+    private func makeHeaderLine(
+        text: String,
+        textColor: Any,
+        paragraphStyle: NSParagraphStyle,
+        fontSize: CGFloat
+    ) -> CTLine {
+        let font = CTFontCreateWithName("Helvetica-Bold" as CFString, fontSize, nil)
+        let attributes: [NSAttributedString.Key: Any] = [
+            .font: font,
+            .foregroundColor: textColor,
+            .paragraphStyle: paragraphStyle
+        ]
+        return CTLineCreateWithAttributedString(NSAttributedString(string: text, attributes: attributes))
+    }
+
+    private func textLayoutMetrics(for line: CTLine) -> TextLineMetrics {
         var ascent: CGFloat = 0
         var descent: CGFloat = 0
         var leading: CGFloat = 0
@@ -1323,7 +1426,13 @@ public final class ThumbnailProcessor: @unchecked Sendable {
         let bounds = CTLineGetBoundsWithOptions(line, .useOpticalBounds)
         let width = max(ceil(typographicWidth), ceil(bounds.width))
         let height = ceil(ascent + descent + leading)
-        return (bounds, width, height, ascent, descent)
+        return TextLineMetrics(
+            bounds: bounds,
+            width: width,
+            height: height,
+            ascent: ascent,
+            descent: descent
+        )
     }
 
     private func mosaicOuterPadding(for layout: MosaicLayout) -> CGFloat {
@@ -1377,9 +1486,7 @@ public final class ThumbnailProcessor: @unchecked Sendable {
         newContext.draw(image, in: rect)
         newContext.restoreGState()
         
-        // Calculate font size based on thumbnail height for consistent sizing
-        // Use 8% of thumbnail height, ensuring good readability across all sizes
-        let fontSize = max(10.0, min(24.0, size.height * 0.08)) * 1.5
+        let fontSize = overlayFontSize(for: size)
         
         // Create font and attributes
         let font = CTFontCreateWithName("Helvetica-Bold" as CFString, fontSize, nil)

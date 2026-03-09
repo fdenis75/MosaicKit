@@ -17,6 +17,12 @@ A high-performance Swift package for generating video mosaics with Metal-acceler
 - 📊 **Overlay Annotations** - Per-frame labels (timestamp, index), customisable metadata headers, watermarks, and Color DNA strips
 - 🎬 **Video Preview Generation** - Create short highlight reels from any video, either exported to file or as a live `AVPlayerItem` composition
 
+## New in 1.1.0
+
+- Adaptive metadata headers now size themselves from the actual rendered content instead of relying on thumbnail-row heuristics.
+- File paths get their own shrink-to-fit header row, which keeps long source URLs and paths readable.
+- Per-frame label typography now scales from the thumbnail’s dominant dimension for more consistent captions across portrait and landscape layouts.
+
 ## Requirements
 
 - macOS 15.0+ or iOS 15.0+
@@ -32,7 +38,7 @@ Add MosaicKit to your `Package.swift`:
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/fdenis75/MosaicKit.git", from: "1.0.0")
+    .package(url: "https://github.com/fdenis75/MosaicKit.git", from: "1.1.0")
 ]
 ```
 
@@ -220,7 +226,7 @@ config.overlay.header = HeaderConfig(
         .colorPalette(swatchCount: 8),          // row of colour swatches
         .custom(label: "Director", value: "Jane Doe")
     ],
-    height:          .fixed(80),     // .auto (50% of first row) | .fixed(Int)
+    height:          .fixed(80),     // .auto (fit content) | .fixed(Int)
     textColor:       nil,            // nil → platform default
     backgroundColor: nil             // nil → semi-transparent dark default
 )

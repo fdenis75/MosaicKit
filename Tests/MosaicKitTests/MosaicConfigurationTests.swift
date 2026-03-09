@@ -184,7 +184,8 @@ struct MosaicConfigurationTests {
         #expect(decoded.overlay.frameLabel.show  == true)
         #expect(decoded.overlay.watermark        == nil)
         #expect(decoded.overlay.colorDNA.show    == false)
-        #expect(decoded.overlay.header.fields.count == 6)
+        #expect(decoded.overlay.header.fields.count == 7)
+        #expect(decoded.overlay.header.fields.contains(.filePath))
     }
 
     private func makeVideoInput(

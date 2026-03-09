@@ -25,7 +25,7 @@ Alternatively, add it to your `Package.swift`:
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/fdenis75/MosaicKit.git", from: "1.0.0")
+    .package(url: "https://github.com/fdenis75/MosaicKit.git", from: "1.1.0")
 ]
 ```
 
@@ -215,7 +215,7 @@ config.overlay.header = HeaderConfig(
         .colorPalette(swatchCount: 8),                    // colour swatches row
         .custom(label: "Director", value: "Jane Doe")     // arbitrary key/value
     ],
-    height:          .fixed(80),   // or .auto (50% of first thumbnail row)
+    height:          .fixed(80),   // or .auto (fit rendered content)
     textColor:       nil,          // nil → platform default
     backgroundColor: nil           // nil → semi-transparent dark default
 )

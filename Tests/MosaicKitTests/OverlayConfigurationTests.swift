@@ -134,16 +134,17 @@ struct OverlayConfigurationTests {
 
     // MARK: - HeaderConfig
 
-    @Test("HeaderConfig default contains six canonical fields")
+    @Test("HeaderConfig default contains seven canonical fields")
     func headerConfigDefaults() {
         let cfg = HeaderConfig.default
-        #expect(cfg.fields.count == 6)
+        #expect(cfg.fields.count == 7)
         #expect(cfg.fields.contains(.title))
         #expect(cfg.fields.contains(.duration))
         #expect(cfg.fields.contains(.fileSize))
         #expect(cfg.fields.contains(.codec))
         #expect(cfg.fields.contains(.resolution))
         #expect(cfg.fields.contains(.bitrate))
+        #expect(cfg.fields.contains(.filePath))
         #expect(cfg.height == .auto)
         #expect(cfg.textColor == nil)
         #expect(cfg.backgroundColor == nil)
@@ -268,7 +269,8 @@ struct OverlayConfigurationTests {
         #expect(overlay.frameLabel.format         == .timestamp)
         #expect(overlay.frameLabel.position       == .bottomRight)
         #expect(overlay.frameLabel.backgroundStyle == .pill)
-        #expect(overlay.header.fields.count       == 6)
+        #expect(overlay.header.fields.count       == 7)
+        #expect(overlay.header.fields.contains(.filePath))
         #expect(overlay.header.height             == .auto)
         #expect(overlay.watermark                 == nil)
         #expect(overlay.colorDNA.show             == false)
@@ -281,7 +283,8 @@ struct OverlayConfigurationTests {
         #expect(decoded.watermark              == nil)
         #expect(decoded.frameLabel.format      == .timestamp)
         #expect(decoded.colorDNA.show          == false)
-        #expect(decoded.header.fields.count    == 6)
+        #expect(decoded.header.fields.count    == 7)
+        #expect(decoded.header.fields.contains(.filePath))
     }
 
     @Test("OverlayConfiguration round-trips with all non-nil fields")
