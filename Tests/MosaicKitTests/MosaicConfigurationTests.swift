@@ -153,6 +153,38 @@ struct MosaicConfigurationTests {
         #expect(nonIphoneConfig.useMovieColorsForBg == true)
         #expect(iphoneConfig.backgroundColor == .defaultGray)
         #expect(nonIphoneConfig.backgroundColor == .defaultGray)
+        // Deprecated init must also initialise the overlay field
+        #expect(iphoneConfig.overlay.frameLabel.show    == true)
+        #expect(iphoneConfig.overlay.watermark          == nil)
+        #expect(iphoneConfig.overlay.colorDNA.show      == false)
+    }
+
+    @Test("configurationHash contains all four components")
+    func configurationHashComponents() {
+        let config = MosaicConfiguration(
+            width: 3840,
+            density: .s,
+            format: .jpeg,
+            layout: LayoutConfiguration(aspectRatio: .vertical, layoutType: .classic)
+        )
+        let hash = config.configurationHash
+        #expect(hash.contains("3840"),    "Hash missing width")
+        #expect(hash.contains(config.density.name), "Hash missing density name")
+        // Aspect ratio stored as "9:16"; colon replaced with dash
+        #expect(hash.contains("9-16"),    "Hash missing aspect ratio")
+        #expect(hash.contains("classic"), "Hash missing layout type")
+    }
+
+    @Test("MosaicConfiguration.default overlay field round-trips through Codable")
+    func defaultConfigOverlayCodable() throws {
+        let encoder = JSONEncoder()
+        let decoder = JSONDecoder()
+        let data    = try encoder.encode(MosaicConfiguration.default)
+        let decoded = try decoder.decode(MosaicConfiguration.self, from: data)
+        #expect(decoded.overlay.frameLabel.show  == true)
+        #expect(decoded.overlay.watermark        == nil)
+        #expect(decoded.overlay.colorDNA.show    == false)
+        #expect(decoded.overlay.header.fields.count == 6)
     }
 
     private func makeVideoInput(

@@ -78,6 +78,48 @@ struct SimpleWithConfig {
     }
 }
 
+// MARK: - Simple with Overlay Annotations
+
+// @available(macOS 26, iOS 26, *)
+struct SimpleWithOverlay {
+    static func run() async throws {
+        print("🎬 Simple Example with Overlay Annotations\n")
+
+        var config = MosaicConfiguration(
+            width: 4000,
+            density: .m,
+            format: .heif,
+            includeMetadata: true
+        )
+
+        // Per-frame timestamp pill
+        config.overlay.frameLabel = FrameLabelConfig(format: .timestamp, position: .bottomRight)
+
+        // Metadata header with four fields
+        config.overlay.header = HeaderConfig(
+            fields: [.title, .duration, .resolution, .colorPalette(swatchCount: 6)],
+            height: .fixed(60)
+        )
+
+        // Translucent text watermark
+        config.overlay.watermark = WatermarkConfig(
+            content: .text("© My Studio"), position: .bottomRight, opacity: 0.35, scale: 0.10
+        )
+
+        // Color DNA strip at the bottom
+        config.overlay.colorDNA = ColorDNAConfig(show: true, height: 24, position: .bottom, style: .gradient)
+
+        let generator = try MosaicGenerator()
+        let mosaicURL = try await generator.generate(
+            from: URL(fileURLWithPath: "/path/to/video.mp4"),
+            config: config,
+            outputDirectory: URL(fileURLWithPath: "/path/to/output")
+        )
+
+        print("✅ Saved: \(mosaicURL.lastPathComponent)")
+    }
+}
+
 // MARK: - Simple Batch Processing
 
 // @available(macOS 26, iOS 26, *)

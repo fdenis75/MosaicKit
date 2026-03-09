@@ -523,43 +523,63 @@ public final class ThumbnailProcessor: @unchecked Sendable {
         width: Int,
         height: Int? = nil,
         backgroundColor: CGColor? = nil,
-        forIphone: Bool = false
+        forIphone: Bool = false,
+        headerConfig: HeaderConfig = .default,
+        swatchColors: [CGColor] = []
     ) -> CGImage? {
-        // Set default background color based on platform
-        #if canImport(AppKit)
-        let bgColor = backgroundColor ?? NSColor(white: 0.1, alpha: 0.25).cgColor
-        #elseif canImport(UIKit)
-        let bgColor = backgroundColor ?? UIColor(white: 0.1, alpha: 0.25).cgColor
-        #endif
-        logger.debug("🏷️ Creating enhanced metadata header image - Width: \(width)")
+        logger.debug("🏷️ Creating metadata header - Width: \(width)")
 
-        // Format resolution using video dimensions from metadata
-        let resolution = "\(Int(video.width ?? 0.0))×\(Int(video.height ?? 0.0))"
+        // Background colour: config override → caller override → platform default
+        let bgColor: CGColor
+        if let cfgBg = headerConfig.backgroundColor {
+            bgColor = cfgBg.cgColor
+        } else if let callerBg = backgroundColor {
+            bgColor = callerBg
+        } else {
+            #if canImport(AppKit)
+            bgColor = NSColor(white: 0.1, alpha: 0.25).cgColor
+            #elseif canImport(UIKit)
+            bgColor = UIColor(white: 0.1, alpha: 0.25).cgColor
+            #endif
+        }
 
         let padding: CGFloat = 8.0
+        let baseFontSize: CGFloat = forIphone ? 6.0 : 16.0
+        var fontSize = max(baseFontSize, CGFloat(width) * 0.05)
 
-        // Calculate font size first, independent of height
-        let baseFontSize = forIphone ? 6.0 : 16.0
-        var fontSize = max(baseFontSize, CGFloat(width) * 0.05) // 2% of width for scalability
-
-        // Calculate height based on content needs (3 lines + padding)
-        let estimatedLineHeight = fontSize * 1.5
-        let numberOfLines: CGFloat = 3.0 // title/duration/size, codec/resolution/bitrate, path
-        let calculatedHeight = Int(estimatedLineHeight * numberOfLines + padding * 4)
-
-        // Use provided height or calculated height
-        let metadataHeight = height ?? calculatedHeight
-        
-        // If height is constrained, ensure font size fits vertically
-        if height != nil {
-            let availableHeight = CGFloat(metadataHeight) - (padding * 4)
-            let maxFontSizeByHeight = availableHeight / (numberOfLines * 1.5)
-            fontSize = min(fontSize, maxFontSizeByHeight)
-            // Ensure a sane minimum
-            fontSize = max(forIphone ? 4.0 : 16.0, fontSize)
+        // Build ordered rows of text from headerConfig.fields (3 fields per row)
+        let textFields = headerConfig.fields.filter {
+            if case .colorPalette = $0 { return false }
+            return true
         }
-        
-        // Create bitmap context for the header
+        let fieldStrings: [String] = textFields.compactMap { field -> String? in
+            formatHeaderField(field, video: video)
+        }
+        // Group into rows of max 3 fields
+        var rowTexts: [String] = stride(from: 0, to: fieldStrings.count, by: 3).map { start in
+            let end = min(start + 3, fieldStrings.count)
+            return fieldStrings[start..<end].joined(separator: " | ")
+        }
+        // Ensure we always have at least one row to avoid empty headers
+        if rowTexts.isEmpty { rowTexts = [""] }
+        let numberOfLines = CGFloat(rowTexts.count)
+
+        // Determine header height
+        let estimatedLineHeight = fontSize * 1.5
+        let calculatedHeight = Int(estimatedLineHeight * numberOfLines + padding * 4)
+        let metadataHeight: Int
+        switch headerConfig.height {
+        case .auto:    metadataHeight = height ?? calculatedHeight
+        case .fixed(let h): metadataHeight = h
+        }
+
+        // Clamp font size to fit the available height
+        let availableHeight = CGFloat(metadataHeight) - (padding * 4)
+        let maxFontByHeight = numberOfLines > 0 ? availableHeight / (numberOfLines * 1.5) : fontSize
+        fontSize = min(fontSize, maxFontByHeight)
+        fontSize = max(baseFontSize, fontSize)
+
+        // Create bitmap context
         let colorSpace = CGColorSpaceCreateDeviceRGB()
         guard let context = CGContext(
             data: nil,
@@ -573,177 +593,122 @@ public final class ThumbnailProcessor: @unchecked Sendable {
             logger.error("❌ Failed to create graphics context for metadata header")
             return nil
         }
-        
-        // Draw a fully transparent background first to let the blurred background show through
+
         context.clear(CGRect(x: 0, y: 0, width: width, height: metadataHeight))
-        
-        // Create dark semi-transparent background for metadata (50% opacity to see background better)
-        context.setFillColor(bgColor)  // Using our platform-specific background color
-       
-        let bgRect = CGRect(x: 0, y: 0, width: width, height: metadataHeight)
-        context.fill(bgRect)
-        
-        // Format duration
-        let formattedDuration: String
-        // Safely unwrap duration and check if positive
-        if let duration = video.duration, duration > 0 {
-            let hours = Int(duration) / 3600
-            let minutes = (Int(duration) % 3600) / 60
-            let seconds = Int(duration) % 60
-            formattedDuration = String(format: "%02d:%02d:%02d", hours, minutes, seconds)
+        context.setFillColor(bgColor)
+        context.fill(CGRect(x: 0, y: 0, width: width, height: metadataHeight))
+
+        // Determine text colour: config override → forIphone white → macOS black
+        #if canImport(AppKit)
+        let defaultTextColor = forIphone ? NSColor.white : NSColor.black
+        let textNSColor: NSColor
+        if let cfgColor = headerConfig.textColor {
+            textNSColor = NSColor(
+                red: CGFloat(cfgColor.red), green: CGFloat(cfgColor.green),
+                blue: CGFloat(cfgColor.blue), alpha: CGFloat(cfgColor.alpha))
         } else {
-            formattedDuration = "Unknown"
+            textNSColor = defaultTextColor
         }
-        
-        // Format file size
-        let formattedFileSize: String
-        if let fileSize = video.fileSize {
-            let formatter = ByteCountFormatter()
-            formatter.allowedUnits = [.useGB, .useMB, .useKB]
-            formatter.countStyle = .file
-            formattedFileSize = formatter.string(fromByteCount: fileSize)
+        #elseif canImport(UIKit)
+        let defaultTextColor = UIColor.black
+        let textNSColor: UIColor
+        if let cfgColor = headerConfig.textColor {
+            textNSColor = UIColor(
+                red: CGFloat(cfgColor.red), green: CGFloat(cfgColor.green),
+                blue: CGFloat(cfgColor.blue), alpha: CGFloat(cfgColor.alpha))
         } else {
-            formattedFileSize = "Unknown"
+            textNSColor = defaultTextColor
         }
-        
-        // Prepare the metadata in two rows for better readability
-        let row1Items = [
-            "Title: \(video.title)",
-            "Duration: \(formattedDuration)",
-            "Size: \(formattedFileSize)"
-        ]
-        
-        let row2Items = [
-            "Codec: \(video.metadata.codec ?? "Unknown")",
-            "Resolution: \(resolution)",
-            "Bitrate: \(formatBitrate(video.metadata.bitrate))"
-        ]
-        
-        // Get filepath
-        // Safely unwrap url before accessing path
-      //  let filePath = "Path: \(video.url.path)"
-        let filePath = ""
-        
-        // Set up text attributes using CoreText with enhanced styling
-        let font = CTFontCreateWithName("Helvetica-Bold" as CFString, fontSize, nil)
-        let smallerFont = CTFontCreateWithName("Helvetica" as CFString, fontSize * 0.8, nil)
+        #endif
+
         let paragraphStyle = NSMutableParagraphStyle()
         paragraphStyle.alignment = .left
-        paragraphStyle.lineSpacing = forIphone ? 1.0 : 2.0 // Add more spacing between lines
-        
-#if canImport(AppKit)
-        // for  iphine, all text is white
-        // Create the attributed strings with enhanced styling
-        let row1Attributes: [NSAttributedString.Key: Any] = [
-            .font: font,
-            .foregroundColor: forIphone ? NSColor.white : NSColor.black,
-            .paragraphStyle: paragraphStyle,
-         //   .strokeWidth: -0.5, // Text outline for better visibility against semi-transparent background
-           // .strokeColor: NSColor.black.withAlphaComponent(0.5)
-           
-        ]
-        
-        let row2Attributes: [NSAttributedString.Key: Any] = [
-            .font: font,
-            .foregroundColor: forIphone ? NSColor.white : NSColor.black,
-            .paragraphStyle: paragraphStyle,
-         //   .strokeWidth: -0.5, // Text outline
-          //  .strokeColor: NSColor.black.withAlphaComponent(0.5)
-        
-        ]
-        
-        let pathAttributes: [NSAttributedString.Key: Any] = [
-            .font: smallerFont,
-        
-            .foregroundColor: forIphone ? NSColor.white : NSColor.black,// Brighter text for better visibility
-            .paragraphStyle: paragraphStyle,
-            //.strokeWidth: -0.3, // Subtle text outline
-           // .strokeColor: NSColor.black.withAlphaComponent(0.3)
-          
-        ]
-#elseif canImport(UIKit)
-        let row1Attributes: [NSAttributedString.Key: Any] = [
-            .font: font,
+        paragraphStyle.lineSpacing = forIphone ? 1.0 : 2.0
 
-            .foregroundColor: UIColor.black,
-            .paragraphStyle: paragraphStyle,
-            .strokeWidth: -0.5, // Text outline for better visibility against semi-transparent background
-            .strokeColor: UIColor.black.withAlphaComponent(0.5)
-        ]
-        
-        let row2Attributes: [NSAttributedString.Key: Any] = [
-            .font: font,
+        let mainFont  = CTFontCreateWithName("Helvetica-Bold" as CFString, fontSize, nil)
 
-            .foregroundColor: UIColor.black,
-            .paragraphStyle: paragraphStyle,
-            .strokeWidth: -0.5, // Text outline
-            .strokeColor: UIColor.black.withAlphaComponent(0.5)
+        let rowAttributes: [NSAttributedString.Key: Any] = [
+            .font: mainFont,
+            .foregroundColor: textNSColor,
+            .paragraphStyle: paragraphStyle
         ]
-        
-        let pathAttributes: [NSAttributedString.Key: Any] = [
-            .font: smallerFont,
 
-            .foregroundColor: UIColor.black,
-            .paragraphStyle: paragraphStyle,
-            .strokeWidth: -0.3, // Subtle text outline
-            .strokeColor: UIColor.black.withAlphaComponent(0.3)
-        ]
-        
-        
-        
-#endif
-        // if for iphone, the lines width should be more than 1000 px
-        
-        // Join rows with separators
-        let row1Text = row1Items.joined(separator: " | ")
-        let row2Text = row2Items.joined(separator: " | ")
-        
-        // Create attributed strings
-        let row1AttributedString = NSAttributedString(string: row1Text, attributes: row1Attributes)
-        let row2AttributedString = NSAttributedString(string: row2Text, attributes: row2Attributes)
-        let pathAttributedString = NSAttributedString(string: filePath, attributes: pathAttributes)
-        
-        // Create lines
-        let row1Line = CTLineCreateWithAttributedString(row1AttributedString)
-        let row2Line = CTLineCreateWithAttributedString(row2AttributedString)
-        let pathLine = CTLineCreateWithAttributedString(pathAttributedString)
-        
-        // Calculate text bounds for positioning
-        // Calculate padding from the left edge
+        // Draw rows evenly distributed within the header height
         let leftPadding: CGFloat = 20.0
-        
-        // Draw row 1 (top third)
-        let row1YPos = CGFloat(metadataHeight) * 0.75
-        context.saveGState()
-        context.textMatrix = CGAffineTransform.identity
-        context.translateBy(x: leftPadding, y: row1YPos)
-        
-        CTLineDraw(row1Line, context)
-        context.restoreGState()
-        
-        // Draw row 2 (middle third)
-        let row2YPos = CGFloat(metadataHeight) * 0.45
-        context.saveGState()
-        context.textMatrix = CGAffineTransform.identity
-        context.translateBy(x: leftPadding, y: row2YPos)
-        CTLineDraw(row2Line, context)
-        context.restoreGState()
-        
-        // Draw file path (bottom third)
-        let pathYPos = CGFloat(metadataHeight) * 0.15
-        context.saveGState()
-        context.textMatrix = CGAffineTransform.identity
-        context.translateBy(x: leftPadding, y: pathYPos)
-        CTLineDraw(pathLine, context)
-        context.restoreGState()
-        
+        for (i, rowText) in rowTexts.enumerated() {
+            // Distribute rows evenly: position fraction = (i+1) / (count+1)
+            let yPos = CGFloat(metadataHeight) * (1.0 - CGFloat(i + 1) / (numberOfLines + 1))
+            let attrStr = NSAttributedString(string: rowText, attributes: rowAttributes)
+            let line = CTLineCreateWithAttributedString(attrStr)
+            context.saveGState()
+            context.textMatrix = CGAffineTransform.identity
+            context.translateBy(x: leftPadding, y: yPos)
+            CTLineDraw(line, context)
+            context.restoreGState()
+        }
+
+        // Colour palette swatches (if requested and colours are available)
+        let paletteField = headerConfig.fields.first {
+            if case .colorPalette = $0 { return true }; return false
+        }
+        if let field = paletteField, case .colorPalette(let swatchCount) = field, !swatchColors.isEmpty {
+            let n          = min(swatchCount, swatchColors.count)
+            let swatchSize = CGFloat(metadataHeight) * 0.25
+            let gap: CGFloat = 4
+            let totalW     = CGFloat(n) * (swatchSize + gap) - gap
+            let startX     = CGFloat(width) - totalW - 20
+            let swatchY    = CGFloat(metadataHeight) * 0.1
+
+            for i in 0..<n {
+                context.setFillColor(swatchColors[i])
+                let r = CGRect(
+                    x: startX + CGFloat(i) * (swatchSize + gap),
+                    y: swatchY,
+                    width: swatchSize, height: swatchSize
+                )
+                // Draw as circles
+                context.fillEllipse(in: r)
+            }
+        }
+
         guard let headerImage = context.makeImage() else {
             logger.error("❌ Failed to create metadata header image")
             return nil
         }
-        
-        logger.debug("✅ Created enhanced metadata header - Size: \(width)×\(metadataHeight)")
+        logger.debug("✅ Created metadata header - Size: \(width)×\(metadataHeight)")
         return headerImage
+    }
+
+    /// Format a single `MetadataField` to a display string using `VideoInput` data.
+    private func formatHeaderField(_ field: MetadataField, video: VideoInput) -> String? {
+        switch field {
+        case .title:
+            return "Title: \(video.title)"
+        case .duration:
+            guard let d = video.duration, d > 0 else { return nil }
+            let h = Int(d) / 3600; let m = (Int(d) % 3600) / 60; let s = Int(d) % 60
+            return "Duration: \(String(format: "%02d:%02d:%02d", h, m, s))"
+        case .fileSize:
+            guard let size = video.fileSize else { return nil }
+            let fmt = ByteCountFormatter()
+            fmt.allowedUnits = [.useGB, .useMB, .useKB]; fmt.countStyle = .file
+            return "Size: \(fmt.string(fromByteCount: size))"
+        case .resolution:
+            return "Resolution: \(Int(video.width ?? 0))×\(Int(video.height ?? 0))"
+        case .codec:
+            return "Codec: \(video.metadata.codec ?? "Unknown")"
+        case .bitrate:
+            return "Bitrate: \(formatBitrate(video.metadata.bitrate))"
+        case .frameRate:
+            guard let fps = video.frameRate else { return nil }
+            return "FPS: \(String(format: "%.2f", fps))"
+        case .filePath:
+            return "Path: \(video.url.path)"
+        case .custom(let label, let value):
+            return "\(label): \(value)"
+        case .colorPalette:
+            return nil  // rendered as swatches, not text
+        }
     }
     
     /// Creates a metadata header image to be placed at the top of the mosaic (legacy version)
@@ -943,10 +908,18 @@ public final class ThumbnailProcessor: @unchecked Sendable {
     /// Add timestamp overlay to the thumbnail image with Apple-inspired design
     /// - Parameters:
     ///   - image: The thumbnail image
-    ///   - timestamp: The timestamp string to add
+    ///   - timestamp: The timestamp string to add ("HH:MM:SS")
+    ///   - frameIndex: Zero-based index of this frame (used for `.frameIndex` label format)
     ///   - size: The size of the thumbnail
-    /// - Returns: CGImage with timestamp overlay and enhanced visual design
-    internal func addTimestampToImage(image: CGImage, timestamp: String, size: CGSize) -> CGImage {
+    ///   - labelConfig: Per-frame label configuration (defaults to original appearance)
+    /// - Returns: CGImage with label overlay and visual treatment
+    internal func addTimestampToImage(
+        image: CGImage,
+        timestamp: String,
+        frameIndex: Int = 0,
+        size: CGSize,
+        labelConfig: FrameLabelConfig = .default
+    ) -> CGImage {
         // Create a context for the image with appropriate scale
         let scale = max(1.0, min(1.2,Double(image.width) / size.width)) // Handle high-resolution images
         // Preserve source color space for accurate color representation
@@ -998,6 +971,14 @@ public final class ThumbnailProcessor: @unchecked Sendable {
         // Restore graphics state after image
         //context.restoreGState()
         
+        // Determine label text before the vignette so it is available in all code paths.
+        let labelText: String
+        switch labelConfig.format {
+        case .timestamp:  labelText = timestamp
+        case .frameIndex: labelText = "Frame \(frameIndex + 1)"
+        case .none:       labelText = ""
+        }
+
         // Add subtle vignette effect for depth (Apple design often uses this)
         // Create gradient for vignette
         let components: [CGFloat] = [
@@ -1011,9 +992,14 @@ public final class ThumbnailProcessor: @unchecked Sendable {
             locations: locations,
             count: 2
         ) else {
+            // Vignette creation failed — restore state and continue with label drawing below.
             context.restoreGState()
-            // Draw timestamp without vignette if gradient creation fails
-            return addTimestampToBaseImage(image: image, timestamp: timestamp, size: size, context: context, rect: rect)
+            // Fall through: the guard below will handle the no-label early exit.
+            guard labelConfig.show, labelConfig.format != .none else {
+                guard let visualOnly = context.makeImage() else { return image }
+                return visualOnly
+            }
+            return addTimestampToBaseImage(image: image, timestamp: labelText, size: size, context: context, rect: rect)
         }
         
         // Draw radial gradient from center
@@ -1028,19 +1014,43 @@ public final class ThumbnailProcessor: @unchecked Sendable {
         
         // Restore graphics state after image and vignette
         context.restoreGState()
-        
+
+        // Early exit if no label text is requested; visual treatment (rounded corners,
+        // vignette) has already been applied above.
+        guard labelConfig.show, labelConfig.format != .none else {
+            guard let visualOnly = context.makeImage() else { return image }
+            return visualOnly
+        }
+
         // Calculate font size based on thumbnail height for consistent sizing
         // Use 8% of thumbnail height, ensuring good readability across all sizes
         // Previously calculated based on width which caused inconsistencies
         let fontSize = max(10.0, min(24.0, size.height * 0.08)) * 1.5
-        
+
         // Use a system font with bold weight for better readability
         #if canImport(AppKit)
         let systemFont = NSFont.systemFont(ofSize: CGFloat(fontSize), weight: .semibold)
         #elseif canImport(UIKit)
         let systemFont = UIFont.systemFont(ofSize: CGFloat(fontSize), weight: .semibold)
         #endif
-        
+
+        // Build the platform text colour from the config (defaults to white)
+        #if canImport(AppKit)
+        let labelColor = NSColor(
+            red:   CGFloat(labelConfig.textColor.red),
+            green: CGFloat(labelConfig.textColor.green),
+            blue:  CGFloat(labelConfig.textColor.blue),
+            alpha: CGFloat(labelConfig.textColor.alpha)
+        )
+        #elseif canImport(UIKit)
+        let labelColor = UIColor(
+            red:   CGFloat(labelConfig.textColor.red),
+            green: CGFloat(labelConfig.textColor.green),
+            blue:  CGFloat(labelConfig.textColor.blue),
+            alpha: CGFloat(labelConfig.textColor.alpha)
+        )
+        #endif
+
         // Apply subtle shadow for better legibility (Apple-style)
         #if canImport(AppKit)
         let shadow = NSShadow()
@@ -1054,133 +1064,151 @@ public final class ThumbnailProcessor: @unchecked Sendable {
         shadow.shadowOffset = CGSize(width: 0, height: 1.0 * scale)
         shadow.shadowBlurRadius = 3.0 * scale
         #endif
-        
+
         // Create the text attributes with Apple-style refinements
         #if canImport(AppKit)
         let textAttributes: [NSAttributedString.Key: Any] = [
             .font: systemFont,
-            .foregroundColor: NSColor.white,
+            .foregroundColor: labelColor,
             .shadow: shadow
         ]
         #elseif canImport(UIKit)
         let textAttributes: [NSAttributedString.Key: Any] = [
             .font: systemFont,
-            .foregroundColor: UIColor.white,
+            .foregroundColor: labelColor,
             .shadow: shadow
         ]
         #endif
-        
-        let nsString = NSString(string: timestamp)
+
+        let nsString = NSString(string: labelText)
         let stringSize = nsString.size(withAttributes: textAttributes)
         
         // Padding for the pill-shaped background (proportional to font size)
         let paddingX: CGFloat = fontSize * 0.6
         let paddingY: CGFloat = fontSize * 0.3
-        
+
         // Calculate background rectangle dimensions with more subtle proportions
-        let bgWidth = stringSize.width + (paddingX * 2)
+        let bgWidth  = stringSize.width  + (paddingX * 2)
         let bgHeight = stringSize.height + (paddingY * 2)
-        
-        // Position at the bottom right corner with proportional margins
-        // Use 2% of thumbnail width/height for consistent spacing
-        let margin = size.width * 0.02
-        let bgX = rect.maxX - bgWidth - margin
-        let bottomMargin = size.height * 0.02 // Proportional bottom margin
-        let bgY = rect.maxY - bgHeight - bottomMargin
-        
-        // Draw a pill-shaped background with Apple's signature blur effect
-        let bgRect = CGRect(x: bgX, y: bgY, width: bgWidth, height: bgHeight)
-        
-        // Apple-style pill shape has more pronounced rounding (half the height)
-        let pillRadius = bgHeight / 2
-        
-        // Use a subtle gradient background for the pill
-        // Apple often uses gradients rather than flat colors
-       #if os(macOS)
-        let pillColors = [
-            NSColor(white: 0.12, alpha: 0.55).cgColor,  // Slightly lighter at top
-            NSColor(white: 0.08, alpha: 0.75).cgColor   // Slightly darker at bottom
-        ]
-        #elseif os(iOS)
-        let pillColors = [
-            UIColor(white: 0.12, alpha: 0.55).cgColor,  // Slightly lighter at top
-            UIColor(white: 0.08, alpha: 0.75).cgColor   // Slightly darker at bottom
-        ]
-        #endif
-        let pillLocations: [CGFloat] = [0.0, 1.0]
-        
-        guard let pillGradient = CGGradient(
-            colorsSpace: colorSpace,
-            colors: pillColors as CFArray,
-            locations: pillLocations
-        ) else {
-            // Fallback to solid color if gradient creation fails
-            #if canImport(AppKit)
-            context.setFillColor(NSColor(white: 0.1, alpha: 0.8).cgColor)
-            #elseif canImport(UIKit)
-            context.setFillColor(UIColor(white: 0.1, alpha: 0.8).cgColor)
-            #endif
-            drawPillBackground(in: context, rect: bgRect, radius: pillRadius)
-            drawTimestampText(in: context, text: timestamp, attributes: textAttributes, rect: bgRect)
-            
-            // Return the final image
-            guard let finalImage = context.makeImage() else {
-                logger.error("❌ Failed to create final image with timestamp")
-                return image
-            }
-            return finalImage
+
+        // Position based on labelConfig.position
+        let hMargin: CGFloat = size.width  * 0.02
+        let vMargin: CGFloat = size.height * 0.02
+        let bgX: CGFloat
+        let bgY: CGFloat
+        switch labelConfig.position {
+        case .bottomRight:
+            bgX = rect.maxX - bgWidth - hMargin
+            bgY = rect.maxY - bgHeight - vMargin
+        case .bottomLeft:
+            bgX = rect.minX + hMargin
+            bgY = rect.maxY - bgHeight - vMargin
+        case .topRight:
+            bgX = rect.maxX - bgWidth - hMargin
+            bgY = rect.minY + vMargin
+        case .topLeft:
+            bgX = rect.minX + hMargin
+            bgY = rect.minY + vMargin
+        case .center:
+            bgX = rect.midX - bgWidth  / 2
+            bgY = rect.midY - bgHeight / 2
         }
         
-        // Draw the pill shape
-        let pillPath = CGPath(roundedRect: bgRect, cornerWidth: pillRadius, cornerHeight: pillRadius, transform: nil)
-        context.addPath(pillPath)
-        context.clip()
-        
-        // Fill with gradient
-        context.drawLinearGradient(
-            pillGradient,
-            start: CGPoint(x: bgRect.midX, y: bgRect.minY),
-            end: CGPoint(x: bgRect.midX, y: bgRect.maxY),
-            options: []
-        )
-        
-        // Reset clipping for further drawing
-        context.resetClip()
-        
-        // Draw the text with precise positioning
-        // Calculate position to vertically center the text in the pill
-        let textX = bgX + (bgWidth - stringSize.width) / 2
-        // Add a tiny adjustment to ensure perfect vertical centering
+        let bgRect   = CGRect(x: bgX, y: bgY, width: bgWidth, height: bgHeight)
+        let pillRadius = bgHeight / 2
+
+        // Draw background according to the configured style
+        switch labelConfig.backgroundStyle {
+        case .none:
+            // No background — text only (shadow provides legibility)
+            break
+
+        case .fullWidth:
+            // Full-width translucent bar at the thumbnail edge nearest the label
+            let barY: CGFloat
+            switch labelConfig.position {
+            case .topLeft, .topRight, .center:
+                barY = rect.minY
+            default:
+                barY = rect.maxY - bgHeight
+            }
+            let barRect = CGRect(x: rect.minX, y: barY, width: rect.width, height: bgHeight)
+            #if canImport(AppKit)
+            context.setFillColor(NSColor(white: 0.08, alpha: 0.72).cgColor)
+            #elseif canImport(UIKit)
+            context.setFillColor(UIColor(white: 0.08, alpha: 0.72).cgColor)
+            #endif
+            context.fill(barRect)
+
+        case .pill:
+            // Apple-style gradient pill (original behaviour)
+            #if os(macOS)
+            let pillColors = [
+                NSColor(white: 0.12, alpha: 0.55).cgColor,
+                NSColor(white: 0.08, alpha: 0.75).cgColor
+            ]
+            #elseif os(iOS)
+            let pillColors = [
+                UIColor(white: 0.12, alpha: 0.55).cgColor,
+                UIColor(white: 0.08, alpha: 0.75).cgColor
+            ]
+            #endif
+            let pillPath = CGPath(
+                roundedRect: bgRect,
+                cornerWidth: pillRadius, cornerHeight: pillRadius,
+                transform: nil
+            )
+            if let pillGradient = CGGradient(
+                colorsSpace: colorSpace,
+                colors: pillColors as CFArray,
+                locations: [0.0, 1.0]
+            ) {
+                context.saveGState()
+                context.addPath(pillPath)
+                context.clip()
+                context.drawLinearGradient(
+                    pillGradient,
+                    start: CGPoint(x: bgRect.midX, y: bgRect.minY),
+                    end:   CGPoint(x: bgRect.midX, y: bgRect.maxY),
+                    options: []
+                )
+                context.restoreGState()
+                // Subtle border highlight
+                #if canImport(AppKit)
+                context.setStrokeColor(NSColor.white.withAlphaComponent(0.15).cgColor)
+                #elseif canImport(UIKit)
+                context.setStrokeColor(UIColor.white.withAlphaComponent(0.15).cgColor)
+                #endif
+                context.setLineWidth(0.5 * scale)
+                context.addPath(pillPath)
+                context.strokePath()
+            } else {
+                // Fallback to solid fill
+                #if canImport(AppKit)
+                context.setFillColor(NSColor(white: 0.1, alpha: 0.8).cgColor)
+                #elseif canImport(UIKit)
+                context.setFillColor(UIColor(white: 0.1, alpha: 0.8).cgColor)
+                #endif
+                drawPillBackground(in: context, rect: bgRect, radius: pillRadius)
+            }
+        }
+
+        // Draw the label text centred inside the background rect
+        let textX = bgX + (bgWidth  - stringSize.width)  / 2
         let textY = bgY + (bgHeight - stringSize.height) / 2 + 1.0 * scale
         let textRect = CGRect(x: textX, y: textY, width: stringSize.width, height: stringSize.height)
-        
-        // Draw text
+
         context.saveGState()
         context.textMatrix = CGAffineTransform.identity
         context.translateBy(x: textRect.origin.x, y: textRect.origin.y)
-        
-        let attributedString = NSAttributedString(string: timestamp, attributes: textAttributes)
-        let line = CTLineCreateWithAttributedString(attributedString)
-        CTLineDraw(line, context)
-        //context.restoreGState()
-        
-        // Apply final subtle border highlight for depth (Apple design detail)
-        #if canImport(AppKit)
-        let whiteColor = NSColor.white.withAlphaComponent(0.15).cgColor
-        #elseif canImport(UIKit)
-        let whiteColor = UIColor.white.withAlphaComponent(0.15).cgColor
-        #endif
-        context.setStrokeColor(whiteColor)
-        context.setLineWidth(0.5 * scale)
-        context.addPath(pillPath)
-        context.strokePath()
-        
-        // Return the final image
+        let attributedString = NSAttributedString(string: labelText, attributes: textAttributes)
+        CTLineDraw(CTLineCreateWithAttributedString(attributedString), context)
+        context.restoreGState()
+
         guard let finalImage = context.makeImage() else {
-            logger.error("❌ Failed to create final image with timestamp")
+            logger.error("❌ Failed to create final image with label")
             return image
         }
-        
         return finalImage
     }
     

@@ -17,6 +17,20 @@ typealias PlatformImage = NSImage
 typealias PlatformImage = UIImage
 #endif
 
+/// Thread-safe accumulator for per-frame average colours used by the Color DNA strip.
+private actor FrameColorCollector {
+    private var colors: [Int: CGColor] = [:]
+
+    func store(_ color: CGColor, at index: Int) {
+        colors[index] = color
+    }
+
+    /// Returns colours sorted by frame index (temporal order), up to `count` entries.
+    func orderedColors(count: Int) -> [CGColor] {
+        (0..<count).compactMap { colors[$0] }
+    }
+}
+
 /// A Metal-accelerated implementation of the MosaicGeneratorProtocol
 public actor MetalMosaicGenerator: MosaicGeneratorProtocol {
     // MARK: - Properties
@@ -150,42 +164,54 @@ public actor MetalMosaicGenerator: MosaicGeneratorProtocol {
                 // Capture progress handler before passing to async context
                 let currentProgressHandler = progressHandlers[videoID]
 
+                let overlayConfig = mutableConfig.overlay
+
                 // If metadata is enabled, create a header image with enhanced information
                 var metadataHeader: CGImage? = nil
-                if mutableConfig.includeMetadata { // Use mutableConfig
+                if mutableConfig.includeMetadata {
                     metadataHeader = thumbnailProcessor.createMetadataHeader(
                         for: video,
                         width: Int(layout.mosaicSize.width),
                         height: Int(layout.thumbnailSize.height * 0.5),
-                        forIphone: forIphone
-                    ) as CGImage? // Use as? for safe casting
+                        forIphone: forIphone,
+                        headerConfig: overlayConfig.header
+                    ) as CGImage?
                 }
 
                 // Create a stream for processed images (with timestamps)
                 let (processedStream, continuation) = AsyncThrowingStream<(Int, CGImage), Error>.makeStream()
-                
+
                 // Capture dependencies for the producer task
                 let processor = self.thumbnailProcessor
                 let thumbnailSizes = layout.thumbnailSizes
-                
-                // Start producer task to burn timestamps in parallel
+                let labelConfig = overlayConfig.frameLabel
+                // Collect per-frame average colours for the DNA strip (if enabled)
+                let colorCollector = overlayConfig.colorDNA.show ? FrameColorCollector() : nil
+
+                // Start producer task to burn labels in parallel
                 Task {
                     do {
                         let rawStream = processor.extractFramesStream(
                             from: videoURL,
                             layout: layout,
                             asset: asset,
-                            accurate: mutableConfig.useAccurateTimestamps // Use mutableConfig
+                            accurate: mutableConfig.useAccurateTimestamps
                         )
-                        
+
                         try await withThrowingTaskGroup(of: Void.self) { group in
                             for try await (index, rawImage, timestamp) in rawStream {
                                 group.addTask {
+                                    if let collector = colorCollector {
+                                        let color = OverlayProcessor.averageColor(of: rawImage)
+                                        await collector.store(color, at: index)
+                                    }
                                     let size = thumbnailSizes[index]
                                     let processedImage = processor.addTimestampToImage(
                                         image: rawImage,
                                         timestamp: timestamp,
-                                        size: size
+                                        frameIndex: index,
+                                        size: size,
+                                        labelConfig: labelConfig
                                     )
                                     continuation.yield((index, processedImage))
                                 }
@@ -198,7 +224,7 @@ public actor MetalMosaicGenerator: MosaicGeneratorProtocol {
                 }
 
                 // Generate mosaic using Metal with streaming input
-                let mosaic = try await metalProcessor.generateMosaicStream(
+                var mosaic = try await metalProcessor.generateMosaicStream(
                     stream: processedStream,
                     layout: layout,
                     metadata: VideoMetadata(
@@ -206,11 +232,10 @@ public actor MetalMosaicGenerator: MosaicGeneratorProtocol {
                         bitrate: video.metadata.bitrate,
                         custom: video.metadata.custom
                     ),
-                    config: mutableConfig, // Use mutableConfig
+                    config: mutableConfig,
                     metadataHeader: metadataHeader,
                     forIphone: forIphone,
                     progressHandler: { @Sendable progress in
-                        // Scale the progress to fit within the overall progress range (0.5-0.8)
                         let scaledProgress = 0.7 + (0.299 * progress)
                         currentProgressHandler?(MosaicGenerationProgress(
                             video: video,
@@ -219,6 +244,22 @@ public actor MetalMosaicGenerator: MosaicGeneratorProtocol {
                         ))
                     }
                 )
+
+                // Apply Color DNA strip
+                if overlayConfig.colorDNA.show, let collector = colorCollector {
+                    let frameColors = await collector.orderedColors(count: layout.thumbCount)
+                    if let dnaImage = OverlayProcessor.applyColorDNA(
+                        to: mosaic, frameColors: frameColors, config: overlayConfig.colorDNA) {
+                        mosaic = dnaImage
+                    }
+                }
+
+                // Apply watermark
+                if let wmConfig = overlayConfig.watermark,
+                   let watermarked = OverlayProcessor.applyWatermark(to: mosaic, config: wmConfig) {
+                    mosaic = watermarked
+                }
+
                 progressHandlers[videoID]?(MosaicGenerationProgress(
                     video: video,
                     progress: 0.9,
@@ -228,8 +269,8 @@ public actor MetalMosaicGenerator: MosaicGeneratorProtocol {
                 let mosaicURL = try await saveMosaic(
                     mosaic,
                     for: video,
-                    config: config, // Use mutableConfig
-                    forIphone:  forIphone
+                    config: config,
+                    forIphone: forIphone
                 )
                 
                 progressHandlers[videoID]?(MosaicGenerationProgress(
@@ -317,6 +358,8 @@ public actor MetalMosaicGenerator: MosaicGeneratorProtocol {
 
             let currentProgressHandler = progressHandlers[videoID]
 
+            let overlayConfig = mutableConfig.overlay
+
             // Create metadata header if enabled
             var metadataHeader: CGImage? = nil
             if mutableConfig.includeMetadata {
@@ -324,17 +367,20 @@ public actor MetalMosaicGenerator: MosaicGeneratorProtocol {
                     for: video,
                     width: Int(layout.mosaicSize.width),
                     height: Int(layout.thumbnailSize.height * 0.5),
-                    forIphone: forIphone
+                    forIphone: forIphone,
+                    headerConfig: overlayConfig.header
                 ) as CGImage?
             }
 
-            // Create a stream for processed images (with timestamps)
+            // Create a stream for processed images (with labels)
             let (processedStream, continuation) = AsyncThrowingStream<(Int, CGImage), Error>.makeStream()
 
             let processor = self.thumbnailProcessor
             let thumbnailSizes = layout.thumbnailSizes
+            let labelConfig = overlayConfig.frameLabel
+            let colorCollector = overlayConfig.colorDNA.show ? FrameColorCollector() : nil
 
-            // Start producer task to burn timestamps in parallel
+            // Start producer task to burn labels in parallel
             Task {
                 do {
                     let rawStream = processor.extractFramesStream(
@@ -347,11 +393,17 @@ public actor MetalMosaicGenerator: MosaicGeneratorProtocol {
                     try await withThrowingTaskGroup(of: Void.self) { group in
                         for try await (index, rawImage, timestamp) in rawStream {
                             group.addTask {
+                                if let collector = colorCollector {
+                                    let color = OverlayProcessor.averageColor(of: rawImage)
+                                    await collector.store(color, at: index)
+                                }
                                 let size = thumbnailSizes[index]
                                 let processedImage = processor.addTimestampToImage(
                                     image: rawImage,
                                     timestamp: timestamp,
-                                    size: size
+                                    frameIndex: index,
+                                    size: size,
+                                    labelConfig: labelConfig
                                 )
                                 continuation.yield((index, processedImage))
                             }
@@ -364,7 +416,7 @@ public actor MetalMosaicGenerator: MosaicGeneratorProtocol {
             }
 
             // Generate mosaic using Metal with streaming input
-            let mosaic = try await metalProcessor.generateMosaicStream(
+            var mosaic = try await metalProcessor.generateMosaicStream(
                 stream: processedStream,
                 layout: layout,
                 metadata: VideoMetadata(
@@ -384,6 +436,21 @@ public actor MetalMosaicGenerator: MosaicGeneratorProtocol {
                     ))
                 }
             )
+
+            // Apply Color DNA strip
+            if overlayConfig.colorDNA.show, let collector = colorCollector {
+                let frameColors = await collector.orderedColors(count: layout.thumbCount)
+                if let dnaImage = OverlayProcessor.applyColorDNA(
+                    to: mosaic, frameColors: frameColors, config: overlayConfig.colorDNA) {
+                    mosaic = dnaImage
+                }
+            }
+
+            // Apply watermark
+            if let wmConfig = overlayConfig.watermark,
+               let watermarked = OverlayProcessor.applyWatermark(to: mosaic, config: wmConfig) {
+                mosaic = watermarked
+            }
 
             progressHandlers[videoID]?(MosaicGenerationProgress(
                 video: video,

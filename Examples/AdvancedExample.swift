@@ -59,6 +59,14 @@ struct AdvancedExample {
             outputDir: outputDir
         )
 
+        // Example 6: Full Overlay Annotations
+        print("\n6️⃣ Generating with overlay annotations...")
+        try await generateWithOverlays(
+            video: video,
+            generator: generator,
+            outputDir: outputDir
+        )
+
         print("\n" + "=" * 50)
         print("🎉 All examples complete!")
     }
@@ -178,6 +186,70 @@ struct AdvancedExample {
         let elapsed = Date().timeIntervalSince(startTime)
 
         print("   ✅ Custom layout (\(String(format: "%.1f", elapsed))s)")
+        print("   → \(url.lastPathComponent)")
+    }
+
+    /// Demonstrates the full OverlayConfiguration API:
+    /// per-frame labels, metadata header band, text watermark, and Color DNA strip.
+    static func generateWithOverlays(
+        video: VideoInput,
+        generator: MetalMosaicGenerator,
+        outputDir: URL
+    ) async throws {
+        var config = MosaicConfiguration(
+            width: 5120,
+            density: .m,
+            format: .heif,
+            includeMetadata: true,
+            compressionQuality: 0.6
+        )
+        config.outputdirectory = outputDir
+
+        // --- Per-frame label: timestamp pill in the bottom-right corner ---
+        config.overlay.frameLabel = FrameLabelConfig(
+            show:            true,
+            format:          .timestamp,   // show HH:MM:SS
+            position:        .bottomRight,
+            textColor:       MosaicColor(red: 1, green: 1, blue: 1),
+            backgroundStyle: .pill
+        )
+
+        // --- Metadata header band with eight fields + a colour palette row ---
+        config.overlay.header = HeaderConfig(
+            fields: [
+                .title,
+                .duration,
+                .resolution,
+                .codec,
+                .bitrate,
+                .fileSize,
+                .frameRate,
+                .colorPalette(swatchCount: 8)   // dominant-colour swatches
+            ],
+            height: .fixed(80)                  // exact 80-pixel band
+        )
+
+        // --- Text watermark in the bottom-right corner ---
+        config.overlay.watermark = WatermarkConfig(
+            content:  .text("© My Studio"),
+            position: .bottomRight,
+            opacity:  0.35,
+            scale:    0.10
+        )
+
+        // --- Color DNA gradient strip below the mosaic ---
+        config.overlay.colorDNA = ColorDNAConfig(
+            show:     true,
+            height:   24,
+            position: .bottom,
+            style:    .gradient
+        )
+
+        let startTime = Date()
+        let url = try await generator.generate(for: video, config: config)
+        let elapsed = Date().timeIntervalSince(startTime)
+
+        print("   ✅ Overlay annotations (\(String(format: "%.1f", elapsed))s)")
         print("   → \(url.lastPathComponent)")
     }
 }

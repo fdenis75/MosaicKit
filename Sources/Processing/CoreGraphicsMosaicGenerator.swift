@@ -153,20 +153,45 @@ public actor CoreGraphicsMosaicGenerator: MosaicGeneratorProtocol {
                     }
                 )
 
+                let overlayConfig = config.overlay
+
+                // Burn per-frame labels now that we have the full frame array
+                let processedFrames: [(image: CGImage, timestamp: String)] = frames.enumerated().map { (idx, frame) in
+                    let labeled = thumbnailProcessor.addTimestampToImage(
+                        image: frame.image,
+                        timestamp: frame.timestamp,
+                        frameIndex: idx,
+                        size: layout.thumbnailSizes[idx],
+                        labelConfig: overlayConfig.frameLabel
+                    )
+                    return (image: labeled, timestamp: frame.timestamp)
+                }
+
+                // Compute frame colours when needed by either the DNA strip or palette swatches.
+                let needsColors = overlayConfig.colorDNA.show
+                    || overlayConfig.header.fields.contains { if case .colorPalette = $0 { return true }; return false }
+                let frameColors: [CGColor] = needsColors
+                    ? frames.map { OverlayProcessor.averageColor(of: $0.image) }
+                    : []
+
                 // Create metadata header if enabled
                 var metadataHeader: CGImage? = nil
                 if config.includeMetadata {
+                    let hasPalette = overlayConfig.header.fields.contains { if case .colorPalette = $0 { return true }; return false }
+                    let swatches = hasPalette ? frameColors : []
                     metadataHeader = thumbnailProcessor.createMetadataHeader(
                         for: video,
                         width: Int(layout.mosaicSize.width),
                         height: Int(layout.thumbnailSize.height * 0.5),
-                        forIphone: forIphone
+                        forIphone: forIphone,
+                        headerConfig: overlayConfig.header,
+                        swatchColors: swatches
                     ) as CGImage?
                 }
 
                 // Generate mosaic using Core Graphics
-                let mosaic = try await cgProcessor.generateMosaic(
-                    from: frames,
+                var mosaic = try await cgProcessor.generateMosaic(
+                    from: processedFrames,
                     layout: layout,
                     metadata: VideoMetadata(
                         codec: video.metadata.codec,
@@ -185,6 +210,19 @@ public actor CoreGraphicsMosaicGenerator: MosaicGeneratorProtocol {
                         )
                     }
                 )
+
+                // Apply Color DNA strip
+                if overlayConfig.colorDNA.show,
+                   let dnaImage = OverlayProcessor.applyColorDNA(
+                       to: mosaic, frameColors: frameColors, config: overlayConfig.colorDNA) {
+                    mosaic = dnaImage
+                }
+
+                // Apply watermark
+                if let wmConfig = overlayConfig.watermark,
+                   let watermarked = OverlayProcessor.applyWatermark(to: mosaic, config: wmConfig) {
+                    mosaic = watermarked
+                }
 
                 progressHandlers[videoID]?(MosaicGenerationProgress(
                     video: video,
@@ -296,20 +334,44 @@ public actor CoreGraphicsMosaicGenerator: MosaicGeneratorProtocol {
                 }
             )
 
+            let overlayConfig = config.overlay
+
+            // Burn per-frame labels
+            let processedFrames: [(image: CGImage, timestamp: String)] = frames.enumerated().map { (idx, frame) in
+                let labeled = thumbnailProcessor.addTimestampToImage(
+                    image: frame.image,
+                    timestamp: frame.timestamp,
+                    frameIndex: idx,
+                    size: layout.thumbnailSizes[idx],
+                    labelConfig: overlayConfig.frameLabel
+                )
+                return (image: labeled, timestamp: frame.timestamp)
+            }
+
+            let needsColors = overlayConfig.colorDNA.show
+                || overlayConfig.header.fields.contains { if case .colorPalette = $0 { return true }; return false }
+            let frameColors: [CGColor] = needsColors
+                ? frames.map { OverlayProcessor.averageColor(of: $0.image) }
+                : []
+
             // Create metadata header if enabled
             var metadataHeader: CGImage? = nil
             if config.includeMetadata {
+                let hasPaletteField = overlayConfig.header.fields.contains { if case .colorPalette = $0 { return true }; return false }
+                let swatches = hasPaletteField ? frameColors : []
                 metadataHeader = thumbnailProcessor.createMetadataHeader(
                     for: video,
                     width: Int(layout.mosaicSize.width),
                     height: Int(layout.thumbnailSize.height * 0.5),
-                    forIphone: forIphone
+                    forIphone: forIphone,
+                    headerConfig: overlayConfig.header,
+                    swatchColors: swatches
                 ) as CGImage?
             }
 
             // Generate mosaic using Core Graphics
-            let mosaic = try await cgProcessor.generateMosaic(
-                from: frames,
+            var mosaic = try await cgProcessor.generateMosaic(
+                from: processedFrames,
                 layout: layout,
                 metadata: VideoMetadata(
                     codec: video.metadata.codec,
@@ -328,6 +390,19 @@ public actor CoreGraphicsMosaicGenerator: MosaicGeneratorProtocol {
                     )
                 }
             )
+
+            // Apply Color DNA strip
+            if overlayConfig.colorDNA.show,
+               let dnaImage = OverlayProcessor.applyColorDNA(
+                   to: mosaic, frameColors: frameColors, config: overlayConfig.colorDNA) {
+                mosaic = dnaImage
+            }
+
+            // Apply watermark
+            if let wmConfig = overlayConfig.watermark,
+               let watermarked = OverlayProcessor.applyWatermark(to: mosaic, config: wmConfig) {
+                mosaic = watermarked
+            }
 
             progressHandlers[videoID]?(MosaicGenerationProgress(
                 video: video,

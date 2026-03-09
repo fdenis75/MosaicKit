@@ -20,7 +20,7 @@ public struct MosaicColor: Codable, Sendable, Equatable {
 
     /// Converts to a CGColor for use in Core Graphics rendering.
     public var cgColor: CGColor {
-        CGColor(red: red, green: blue, blue: blue, alpha: alpha)
+        CGColor(red: red, green: green, blue: blue, alpha: alpha)
     }
 }
 
@@ -65,6 +65,10 @@ public struct MosaicConfiguration: Codable, Sendable {
     /// Ignored when `useMovieColorsForBg` is `true`.
     public var backgroundColor: MosaicColor
 
+    /// Overlay and annotation configuration: per-frame labels, header fields,
+    /// watermark, and Color DNA strip.
+    public var overlay: OverlayConfiguration
+
     // MARK: - Initialization
 
     /// Creates a new MosaicConfiguration instance.
@@ -79,7 +83,8 @@ public struct MosaicConfiguration: Codable, Sendable {
         outputdirectory: URL? = nil,
         fullPathInName: Bool = false,
         useMovieColorsForBg: Bool = true,
-        backgroundColor: MosaicColor = .defaultGray
+        backgroundColor: MosaicColor = .defaultGray,
+        overlay: OverlayConfiguration = .default
     ) {
         self.width = width
         self.density = density
@@ -92,6 +97,7 @@ public struct MosaicConfiguration: Codable, Sendable {
         self.fullPathInName = fullPathInName
         self.useMovieColorsForBg = useMovieColorsForBg
         self.backgroundColor = backgroundColor
+        self.overlay = overlay
     }
 
     /// Creates a MosaicConfiguration instance.
@@ -123,6 +129,7 @@ public struct MosaicConfiguration: Codable, Sendable {
         // forIphone == true previously meant solid gray; map that to the new params
         self.useMovieColorsForBg = !forIphone
         self.backgroundColor = .defaultGray
+        self.overlay = .default
     }
 
     /// Default configuration for mosaic generation

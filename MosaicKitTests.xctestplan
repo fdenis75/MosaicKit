@@ -22,10 +22,49 @@
   ],
   "defaultOptions" : {
     "codeCoverage" : false,
+    "environmentVariableEntries" : [
+      {
+        "key" : "MOSAICKIT_SUITE_MODE",
+        "value" : "folder"
+      },
+      {
+        "key" : "MOSAIC_TARGET_FOLDER",
+        "value" : "\/Users\/francois\/Downloads\/testvidsnodelete\/output"
+      },
+      {
+        "key" : "MOSAIC_TEST_VIDEO",
+        "value" : "\/Users\/francois\/Downloads\/testvidsnodelete\/bunnylicorne.mp4"
+      }
+    ],
     "performanceAntipatternCheckerEnabled" : true
   },
   "testTargets" : [
     {
+      "skippedTests" : {
+        "suites" : [
+          {
+            "name" : "ErrorTypesTests"
+          },
+          {
+            "name" : "LayoutProcessorTests"
+          },
+          {
+            "name" : "MosaicConfigurationTests"
+          },
+          {
+            "name" : "OverlayConfigurationTests"
+          },
+          {
+            "name" : "OverlayProcessorTests"
+          },
+          {
+            "name" : "PreviewConfigurationTests"
+          },
+          {
+            "name" : "ThumbnailProcessorTests"
+          }
+        ]
+      },
       "target" : {
         "containerPath" : "container:",
         "identifier" : "MosaicKitTests",
@@ -33,5 +72,5 @@
       }
     }
   ],
-  "version" : 1
+  "version" : 2
 }
