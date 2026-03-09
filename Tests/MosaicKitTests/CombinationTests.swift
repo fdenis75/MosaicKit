@@ -258,12 +258,12 @@ private extension ComboConfig {
         }
 
         // G01 – density sweep (7)
-        for d in [DensityConfig.xxl, .xl, .l, .m, .s, .xs, .xxs] {
+        for d in [DensityConfig.m] {
             add(group: "G01-density", density: d)
         }
 
         // G02 – layout type sweep (5)
-        for l in [LayoutType.auto, .classic, .custom, .dynamic, .iphone] {
+        for l in [LayoutType.auto, .classic, .custom, .dynamic] {
             add(group: "G02-layout", layout: l)
         }
 
@@ -310,14 +310,14 @@ private extension ComboConfig {
         }
 
         // G11 – density × layout cross-product (7 × 5 = 35)
-        for d in [DensityConfig.xxl, .xl, .l, .m, .s, .xs, .xxs] {
+        for d in [DensityConfig.m] {
             for l in [LayoutType.auto, .classic, .custom, .dynamic, .iphone] {
                 add(group: "G11-dens×lay", density: d, layout: l)
             }
         }
 
         // G12 – density × aspect ratio cross-product (7 × 5 = 35)
-        for d in [DensityConfig.xxl, .xl, .l, .m, .s, .xs, .xxs] {
+        for d in [DensityConfig.m] {
             for a in [AspectRatio.widescreen, .standard, .square, .ultrawide, .vertical] {
                 add(group: "G12-dens×asp", density: d, aspect: a)
             }

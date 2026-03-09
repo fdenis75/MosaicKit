@@ -26,6 +26,14 @@
       {
         "key" : "MOSAICKIT_SUITE_MODE",
         "value" : "folder"
+      },
+      {
+        "key" : "MOSAIC_TARGET_FOLDER",
+        "value" : "\/Users\/francois\/Downloads\/testvidsnodelete\/output"
+      },
+      {
+        "key" : "MOSAIC_TEST_VIDEO",
+        "value" : "\/Users\/francois\/Downloads\/testvidsnodelete\/bunnylicorne.mp4"
       }
     ],
     "performanceAntipatternCheckerEnabled" : true

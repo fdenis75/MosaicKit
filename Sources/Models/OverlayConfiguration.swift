@@ -174,7 +174,7 @@ public struct HeaderConfig: Codable, Sendable {
     public var backgroundColor: MosaicColor?
 
     public init(
-        fields: [MetadataField] = [.title, .duration, .fileSize, .codec, .resolution, .bitrate],
+        fields: [MetadataField] = [.title, .duration, .fileSize, .codec, .resolution, .bitrate, .filePath],
         height: HeaderHeight = .auto,
         textColor: MosaicColor? = nil,
         backgroundColor: MosaicColor? = nil
