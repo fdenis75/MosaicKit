@@ -109,6 +109,33 @@ let mobileConfig = MosaicConfiguration(width: 2048)
 let largeConfig = MosaicConfiguration(width: 5120)
 ```
 
+### Add Overlay Annotations
+
+Decorate thumbnails and the assembled mosaic with labels, a metadata header, a watermark, and a Color DNA strip — all through `MosaicConfiguration.overlay`:
+
+```swift
+var annotated = MosaicConfiguration(width: 5120, density: .m, format: .heif, includeMetadata: true)
+
+// Per-frame timestamp label (bottom-right pill, white text)
+annotated.overlay.frameLabel = FrameLabelConfig(
+    format: .timestamp, position: .bottomRight, backgroundStyle: .pill
+)
+
+// Metadata header with six fields + a colour-palette row
+annotated.overlay.header = HeaderConfig(
+    fields: [.title, .duration, .resolution, .codec, .bitrate, .colorPalette(swatchCount: 8)],
+    height: .fixed(80)
+)
+
+// Translucent text watermark in the bottom-right corner
+annotated.overlay.watermark = WatermarkConfig(
+    content: .text("© My Studio"), position: .bottomRight, opacity: 0.35, scale: 0.10
+)
+
+// Gradient Color DNA strip under the mosaic
+annotated.overlay.colorDNA = ColorDNAConfig(show: true, height: 24, position: .bottom, style: .gradient)
+```
+
 ## Step 5: Complete Example
 
 Here's a complete working example:
@@ -226,3 +253,8 @@ do {
 - ``MosaicConfiguration``
 - ``DensityConfig``
 - ``LayoutConfiguration``
+- ``OverlayConfiguration``
+- ``FrameLabelConfig``
+- ``HeaderConfig``
+- ``WatermarkConfig``
+- ``ColorDNAConfig``

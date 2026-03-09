@@ -14,7 +14,7 @@ A high-performance Swift package for generating video mosaics with Metal-acceler
 - 📦 **Multiple Output Formats** - JPEG, PNG, and HEIF with configurable compression
 - 🔄 **Batch Processing** - Intelligent concurrency management for processing multiple videos
 - 🎯 **Hardware-Accelerated Frame Extraction** - Uses VideoToolbox for optimal performance
-- 📊 **Metadata Headers** - Optional metadata overlay with video information
+- 📊 **Overlay Annotations** - Per-frame labels (timestamp, index), customisable metadata headers, watermarks, and Color DNA strips
 - 🎬 **Video Preview Generation** - Create short highlight reels from any video, either exported to file or as a live `AVPlayerItem` composition
 
 ## Requirements
@@ -119,6 +119,7 @@ public struct MosaicConfiguration {
     var useAccurateTimestamps: Bool     // Precise frame extraction
     var compressionQuality: Double      // 0.0 to 1.0 (default: 0.4)
     var outputdirectory: URL?           // Output directory
+    var overlay: OverlayConfiguration   // Per-frame labels, header, watermark, Color DNA
 }
 ```
 
@@ -178,6 +179,126 @@ config.compressionQuality = 0.8
 
 // PNG - Lossless, larger file size
 config.format = .png
+```
+
+## Overlay & Annotations
+
+All overlay layers are controlled through `MosaicConfiguration.overlay`, an `OverlayConfiguration` value that groups four independent subsystems. Every property defaults to the original hardcoded behaviour so existing code requires no changes.
+
+```swift
+config.overlay = OverlayConfiguration(
+    frameLabel: FrameLabelConfig(...),   // label drawn on each thumbnail
+    header:     HeaderConfig(...),       // top metadata band
+    watermark:  WatermarkConfig(...),    // optional branding layer
+    colorDNA:   ColorDNAConfig(...)      // horizontal colour strip
+)
+```
+
+### Per-Frame Labels
+
+Each thumbnail can display a timestamp, a sequential frame number, or nothing:
+
+```swift
+config.overlay.frameLabel = FrameLabelConfig(
+    show:            true,
+    format:          .timestamp,     // .timestamp | .frameIndex | .none
+    position:        .bottomRight,   // .topLeft | .topRight | .bottomLeft | .bottomRight | .center
+    textColor:       MosaicColor(red: 1, green: 1, blue: 1),
+    backgroundStyle: .pill           // .pill | .none | .fullWidth
+)
+```
+
+### Metadata Header
+
+The top band that appears when `includeMetadata` is `true` is fully configurable:
+
+```swift
+config.overlay.header = HeaderConfig(
+    fields: [
+        .title, .duration, .fileSize, .resolution,
+        .codec, .bitrate, .frameRate, .filePath,
+        .colorPalette(swatchCount: 8),          // row of colour swatches
+        .custom(label: "Director", value: "Jane Doe")
+    ],
+    height:          .fixed(80),     // .auto (50% of first row) | .fixed(Int)
+    textColor:       nil,            // nil → platform default
+    backgroundColor: nil             // nil → semi-transparent dark default
+)
+```
+
+### Watermark
+
+Stamp text or an image onto the assembled mosaic:
+
+```swift
+// Text watermark
+config.overlay.watermark = WatermarkConfig(
+    content:  .text("© Studio 2025"),
+    position: .bottomRight,          // any WatermarkPosition corner or .center
+    opacity:  0.35,                  // 0.0–1.0
+    scale:    0.12                   // fraction of mosaic width
+)
+
+// Image watermark
+config.overlay.watermark = WatermarkConfig(
+    content:  .image(URL(fileURLWithPath: "/path/to/logo.png")),
+    position: .topLeft,
+    opacity:  0.5,
+    scale:    0.08
+)
+```
+
+### Color DNA Strip
+
+A thin horizontal band where each column shows the dominant colour of one frame — a classic MovieBarcode-style visualisation:
+
+```swift
+config.overlay.colorDNA = ColorDNAConfig(
+    show:     true,
+    height:   24,                    // pixels (minimum 8)
+    position: .bottom,               // .top | .bottom
+    style:    .barcode               // .barcode (hard columns) | .gradient (smooth)
+)
+```
+
+### Full Annotation Example
+
+```swift
+var config = MosaicConfiguration(
+    width: 5120,
+    density: .m,
+    format: .heif,
+    includeMetadata: true
+)
+config.outputdirectory = outputDir
+
+config.overlay = OverlayConfiguration(
+    frameLabel: FrameLabelConfig(
+        show: true,
+        format: .timestamp,
+        position: .bottomRight,
+        textColor: MosaicColor(red: 1, green: 1, blue: 1),
+        backgroundStyle: .pill
+    ),
+    header: HeaderConfig(
+        fields: [.title, .duration, .resolution, .codec, .colorPalette(swatchCount: 8)],
+        height: .fixed(80)
+    ),
+    watermark: WatermarkConfig(
+        content: .text("© My Studio"),
+        position: .bottomRight,
+        opacity: 0.35,
+        scale: 0.10
+    ),
+    colorDNA: ColorDNAConfig(
+        show: true,
+        height: 24,
+        position: .bottom,
+        style: .gradient
+    )
+)
+
+let mosaicURL = try await generator.generate(for: video, config: config)
 ```
 
 ## Advanced Usage
@@ -476,6 +597,26 @@ config.density = .m
 config.format = .jpeg
 config.compressionQuality = 0.8
 config.outputdirectory = outputDir
+
+let mosaicURL = try await generator.generate(for: video, config: config)
+```
+
+### Example 4: Fully Annotated Mosaic
+
+```swift
+var config = MosaicConfiguration(
+    width: 5120, density: .m, format: .heif, includeMetadata: true
+)
+config.outputdirectory = outputDir
+config.overlay = OverlayConfiguration(
+    frameLabel: FrameLabelConfig(format: .timestamp, position: .bottomRight, backgroundStyle: .pill),
+    header:     HeaderConfig(
+        fields: [.title, .duration, .resolution, .codec, .colorPalette(swatchCount: 8)],
+        height: .fixed(80)
+    ),
+    watermark:  WatermarkConfig(content: .text("© My Studio"), position: .bottomRight, opacity: 0.35, scale: 0.10),
+    colorDNA:   ColorDNAConfig(show: true, height: 24, position: .bottom, style: .gradient)
+)
 
 let mosaicURL = try await generator.generate(for: video, config: config)
 ```

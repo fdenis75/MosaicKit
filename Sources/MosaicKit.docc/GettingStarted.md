@@ -187,6 +187,92 @@ let jpegConfig = MosaicConfiguration(format: .jpeg)
 let pngConfig = MosaicConfiguration(format: .png)
 ```
 
+## Overlay & Annotations
+
+All visual decorations are configured through `MosaicConfiguration.overlay`, an ``OverlayConfiguration`` value that groups four subsystems. Every property defaults to the original hardcoded appearance so no migration is required.
+
+### Per-Frame Labels
+
+```swift
+config.overlay.frameLabel = FrameLabelConfig(
+    show:            true,
+    format:          .timestamp,     // .timestamp | .frameIndex | .none
+    position:        .bottomRight,   // five anchor positions
+    textColor:       MosaicColor(red: 1, green: 1, blue: 1),
+    backgroundStyle: .pill           // .pill | .none | .fullWidth
+)
+```
+
+### Metadata Header Band
+
+Shown only when `includeMetadata` is `true`. Choose which fields appear and in what order:
+
+```swift
+config.overlay.header = HeaderConfig(
+    fields: [
+        .title, .duration, .fileSize, .resolution, .codec, .bitrate,
+        .frameRate, .filePath,
+        .colorPalette(swatchCount: 8),                    // colour swatches row
+        .custom(label: "Director", value: "Jane Doe")     // arbitrary key/value
+    ],
+    height:          .fixed(80),   // or .auto (50% of first thumbnail row)
+    textColor:       nil,          // nil → platform default
+    backgroundColor: nil           // nil → semi-transparent dark default
+)
+```
+
+### Watermark
+
+```swift
+// Text watermark
+config.overlay.watermark = WatermarkConfig(
+    content:  .text("© Studio 2025"),
+    position: .bottomRight,   // .topLeft | .topRight | .bottomLeft | .bottomRight | .center
+    opacity:  0.35,           // 0.0–1.0 (clamped)
+    scale:    0.12            // fraction of mosaic width (clamped to 0.01–1.0)
+)
+
+// Image watermark (loaded from a local file)
+config.overlay.watermark = WatermarkConfig(
+    content:  .image(URL(fileURLWithPath: "/path/to/logo.png")),
+    position: .topLeft,
+    opacity:  0.5,
+    scale:    0.08
+)
+```
+
+### Color DNA Strip
+
+A thin band where each column shows the dominant colour of one frame — a MovieBarcode-style visualisation:
+
+```swift
+config.overlay.colorDNA = ColorDNAConfig(
+    show:     true,
+    height:   24,          // pixels (clamped to minimum 8)
+    position: .bottom,     // .top | .bottom
+    style:    .gradient    // .barcode (hard columns) | .gradient (smooth transition)
+)
+```
+
+### Full Annotation Example
+
+```swift
+config.includeMetadata = true
+config.overlay = OverlayConfiguration(
+    frameLabel: FrameLabelConfig(
+        format: .timestamp, position: .bottomRight, backgroundStyle: .pill
+    ),
+    header: HeaderConfig(
+        fields: [.title, .duration, .resolution, .colorPalette(swatchCount: 8)],
+        height: .fixed(80)
+    ),
+    watermark: WatermarkConfig(
+        content: .text("© My Studio"), position: .bottomRight, opacity: 0.35, scale: 0.10
+    ),
+    colorDNA: ColorDNAConfig(show: true, height: 24, position: .bottom, style: .gradient)
+)
+```
+
 ## Error Handling
 
 MosaicKit provides comprehensive error types:
@@ -224,3 +310,8 @@ Now that you've created your first mosaic, explore these topics:
 - ``MosaicConfiguration``
 - ``DensityConfig``
 - ``LayoutConfiguration``
+- ``OverlayConfiguration``
+- ``FrameLabelConfig``
+- ``HeaderConfig``
+- ``WatermarkConfig``
+- ``ColorDNAConfig``
