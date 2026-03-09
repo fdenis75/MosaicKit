@@ -3,86 +3,86 @@ import Testing
 @testable import MosaicKit
 
 struct MosaicGeneratorCoordinatorTests {
-    private static let defaultMediaFolderPath = "/Volumes/volname/test/"
+    private static let defaultMediaFolderPath = "/Users/francois/Downloads/testvidsnodelete"
     private static let folderPathEnvKey = "MOSAICKIT_TEST_VIDEOS_DIR"
     private static let supportedExtensions: Set<String> = ["mp4", "mov", "m4v", "avi", "mkv"]
-
-    @Test("Coordinator single test using media from /Volumes/volname/test/")
+    
+    @Test("Coordinator single test using media from /Volumes/}/test/")
     func coordinatorSingleVideoFromFolder() async throws {
         guard currentMode() == .single else { return }
-
+        
         try await withAccessibleMediaFolder { folderURL in
             let videoURLs = try discoverVideoURLs(in: folderURL)
             #expect(!videoURLs.isEmpty)
             guard let firstVideoURL = videoURLs.first else {
                 throw MediaAccessError.noVideosFound(folderURL.path)
             }
-
+            
             let video = try await VideoInput(from: firstVideoURL)
             let coordinator = try createDefaultMosaicCoordinator(concurrencyLimit: 1)
             let config = makeTestConfiguration(outputDirectory: folderURL)
             let progressStore = ProgressStore()
-
+            
             let result = try await coordinator.generateMosaic(for: video, config: config) { progress in
                 progressStore.append(progress)
             }
-
+            
             #expect(result.isSuccess)
             if let outputURL = result.outputURL {
                 #expect(outputURL.path.hasPrefix(folderURL.path))
                 #expect(FileManager.default.fileExists(atPath: outputURL.path))
             }
-
+            
             let statuses = progressStore.statuses(for: video.id)
             #expect(statuses.contains(.queued))
             #expect(statuses.contains(.inProgress))
             #expect(statuses.contains(.completed))
         }
     }
-
+    
     @Test("Coordinator batch test using all videos in /Volumes/volname/test/")
     func coordinatorBatchFromFolder() async throws {
         guard currentMode() == .folder else { return }
-
+        
         try await withAccessibleMediaFolder { folderURL in
             let videoURLs = try discoverVideoURLs(in: folderURL)
             #expect(!videoURLs.isEmpty)
             guard !videoURLs.isEmpty else {
                 throw MediaAccessError.noVideosFound(folderURL.path)
             }
-
+            
             var videos: [VideoInput] = []
             for url in videoURLs {
                 if let input = try? await VideoInput(from: url) {
                     videos.append(input)
                 }
             }
-
+            
             #expect(!videos.isEmpty)
             guard !videos.isEmpty else {
                 throw MediaAccessError.noReadableVideos(folderURL.path)
             }
-
+            
             let coordinator = try createDefaultMosaicCoordinator(concurrencyLimit: 2)
             let config = makeTestConfiguration(outputDirectory: folderURL)
             let progressStore = ProgressStore()
-
+            
             let results = try await coordinator.generateMosaicsforbatch(videos: videos, config: config) { progress in
                 progressStore.append(progress)
             }
-
+            
             #expect(results.count == videos.count)
-
+            
             let successfulResults = results.filter(\.isSuccess)
             #expect(!successfulResults.isEmpty)
-
+            
             for result in successfulResults {
                 if let outputURL = result.outputURL {
                     #expect(outputURL.path.hasPrefix(folderURL.path))
                     #expect(FileManager.default.fileExists(atPath: outputURL.path))
                 }
             }
-
+            
             for video in videos {
                 let statuses = progressStore.statuses(for: video.id)
                 #expect(statuses.contains(.queued))
@@ -90,22 +90,22 @@ struct MosaicGeneratorCoordinatorTests {
             }
         }
     }
-
+    
     @Test("Coordinator generates mosaic from embedded test video")
     func coordinatorSingleVideoFromEmbeddedAsset() async throws {
         let videoURL = try embeddedVideoURL
         let video = try await VideoInput(from: videoURL)
-
+        
         let outputDir = FileManager.default.temporaryDirectory
             .appendingPathComponent("MosaicKitTests-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: outputDir, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: outputDir) }
-
+        
         let coordinator = try createDefaultMosaicCoordinator(concurrencyLimit: 1)
         let config = makeTestConfiguration(outputDirectory: outputDir)
-
+        
         let result = try await coordinator.generateMosaic(for: video, config: config) { _ in }
-
+        
         #expect(result.isSuccess)
         if let outputURL = result.outputURL {
             #expect(FileManager.default.fileExists(atPath: outputURL.path))
@@ -114,24 +114,24 @@ struct MosaicGeneratorCoordinatorTests {
             #expect(size > 0)
         }
     }
-
+    
     /// Exercises the metadata header path (previously always bypassed in CI because
     /// `makeTestConfiguration` used `includeMetadata: false`).
     @Test("Coordinator generates mosaic with metadata header and frame labels from embedded video")
     func coordinatorEmbeddedAssetWithMetadata() async throws {
         let videoURL = try embeddedVideoURL
         let video = try await VideoInput(from: videoURL)
-
+        
         let outputDir = FileManager.default.temporaryDirectory
             .appendingPathComponent("MosaicKitTests-Meta-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: outputDir, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: outputDir) }
-
+        
         let coordinator = try createDefaultMosaicCoordinator(concurrencyLimit: 1)
         let config = makeTestConfigurationWithMetadata(outputDirectory: outputDir)
-
+        
         let result = try await coordinator.generateMosaic(for: video, config: config) { _ in }
-
+        
         #expect(result.isSuccess)
         if let outputURL = result.outputURL {
             #expect(FileManager.default.fileExists(atPath: outputURL.path))
@@ -140,7 +140,7 @@ struct MosaicGeneratorCoordinatorTests {
             #expect(fileSize > 0)
         }
     }
-
+    
     private var embeddedVideoURL: URL {
         get throws {
             guard let url = Bundle.module.url(forResource: "test_video", withExtension: "mp4") else {
@@ -149,7 +149,7 @@ struct MosaicGeneratorCoordinatorTests {
             return url
         }
     }
-
+    
     private func withAccessibleMediaFolder<T>(
         _ operation: (URL) async throws -> T
     ) async throws -> T {
@@ -160,20 +160,20 @@ struct MosaicGeneratorCoordinatorTests {
                 folderURL.stopAccessingSecurityScopedResource()
             }
         }
-
+        
         guard FileManager.default.fileExists(atPath: folderURL.path) else {
             throw MediaAccessError.folderMissing(folderURL.path)
         }
-
+        
         _ = try discoverVideoURLs(in: folderURL)
         return try await operation(folderURL)
     }
-
+    
     private func mediaFolderURL() -> URL {
         let path = ProcessInfo.processInfo.environment[Self.folderPathEnvKey] ?? Self.defaultMediaFolderPath
         return URL(fileURLWithPath: path, isDirectory: true)
     }
-
+    
     private func discoverVideoURLs(in folderURL: URL) throws -> [URL] {
         guard let enumerator = FileManager.default.enumerator(
             at: folderURL,
@@ -186,74 +186,109 @@ struct MosaicGeneratorCoordinatorTests {
         ) else {
             throw MediaAccessError.scanFailed(folderURL.path)
         }
-
+        
         var foundURLs: [URL] = []
         for case let fileURL as URL in enumerator {
             let ext = fileURL.pathExtension.lowercased()
             guard Self.supportedExtensions.contains(ext) else {
                 continue
             }
-
+            
             let didStartFileScope = fileURL.startAccessingSecurityScopedResource()
             defer {
                 if didStartFileScope {
                     fileURL.stopAccessingSecurityScopedResource()
                 }
             }
-
+            
             if FileManager.default.isReadableFile(atPath: fileURL.path) {
                 foundURLs.append(fileURL)
             }
         }
-
+        
         return foundURLs.sorted {
             $0.lastPathComponent.localizedCaseInsensitiveCompare($1.lastPathComponent) == .orderedAscending
         }
     }
-
+    
     private func makeTestConfiguration(outputDirectory: URL) -> MosaicConfiguration {
-        MosaicConfiguration(
-            width: 1200,
-            density: .xxl,
-            format: .png,
-            layout: LayoutConfiguration(
-                aspectRatio: .widescreen,
-                spacing: 6,
-                layoutType: .classic,
-                visual: VisualSettings(
-                    addBorder: true,
-                    borderColor: .gray,
-                    borderWidth: 1,
-                    addShadow: true,
-                    shadowSettings: .default
-                )
-            ),
-            includeMetadata: false,
-            useAccurateTimestamps: false,
-            compressionQuality: 0.5,
-            outputdirectory: outputDirectory,
-            fullPathInName: false,
-            useMovieColorsForBg: false,
-            backgroundColor: .defaultGray
-        )
-    }
-
-    private func makeTestConfigurationWithMetadata(outputDirectory: URL) -> MosaicConfiguration {
-        MosaicConfiguration(
-            width: 1200,
-            density: .xxl,
-            format: .png,
+        var config =  MosaicConfiguration(
+            width: 5100,
+            density: .s,
+            format: .heif,
             layout: LayoutConfiguration(
                 aspectRatio: .widescreen,
                 spacing: 4,
-                layoutType: .classic
+                layoutType: .custom
             ),
             includeMetadata: true,
             useAccurateTimestamps: false,
             compressionQuality: 0.5,
             outputdirectory: outputDirectory,
-            fullPathInName: false,
-            useMovieColorsForBg: false,
+            fullPathInName: true,
+            useMovieColorsForBg: true
+        )
+        
+        
+        config.overlay.frameLabel = FrameLabelConfig(
+            show:            true,
+            format:          .timestamp,   // show HH:MM:SS
+            position:        .bottomRight,
+            textColor:       MosaicColor(red: 1, green: 1, blue: 1),
+            backgroundStyle: .pill
+        )
+        
+        // --- Metadata header band with eight fields + a colour palette row ---
+        config.overlay.header = HeaderConfig(
+            fields: [
+                .title,
+                .duration,
+                .resolution,
+                .codec,
+                .bitrate,
+                .fileSize,
+                .frameRate,
+                .colorPalette(swatchCount: 8)   // dominant-colour swatches
+            ],
+            height: .fixed(80)                  // exact 80-pixel band
+        )
+        
+        // --- Text watermark in the bottom-right corner ---
+        config.overlay.watermark = WatermarkConfig(
+            content:  .text("© My Studio"),
+            position: .bottomRight,
+            opacity:  0.35,
+            scale:    0.10
+        )
+        
+        // --- Color DNA gradient strip below the mosaic ---
+        config.overlay.colorDNA = ColorDNAConfig(
+            show:     true,
+            height:   24,
+            position: .bottom,
+            style:    .gradient
+        )
+        return config
+        
+    }
+    
+    
+    private func makeTestConfigurationWithMetadata(outputDirectory: URL) -> MosaicConfiguration {
+        MosaicConfiguration(
+            width: 5100,
+            density: .s,
+            format: .heif,
+            layout: LayoutConfiguration(
+                aspectRatio: .widescreen,
+                spacing: 4,
+                layoutType: .custom
+            ),
+            includeMetadata: true,
+            useAccurateTimestamps: false,
+            compressionQuality: 0.5,
+            outputdirectory: outputDirectory,
+            fullPathInName: true,
+            useMovieColorsForBg: true,
             backgroundColor: .defaultGray,
             overlay: OverlayConfiguration(
                 frameLabel: FrameLabelConfig(show: true, format: .timestamp, position: .bottomRight),
@@ -263,7 +298,8 @@ struct MosaicGeneratorCoordinatorTests {
             )
         )
     }
-
+    
+    
     private func currentMode() -> SuiteMode {
         let rawValue = ProcessInfo.processInfo.environment["MOSAICKIT_SUITE_MODE"] ?? "none"
         return SuiteMode(rawValue: rawValue.lowercased()) ?? .single

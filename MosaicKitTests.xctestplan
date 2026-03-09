@@ -22,10 +22,41 @@
   ],
   "defaultOptions" : {
     "codeCoverage" : false,
+    "environmentVariableEntries" : [
+      {
+        "key" : "MOSAICKIT_SUITE_MODE",
+        "value" : "folder"
+      }
+    ],
     "performanceAntipatternCheckerEnabled" : true
   },
   "testTargets" : [
     {
+      "skippedTests" : {
+        "suites" : [
+          {
+            "name" : "ErrorTypesTests"
+          },
+          {
+            "name" : "LayoutProcessorTests"
+          },
+          {
+            "name" : "MosaicConfigurationTests"
+          },
+          {
+            "name" : "OverlayConfigurationTests"
+          },
+          {
+            "name" : "OverlayProcessorTests"
+          },
+          {
+            "name" : "PreviewConfigurationTests"
+          },
+          {
+            "name" : "ThumbnailProcessorTests"
+          }
+        ]
+      },
       "target" : {
         "containerPath" : "container:",
         "identifier" : "MosaicKitTests",
@@ -33,5 +64,5 @@
       }
     }
   ],
-  "version" : 1
+  "version" : 2
 }
