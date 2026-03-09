@@ -167,8 +167,10 @@ public actor CoreGraphicsMosaicGenerator: MosaicGeneratorProtocol {
                     return (image: labeled, timestamp: frame.timestamp)
                 }
 
-                // Compute frame colours for the DNA strip (cheap: one 1×1 pixel scale per frame)
-                let frameColors: [CGColor] = overlayConfig.colorDNA.show
+                // Compute frame colours when needed by either the DNA strip or palette swatches.
+                let needsColors = overlayConfig.colorDNA.show
+                    || overlayConfig.header.fields.contains { if case .colorPalette = $0 { return true }; return false }
+                let frameColors: [CGColor] = needsColors
                     ? frames.map { OverlayProcessor.averageColor(of: $0.image) }
                     : []
 
@@ -346,7 +348,9 @@ public actor CoreGraphicsMosaicGenerator: MosaicGeneratorProtocol {
                 return (image: labeled, timestamp: frame.timestamp)
             }
 
-            let frameColors: [CGColor] = overlayConfig.colorDNA.show
+            let needsColors = overlayConfig.colorDNA.show
+                || overlayConfig.header.fields.contains { if case .colorPalette = $0 { return true }; return false }
+            let frameColors: [CGColor] = needsColors
                 ? frames.map { OverlayProcessor.averageColor(of: $0.image) }
                 : []
 
