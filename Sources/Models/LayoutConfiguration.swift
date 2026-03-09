@@ -45,6 +45,8 @@ public enum LayoutType: String, Codable, Sendable {
     case classic
     /// Layout optimized for iPhone screens.
     case iphone
+    
+    public static let allCases: [LayoutType] = [.auto, .custom, .dynamic, .classic, .iphone]
 }
 
 /// Predefined aspect ratios for mosaic layout.

@@ -52,6 +52,9 @@
             "name" : "MosaicConfigurationTests"
           },
           {
+            "name" : "MosaicGeneratorCoordinatorTests"
+          },
+          {
             "name" : "OverlayConfigurationTests"
           },
           {

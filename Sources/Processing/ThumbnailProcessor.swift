@@ -280,9 +280,14 @@ public final class ThumbnailProcessor: @unchecked Sendable {
         // Create a new image context
         let hasMetadata = config.includeMetadata && metadataHeader != nil
         let metadataHeight = hasMetadata ? metadataHeader!.height : 0
+        let outerPadding = mosaicOuterPadding(for: layout)
         
         // Calculate final mosaic size
-        var mosaicSize = layout.mosaicSize
+        let contentSize = layout.mosaicSize
+        var mosaicSize = CGSize(
+            width: contentSize.width + (outerPadding * 2),
+            height: contentSize.height + (outerPadding * 2)
+        )
         if hasMetadata {
             mosaicSize.height += CGFloat(metadataHeight)
         }
@@ -307,9 +312,16 @@ public final class ThumbnailProcessor: @unchecked Sendable {
         // Draw metadata header if present
         if hasMetadata, let headerImage = metadataHeader {
             progressHandler?(0.1)
-            // In CG, (0,0) is bottom-left. To draw at top, we need y = height - headerHeight
-            let yPos = mosaicSize.height - CGFloat(metadataHeight)
-            context.draw(headerImage, in: CGRect(x: 0, y: yPos, width: mosaicSize.width, height: CGFloat(metadataHeight)))
+            let yPos = mosaicSize.height - outerPadding - CGFloat(metadataHeight)
+            context.draw(
+                headerImage,
+                in: CGRect(
+                    x: outerPadding,
+                    y: yPos,
+                    width: contentSize.width,
+                    height: CGFloat(metadataHeight)
+                )
+            )
         }
         
         // Draw thumbnails
@@ -343,12 +355,12 @@ public final class ThumbnailProcessor: @unchecked Sendable {
             // CG Y = mosaicHeight - (visualY + size.height)
             //      = mosaicHeight - (position.y + metadataHeight + size.height)
             
-            let visualY = CGFloat(position.y) + CGFloat(yOffset)
+            let visualY = outerPadding + CGFloat(position.y) + CGFloat(yOffset)
             let cgY = mosaicSize.height - visualY - size.height
             
             // CGRect works on both platforms
             let rect = CGRect(
-                x: CGFloat(position.x), 
+                x: outerPadding + CGFloat(position.x),
                 y: cgY, 
                 width: size.width, 
                 height: size.height
@@ -595,8 +607,12 @@ public final class ThumbnailProcessor: @unchecked Sendable {
         }
 
         context.clear(CGRect(x: 0, y: 0, width: width, height: metadataHeight))
-        context.setFillColor(bgColor)
-        context.fill(CGRect(x: 0, y: 0, width: width, height: metadataHeight))
+        drawRoundedHeaderBackground(
+            in: context,
+            width: CGFloat(width),
+            height: CGFloat(metadataHeight),
+            color: bgColor
+        )
 
         // Determine text colour: config override → forIphone white → macOS black
         #if canImport(AppKit)
@@ -753,8 +769,12 @@ public final class ThumbnailProcessor: @unchecked Sendable {
         
         // Create dark semi-transparent background for metadata
         context.setFillColor(bgColor)
-        let bgRect = CGRect(x: 0, y: 0, width: width, height: metadataHeight)
-        context.fill(bgRect)
+        drawRoundedHeaderBackground(
+            in: context,
+            width: CGFloat(width),
+            height: CGFloat(metadataHeight),
+            color: bgColor
+        )
         
         // Prepare the metadata text
         var metadataItems = [
@@ -834,12 +854,17 @@ public final class ThumbnailProcessor: @unchecked Sendable {
         
         // Create dark semi-transparent background for metadata - more transparent to match main method
         #if canImport(AppKit)
-        context.setFillColor(NSColor(white: 0.1, alpha: 0.5).cgColor)
+        let metadataBackgroundColor = NSColor(white: 0.1, alpha: 0.5).cgColor
         #elseif canImport(UIKit)
-        context.setFillColor(UIColor(white: 0.1, alpha: 0.5).cgColor)
+        let metadataBackgroundColor = UIColor(white: 0.1, alpha: 0.5).cgColor
         #endif
-        let bgRect = CGRect(x: 0, y: 0, width: width, height: metadataHeight)
-        context.fill(bgRect)
+        context.setFillColor(metadataBackgroundColor)
+        drawRoundedHeaderBackground(
+            in: context,
+            width: CGFloat(width),
+            height: CGFloat(metadataHeight),
+            color: metadataBackgroundColor
+        )
         
         // Prepare the metadata text
         var metadataItems = [
@@ -1080,16 +1105,17 @@ public final class ThumbnailProcessor: @unchecked Sendable {
         ]
         #endif
 
-        let nsString = NSString(string: labelText)
-        let stringSize = nsString.size(withAttributes: textAttributes)
+        let attributedString = NSAttributedString(string: labelText, attributes: textAttributes)
+        let line = CTLineCreateWithAttributedString(attributedString)
+        let textMetrics = textLayoutMetrics(for: line)
         
         // Padding for the pill-shaped background (proportional to font size)
         let paddingX: CGFloat = fontSize * 0.6
         let paddingY: CGFloat = fontSize * 0.3
 
         // Calculate background rectangle dimensions with more subtle proportions
-        let bgWidth  = stringSize.width  + (paddingX * 2)
-        let bgHeight = stringSize.height + (paddingY * 2)
+        let bgWidth  = textMetrics.width  + (paddingX * 2)
+        let bgHeight = textMetrics.height + (paddingY * 2)
 
         // Position based on labelConfig.position
         let hMargin: CGFloat = size.width  * 0.02
@@ -1194,15 +1220,13 @@ public final class ThumbnailProcessor: @unchecked Sendable {
         }
 
         // Draw the label text centred inside the background rect
-        let textX = bgX + (bgWidth  - stringSize.width)  / 2
-        let textY = bgY + (bgHeight - stringSize.height) / 2 + 1.0 * scale
-        let textRect = CGRect(x: textX, y: textY, width: stringSize.width, height: stringSize.height)
+        let textX = bgRect.midX - (textMetrics.bounds.width / 2) - textMetrics.bounds.minX
+        let baselineY = bgRect.midY - ((textMetrics.ascent - textMetrics.descent) / 2)
 
         context.saveGState()
         context.textMatrix = CGAffineTransform.identity
-        context.translateBy(x: textRect.origin.x, y: textRect.origin.y)
-        let attributedString = NSAttributedString(string: labelText, attributes: textAttributes)
-        CTLineDraw(CTLineCreateWithAttributedString(attributedString), context)
+        context.textPosition = CGPoint(x: textX, y: baselineY)
+        CTLineDraw(line, context)
         context.restoreGState()
 
         guard let finalImage = context.makeImage() else {
@@ -1263,6 +1287,52 @@ public final class ThumbnailProcessor: @unchecked Sendable {
                       clockwise: false)
         context.closePath()
         context.fillPath()
+    }
+
+    private func drawRoundedHeaderBackground(in context: CGContext, width: CGFloat, height: CGFloat, color: CGColor) {
+        let inset = max(1.0, min(6.0, height * 0.04))
+        let backgroundRect = CGRect(
+            x: inset,
+            y: inset,
+            width: max(0, width - (inset * 2)),
+            height: max(0, height - (inset * 2))
+        )
+        let cornerRadius = min(backgroundRect.height * 0.22, 18.0)
+
+        context.saveGState()
+        context.setShouldAntialias(true)
+        context.setAllowsAntialiasing(true)
+        context.setFillColor(color)
+        context.addPath(
+            CGPath(
+                roundedRect: backgroundRect,
+                cornerWidth: cornerRadius,
+                cornerHeight: cornerRadius,
+                transform: nil
+            )
+        )
+        context.fillPath()
+        context.restoreGState()
+    }
+
+    private func textLayoutMetrics(for line: CTLine) -> (bounds: CGRect, width: CGFloat, height: CGFloat, ascent: CGFloat, descent: CGFloat) {
+        var ascent: CGFloat = 0
+        var descent: CGFloat = 0
+        var leading: CGFloat = 0
+        let typographicWidth = CGFloat(CTLineGetTypographicBounds(line, &ascent, &descent, &leading))
+        let bounds = CTLineGetBoundsWithOptions(line, .useOpticalBounds)
+        let width = max(ceil(typographicWidth), ceil(bounds.width))
+        let height = ceil(ascent + descent + leading)
+        return (bounds, width, height, ascent, descent)
+    }
+
+    private func mosaicOuterPadding(for layout: MosaicLayout) -> CGFloat {
+        let smallestThumbnailDimension = layout.thumbnailSizes
+            .map { min($0.width, $0.height) }
+            .filter { $0 > 0 }
+            .min() ?? min(layout.thumbnailSize.width, layout.thumbnailSize.height)
+
+        return min(24.0, max(8.0, round(smallestThumbnailDimension * 0.04)))
     }
     
     /// Fallback method for adding timestamp to image

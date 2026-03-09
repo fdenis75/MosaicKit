@@ -13,6 +13,26 @@ private struct ComboResult: Sendable {
     var ok: Bool { errorDesc == nil }
 }
 
+private actor GenerationProgressReporter {
+    private let total: Int
+    private var completed = 0
+
+    init(total: Int) {
+        self.total = total
+    }
+
+    func record(_ result: ComboResult) {
+        completed += 1
+        if result.ok {
+            print(String(format: "[%4d/%4d]  %@  ✅  %.1fs",
+                         completed, total, result.combo.shortName, result.elapsed))
+        } else {
+            print("[\(String(format: "%4d/%4d", completed, total))]  \(result.combo.shortName)  ❌  \(result.errorDesc ?? "unknown error")")
+        }
+        fflush(stdout)
+    }
+}
+
 // MARK: - Configuration descriptor
 
 /// Fully specifies one parameter combination to generate.
@@ -83,7 +103,7 @@ private struct ComboConfig: Sendable {
 
     func toMosaicConfiguration(outputDir: URL, accentColor: MosaicColor) -> MosaicConfiguration {
         var config = MosaicConfiguration(
-            width: 4000,
+            width: 2000,
             density: density,
             format: .heif,
             layout: LayoutConfiguration(
@@ -92,7 +112,7 @@ private struct ComboConfig: Sendable {
             ),
             includeMetadata: includeMetadata,
             useAccurateTimestamps: false,
-            compressionQuality: 0.6,
+            compressionQuality: 0.3,
             outputdirectory: outputDir
         )
 
@@ -108,7 +128,7 @@ private struct ComboConfig: Sendable {
         // Metadata header (six standard fields + colour palette)
         if includeMetadata {
             config.overlay.header = HeaderConfig(
-                fields: [.title, .duration, .resolution, .codec, .bitrate, .colorPalette(swatchCount: 6)],
+                fields: [.title, .duration, .resolution, .codec, .bitrate, .filePath, .fileSize, .colorPalette(swatchCount: 6)],
                 height: headerHeight
             )
         }
@@ -216,7 +236,7 @@ private struct ComboConfig: Sendable {
 private extension ComboConfig {
 
     // Baseline values — held constant in single-parameter sweeps
-    static let baseDensity:   DensityConfig       = .m
+    static let baseDensity:   DensityConfig       = .xxl
     static let baseLayout:    LayoutType           = .custom
     static let baseAspect:    AspectRatio          = .widescreen
     static let baseMeta:      Bool                 = true
@@ -232,7 +252,7 @@ private extension ComboConfig {
     static func makeAll() -> [ComboConfig] {
         var configs: [ComboConfig] = []
         var idx = 1
-
+        
         func add(
             group:    String,
             density:  DensityConfig       = baseDensity,
@@ -256,84 +276,68 @@ private extension ComboConfig {
             ))
             idx += 1
         }
-
+        
         // G01 – density sweep (7)
-        for d in [DensityConfig.m] {
+        for d in [DensityConfig.xxl, .m, .s, .xxs] {
             add(group: "G01-density", density: d)
         }
-
+        
         // G02 – layout type sweep (5)
-        for l in [LayoutType.auto, .classic, .custom, .dynamic] {
+        for l in LayoutType.allCases {
             add(group: "G02-layout", layout: l)
         }
-
+        
         // G03 – aspect ratio sweep (5)
-        for a in [AspectRatio.widescreen, .standard, .square, .ultrawide, .vertical] {
+        for a in AspectRatio.allCases {
             add(group: "G03-aspect", aspect: a)
         }
-
+        
         // G04 – includeMetadata sweep (2)
-        for m in [false, true] {
+        for m in [true, false] {
             add(group: "G04-metadata", meta: m)
         }
-
-        // G05 – frame label format sweep (3)
-        for f in [FrameLabelFormat.timestamp, .frameIndex, .none] {
-            add(group: "G05-labelFmt", labelFmt: f)
-        }
-
+        
+     
+        
         // G06 – frame label position sweep (5)
-        for p in [FrameLabelPosition.topLeft, .topRight, .bottomLeft, .bottomRight, .center] {
-            add(group: "G06-labelPos", labelPos: p)
-        }
-
-        // G07 – frame label background sweep (3)
-        for b in [FrameLabelBackground.pill, .none, .fullWidth] {
-            add(group: "G07-labelBg", labelBg: b)
-        }
+        //   for p in [FrameLabelPosition.topLeft, .topRight, .bottomLeft, .bottomRight, .center] {
+    
 
         // G08 – watermark sweep (2)
-        add(group: "G08-watermark", wm: nil)
-        add(group: "G08-watermark", wm: "© Test Studio")
+      //  add(group: "G08-watermark", wm: nil)
+       // add(group: "G08-watermark", wm: "© Test Studio")
 
         // G09 – Color DNA sweep: off + 2 styles × 2 positions = 5
         add(group: "G09-colorDNA")   // off
         for style in [ColorDNAStyle.barcode, .gradient] {
-            for pos in [ColorDNAPosition.bottom, .top] {
+            for pos in [ColorDNAPosition.bottom] {
                 add(group: "G09-colorDNA", dnaStyle: style, dnaPos: pos)
             }
         }
 
-        // G10 – header height sweep (3, meta=true)
-        for hh in [HeaderHeight.auto, .fixed(60), .fixed(120)] {
-            add(group: "G10-headerH", meta: true, headerH: hh)
-        }
-
+      
         // G11 – density × layout cross-product (7 × 5 = 35)
-        for d in [DensityConfig.m] {
-            for l in [LayoutType.auto, .classic, .custom, .dynamic, .iphone] {
-                add(group: "G11-dens×lay", density: d, layout: l)
+        for d in DensityConfig.allCases {
+            for l in [LayoutType.custom] {
+                for a in AspectRatio.allCases {
+                    add(group: "G11-dens×layxasp", density: d, layout: l, aspect: a)
+                }
             }
         }
 
-        // G12 – density × aspect ratio cross-product (7 × 5 = 35)
-        for d in [DensityConfig.m] {
-            for a in [AspectRatio.widescreen, .standard, .square, .ultrawide, .vertical] {
-                add(group: "G12-dens×asp", density: d, aspect: a)
-            }
-        }
+       
 
-        // G13 – overlay matrix: labelFmt(3) × labelBg(3) × watermark(2) × colorDNA(5) = 90
+    /*    // G13 – overlay matrix: labelFmt(3) × labelBg(3) × watermark(2) × colorDNA(5) = 90
         let dnaStates: [(ColorDNAStyle?, ColorDNAPosition)] = [
             (nil,       .bottom),
             (.barcode,  .bottom),
-            (.barcode,  .top),
-            (.gradient, .bottom),
-            (.gradient, .top),
+           
+     
+            (.gradient, .top)
         ]
-        for lf in [FrameLabelFormat.timestamp, .frameIndex, .none] {
-            for lb in [FrameLabelBackground.pill, .none, .fullWidth] {
-                for wm in [String?.none, "© Test"] {
+        for lf in [FrameLabelFormat.timestamp] {
+            for lb in [FrameLabelBackground.pill] {
+                for wm in [String?.none] {
                     for (dnaS, dnaP) in dnaStates {
                         add(group: "G13-overlay",
                             labelFmt: lf, labelBg: lb,
@@ -341,7 +345,7 @@ private extension ComboConfig {
                     }
                 }
             }
-        }
+        }*/
 
         return configs
     }
@@ -407,8 +411,8 @@ private func timingSummary(_ results: [ComboResult]) -> String {
     // ── Header ────────────────────────────────────────────────────────────────
     out += "MosaicKit Combination Test — Timing Impact Report\n"
     out += bar72 + "\n\n"
-    out += String(format: "Configurations : %d total, %d succeeded, %d failed\n",
-                  results.count, ok.count, results.count - ok.count)
+    out += String(format: "Configurations : %lld total, %lld succeeded, %lld failed\n",
+                  Int64(results.count), Int64(ok.count), Int64(results.count - ok.count))
     out += String(format: "Total wall time: %.0f s\n\n",
                   ok.map(\.elapsed).reduce(0, +))
 
@@ -416,8 +420,8 @@ private func timingSummary(_ results: [ComboResult]) -> String {
     out += "PARAMETER IMPACT RANKING  (impact = max_mean − min_mean)\n"
     out += bar52 + "\n"
     for (i, stat) in ranked.enumerated() {
-        out += String(format: "  %2d. %-24s impact = %6.1f s\n",
-                      i + 1, stat.name, stat.impact)
+        out += String(format: "  %2lld. %-24@ impact = %6.1f s\n",
+                      Int64(i + 1), stat.name as NSString, stat.impact)
     }
     out += "\n"
 
@@ -425,10 +429,10 @@ private func timingSummary(_ results: [ComboResult]) -> String {
     out += "DETAILED BREAKDOWN BY PARAMETER\n"
     out += bar72 + "\n\n"
     for stat in ranked {
-        out += String(format: "● %-24s (impact = %.1f s)\n", stat.name, stat.impact)
+        out += String(format: "● %-24@ (impact = %.1f s)\n", stat.name as NSString, stat.impact)
         for row in stat.rows {
-            out += String(format: "  %-24s → %6.1f s  (n=%d)\n",
-                          row.label, row.mean, row.n)
+            out += String(format: "  %-24@ → %6.1f s  (n=%lld)\n",
+                          row.label as NSString, row.mean, Int64(row.n))
         }
         out += "\n"
     }
@@ -441,8 +445,8 @@ private func timingSummary(_ results: [ComboResult]) -> String {
     for g in gBuckets.keys.sorted() {
         let ts  = gBuckets[g]!
         let avg = ts.reduce(0,+) / Double(ts.count)
-        out += String(format: "  %-18s  n=%3d  mean=%6.1fs  min=%5.1fs  max=%6.1fs\n",
-                      g, ts.count, avg, ts.min()!, ts.max()!)
+        out += String(format: "  %-18@  n=%3lld  mean=%6.1fs  min=%5.1fs  max=%6.1fs\n",
+                      g as NSString, Int64(ts.count), avg, ts.min()!, ts.max()!)
     }
 
     // ── Extremes ──────────────────────────────────────────────────────────────
@@ -515,6 +519,16 @@ struct CombinationTests {
     private static let videoPath: String? =
         ProcessInfo.processInfo.environment["MOSAIC_TEST_VIDEO"]
 
+    private static let defaultMaxConcurrentGenerations = 1
+
+    private static var maxConcurrentGenerations: Int {
+        let rawValue = ProcessInfo.processInfo.environment["MOSAIC_TEST_MAX_CONCURRENT"]
+        guard let rawValue, let value = Int(rawValue) else {
+            return defaultMaxConcurrentGenerations
+        }
+        return max(1, value)
+    }
+
     private static var targetFolder: URL {
         let base = ProcessInfo.processInfo.environment["MOSAIC_TARGET_FOLDER"]
             ?? FileManager.default.homeDirectoryForCurrentUser
@@ -551,10 +565,11 @@ struct CombinationTests {
         try FileManager.default.createDirectory(at: targetFolder, withIntermediateDirectories: true)
 
         let video     = try await VideoInput(from: videoURL)
-        let generator = try MetalMosaicGenerator()
 
         let allConfigs = ComboConfig.makeAll()
         let total      = allConfigs.count
+        let maxConcurrentGenerations = Self.maxConcurrentGenerations
+        let progressReporter = GenerationProgressReporter(total: total)
 
         print("""
 
@@ -563,6 +578,7 @@ struct CombinationTests {
         Video      : \(video.title)  (\(String(format: "%.0f", video.duration ?? 0))s)
         Resolution : \(Int(video.width ?? 0))×\(Int(video.height ?? 0))
         Configs    : \(total)
+        Concurrent : \(maxConcurrentGenerations)
         Output     : \(targetFolder.path)
         ─────────────────────────────────────────────────────────────────────────
 
@@ -577,70 +593,92 @@ struct CombinationTests {
         Total   : \(total) configurations
         Fixed   : width=4000px  format=heif  compressionQuality=0.6
                   accentColor=rgba(0.2, 0.4, 0.8, 1.0)
+        Runtime : maxConcurrentGenerations=\(maxConcurrentGenerations)
         ════════════════════════════════════════════════════════════════════════
 
         """
 
         var results: [ComboResult] = []
-        var succeeded = 0
-        var failedCount = 0
+        results.reserveCapacity(total)
 
-        // ── Generation loop ───────────────────────────────────────────────────
-        for (i, combo) in allConfigs.enumerated() {
-
-            print(String(format: "[%4d/%4d]  %@  …", i + 1, total, combo.shortName),
-                  terminator: " ")
-            fflush(stdout)
-
-            // Isolated per-config temp directory prevents filename collisions
-            let tmpDir = FileManager.default.temporaryDirectory
+        // ── Concurrent generation loop ────────────────────────────────────────
+        func generateResult(for combo: ComboConfig) async -> ComboResult {
+            let fileManager = FileManager.default
+            let tmpDir = fileManager.temporaryDirectory
                 .appendingPathComponent("MosaicCombo-\(combo.index)-\(UUID().uuidString)",
                                         isDirectory: true)
-            try FileManager.default.createDirectory(at: tmpDir, withIntermediateDirectories: true)
-
-            let mosaicConfig = combo.toMosaicConfiguration(outputDir: tmpDir,
-                                                            accentColor: accentColor)
-            let start       = Date()
-            var outputURL: URL?
-            var errorDesc:  String?
-
-            do {
-                let rawURL = try await generator.generate(for: video, config: mosaicConfig)
-
-                // Rename and move into TARGET_Folder
-                let dst = targetFolder.appendingPathComponent(combo.filename)
-                if FileManager.default.fileExists(atPath: dst.path) {
-                    try FileManager.default.removeItem(at: dst)
-                }
-                try FileManager.default.moveItem(at: rawURL, to: dst)
-                outputURL = dst
-                succeeded += 1
-
-            } catch {
-                errorDesc = error.localizedDescription
-                failedCount += 1
+            let start = Date()
+            defer {
+                try? fileManager.removeItem(at: tmpDir)
             }
 
-            // Clean up temp dir (best-effort)
-            try? FileManager.default.removeItem(at: tmpDir)
+            do {
+                try fileManager.createDirectory(at: tmpDir, withIntermediateDirectories: true)
+                let mosaicConfig = combo.toMosaicConfiguration(
+                    outputDir: tmpDir,
+                    accentColor: accentColor
+                )
+                let generator = try MetalMosaicGenerator()
+                let rawURL = try await generator.generate(for: video, config: mosaicConfig)
 
-            let elapsed = Date().timeIntervalSince(start)
-            print(errorDesc == nil
-                  ? String(format: "✅  %.1fs", elapsed)
-                  : "❌  \(errorDesc!)")
+                let destinationURL = targetFolder.appendingPathComponent(combo.filename)
+                if fileManager.fileExists(atPath: destinationURL.path) {
+                    try fileManager.removeItem(at: destinationURL)
+                }
+                try fileManager.moveItem(at: rawURL, to: destinationURL)
 
-            results.append(ComboResult(
-                combo: combo,
-                elapsed: elapsed,
-                outputURL: outputURL,
-                errorDesc: errorDesc
-            ))
+                return ComboResult(
+                    combo: combo,
+                    elapsed: Date().timeIntervalSince(start),
+                    outputURL: destinationURL,
+                    errorDesc: nil
+                )
+            } catch {
+                return ComboResult(
+                    combo: combo,
+                    elapsed: Date().timeIntervalSince(start),
+                    outputURL: nil,
+                    errorDesc: error.localizedDescription
+                )
+            }
+        }
 
-            // Append to manifest
-            manifest += String(format: "[%04d]  %@\n", combo.index, combo.filename)
-            manifest += "    \(combo.fullDescription.replacingOccurrences(of: "\n", with: "\n    "))\n"
-            manifest += String(format: "    time   : %.2fs\n", elapsed)
-            manifest += "    status : \(errorDesc == nil ? "OK" : "FAILED — \(errorDesc!)")\n\n"
+        await withTaskGroup(of: ComboResult.self) { group in
+            var nextIndex = 0
+            let initialCount = min(maxConcurrentGenerations, total)
+
+            for _ in 0..<initialCount {
+                let combo = allConfigs[nextIndex]
+                nextIndex += 1
+                group.addTask {
+                    await generateResult(for: combo)
+                }
+            }
+
+            while let result = await group.next() {
+                results.append(result)
+                await progressReporter.record(result)
+
+                if nextIndex < total {
+                    let combo = allConfigs[nextIndex]
+                    nextIndex += 1
+                    group.addTask {
+                        await generateResult(for: combo)
+                    }
+                }
+            }
+        }
+
+        results.sort { $0.combo.index < $1.combo.index }
+
+        let succeeded = results.filter(\.ok).count
+        let failedCount = results.count - succeeded
+
+        for result in results {
+            manifest += String(format: "[%04d]  %@\n", result.combo.index, result.combo.filename)
+            manifest += "    \(result.combo.fullDescription.replacingOccurrences(of: "\n", with: "\n    "))\n"
+            manifest += String(format: "    time   : %.2fs\n", result.elapsed)
+            manifest += "    status : \(result.ok ? "OK" : "FAILED — \(result.errorDesc ?? "unknown error")")\n\n"
         }
 
         print("\n── Generation complete: \(succeeded) succeeded, \(failedCount) failed ──\n")
