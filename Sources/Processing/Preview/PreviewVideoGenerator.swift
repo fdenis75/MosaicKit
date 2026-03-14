@@ -623,6 +623,7 @@ struct PreviewGenerationLogic {
         if let compAudioTrack = compositionAudioTrack {
             let params = AVMutableAudioMixInputParameters(track: compAudioTrack)
             params.trackID = compAudioTrack.trackID
+            params.audioTimePitchAlgorithm = .varispeed
             let mix = AVMutableAudioMix()
             mix.inputParameters = [params]
             audioMix = mix
