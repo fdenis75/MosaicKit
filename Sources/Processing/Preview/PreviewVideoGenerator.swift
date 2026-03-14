@@ -618,12 +618,17 @@ struct PreviewGenerationLogic {
             }
         }
         
-        // Create audio mix if we have audio
+        // Create audio mix if we have audio and time-scaling is in play.
+        // .spectral is Apple's recommended algorithm for offline export (pitch-preserving,
+        // supports offline/preflight rendering). .varispeed is playback-only and causes
+        // AudioQueue rate-change conflicts ("scheduling rate change at unscaled t=X") during
+        // AVAssetExportSession offline render. Only attach the mix when speed != 1.0 because
+        // there is no pitch correction needed at natural speed.
         var audioMix: AVMutableAudioMix?
-        if let compAudioTrack = compositionAudioTrack {
+        if let compAudioTrack = compositionAudioTrack, playbackSpeed != 1.0 {
             let params = AVMutableAudioMixInputParameters(track: compAudioTrack)
             params.trackID = compAudioTrack.trackID
-            params.audioTimePitchAlgorithm = .varispeed
+            params.audioTimePitchAlgorithm = .spectral
             let mix = AVMutableAudioMix()
             mix.inputParameters = [params]
             audioMix = mix
@@ -804,9 +809,9 @@ struct PreviewGenerationLogic {
             // Perform the export
             do {
                 nonisolated(unsafe) let compositionAsset = composition as AVAsset
-                
+
                 if let vc = videoComposition {
-                    // Use the raw-settings overload so we can pass our custom video composition for scaling
+                    // Use the raw-settings overload so we can pass our custom video composition for scaling.
                     try await exporter.export(
                         asset: compositionAsset,
                         audioOutputSettings: AudioOutputSettings.default.settingsDictionary,
