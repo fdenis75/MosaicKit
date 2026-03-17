@@ -17,11 +17,12 @@ A high-performance Swift package for generating video mosaics with Metal-acceler
 - 📊 **Overlay Annotations** - Per-frame labels (timestamp, index), customisable metadata headers, watermarks, and Color DNA strips
 - 🎬 **Video Preview Generation** - Create short highlight reels from any video, either exported to file or as a live `AVPlayerItem` composition
 
-## New in 1.1.0
+## New in 1.1.3
 
 - Adaptive metadata headers now size themselves from the actual rendered content instead of relying on thumbnail-row heuristics.
 - File paths get their own shrink-to-fit header row, which keeps long source URLs and paths readable.
 - Per-frame label typography now scales from the thumbnail’s dominant dimension for more consistent captions across portrait and landscape layouts.
+- Preview compositions and exported preview videos now show each extract's source timestamp in a bottom-left dark pill for the first second of the extract.
 
 ## Requirements
 
@@ -38,7 +39,7 @@ Add MosaicKit to your `Package.swift`:
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/fdenis75/MosaicKit.git", from: "1.1.0")
+    .package(url: "https://github.com/fdenis75/MosaicKit.git", from: "1.1.3")
 ]
 ```
 
@@ -443,6 +444,8 @@ let playerItem = try await generator.generateComposition(for: video, config: con
 let player = AVPlayer(playerItem: playerItem)
 player.play()
 ```
+
+Every preview extract also displays its source start timestamp as a bottom-left dark pill with white text for the first second of playback. The same overlay is rendered in both live `AVPlayerItem` compositions and exported preview files.
 
 ### Preview Configuration
 

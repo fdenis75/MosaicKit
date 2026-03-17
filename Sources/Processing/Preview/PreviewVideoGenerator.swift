@@ -1,8 +1,14 @@
 import Foundation
 import AVFoundation
 import OSLog
+import QuartzCore
 import UniformTypeIdentifiers
 import SJSAssetExportSession
+#if canImport(AppKit)
+import AppKit
+#elseif canImport(UIKit)
+import UIKit
+#endif
 
 /// Thread-safe cancellation token
 class CancellationToken: @unchecked Sendable {
@@ -207,6 +213,12 @@ public actor PreviewVideoGenerator {
 // @available(macOS 26, iOS 26, *)
 struct PreviewGenerationLogic {
     private static let logger = Logger(subsystem: "com.mosaickit", category: "PreviewGenerationLogic")
+
+    private struct PreviewOverlayCue {
+        let compositionStart: CMTime
+        let displayDuration: CMTime
+        let text: String
+    }
     
     static func generate(
         for video: VideoInput,
@@ -530,6 +542,7 @@ struct PreviewGenerationLogic {
             logger.error("Failed to create composition video track")
             throw PreviewError.compositionFailed("Failed to create composition video track", nil)
         }
+        compositionVideoTrack.preferredTransform = try await videoTrack.load(.preferredTransform)
         
         var compositionAudioTrack: AVMutableCompositionTrack?
         if audioTrack != nil {
@@ -543,6 +556,7 @@ struct PreviewGenerationLogic {
         var insertTime = CMTime.zero
         let progressStep = 0.5 / Double(timestamps.count)
         var skippedSegments = 0
+        var overlayCues: [PreviewOverlayCue] = []
         
         for (index, timestamp) in timestamps.enumerated() {
             if cancellationCheck() {
@@ -561,14 +575,17 @@ struct PreviewGenerationLogic {
             }
             
             do {
+                let compositionStart = insertTime
+
                 // Insert video segment
                 try compositionVideoTrack.insertTimeRange(timeRange, of: videoTrack, at: insertTime)
                 // Insert audio segment from pre-loaded track
                 if let srcAudio = audioTrack, let dstAudio = compositionAudioTrack {
                     try dstAudio.insertTimeRange(timeRange, of: srcAudio, at: insertTime)
                 }
-                
+
                 // Apply time scaling on the COMPOSITION (scales all tracks atomically)
+                let segmentOutputDuration: CMTime
                 if playbackSpeed != 1.0 {
                     let scaledDuration = CMTime(
                         seconds: extractDuration / playbackSpeed,
@@ -576,10 +593,23 @@ struct PreviewGenerationLogic {
                     )
                     let scaleRange = CMTimeRange(start: insertTime, duration: timestamp.duration)
                     composition.scaleTimeRange(scaleRange, toDuration: scaledDuration)
+                    segmentOutputDuration = scaledDuration
                     insertTime = CMTimeAdd(insertTime, scaledDuration)
                 } else {
+                    segmentOutputDuration = timestamp.duration
                     insertTime = CMTimeAdd(insertTime, timestamp.duration)
                 }
+
+                overlayCues.append(
+                    PreviewOverlayCue(
+                        compositionStart: compositionStart,
+                        displayDuration: CMTime(
+                            seconds: min(1.0, CMTimeGetSeconds(segmentOutputDuration)),
+                            preferredTimescale: 600
+                        ),
+                        text: formatExtractTimestamp(seconds: CMTimeGetSeconds(timestamp.start))
+                    )
+                )
                 
                 let progress = 0.2 + (progressStep * Double(index + 1))
                 progressHandler(progress, .composing, nil, "Composing segment \(index + 1)/\(timestamps.count)")
@@ -634,66 +664,208 @@ struct PreviewGenerationLogic {
             audioMix = mix
         }
         
-        // Build video composition for resolution downscaling.
-        //
-        // `AVVideoComposition.Configuration`, `AVVideoCompositionLayerInstruction.Configuration`,
-        // and `AVVideoCompositionInstruction.Configuration` are only available on macOS 26+ / iOS 26+.
-        // On earlier OS versions `videoComp` stays nil and the full source resolution is preserved.
-        var videoComp: AVVideoComposition?
+        let videoComp = try await buildVideoComposition(
+            composition: composition,
+            sourceVideoTrack: videoTrack,
+            compositionVideoTrack: compositionVideoTrack,
+            overlayCues: overlayCues,
+            maxResolutionRaw: maxResolutionRaw
+        )
+        
+        return (composition, audioMix, videoComp)
+    }
+
+    private static func buildVideoComposition(
+        composition: AVMutableComposition,
+        sourceVideoTrack: AVAssetTrack,
+        compositionVideoTrack: AVMutableCompositionTrack,
+        overlayCues: [PreviewOverlayCue],
+        maxResolutionRaw: String?
+    ) async throws -> AVVideoComposition {
+        let naturalSize = try await sourceVideoTrack.load(.naturalSize)
+        let preferredTransform = try await sourceVideoTrack.load(.preferredTransform)
+        let nominalFrameRate = try await sourceVideoTrack.load(.nominalFrameRate)
+        let transformedSize = naturalSize.applying(preferredTransform)
+        let sourceWidth = abs(transformedSize.width)
+        let sourceHeight = abs(transformedSize.height)
+
+        var renderSize = CGSize(width: sourceWidth, height: sourceHeight)
+        var finalTransform = preferredTransform
+
         if #available(macOS 26, iOS 26, *),
            let rawRes = maxResolutionRaw,
-           let maxRes = ExportMaxResolution(rawValue: rawRes),
-           let compVideoTrack = composition.tracks(withMediaType: .video).first {
-            let naturalSize = try await compVideoTrack.load(.naturalSize)
-            let preferredTransform = try await compVideoTrack.load(.preferredTransform)
-            let transformedSize = naturalSize.applying(preferredTransform)
-            let sourceWidth = abs(transformedSize.width)
-            let sourceHeight = abs(transformedSize.height)
-            
+           let maxRes = ExportMaxResolution(rawValue: rawRes) {
             let targetMaxWidth = CGFloat(maxRes.maxWidth)
             let targetMaxHeight = CGFloat(maxRes.maxHeight)
-            
-            // Only downscale — never upscale
+
             if sourceWidth > targetMaxWidth || sourceHeight > targetMaxHeight {
                 let scaleX = targetMaxWidth / sourceWidth
                 let scaleY = targetMaxHeight / sourceHeight
                 let scale = min(scaleX, scaleY)
-                
-                let renderWidth = (sourceWidth * scale).rounded(.down)
-                let renderHeight = (sourceHeight * scale).rounded(.down)
-                let renderSize = CGSize(width: renderWidth, height: renderHeight)
-                
-                let scaleTransform = CGAffineTransform(scaleX: scale, y: scale)
-                let finalTransform = preferredTransform.concatenating(scaleTransform)
-
-                var layerConfiguration = AVVideoCompositionLayerInstruction.Configuration(assetTrack: compVideoTrack)
-                layerConfiguration.setTransform(finalTransform, at: .zero)
-                let layerInstruction = AVVideoCompositionLayerInstruction(configuration: layerConfiguration)
-
-                let instructionConfiguration = AVVideoCompositionInstruction.Configuration(
-                    layerInstructions: [layerInstruction],
-                    timeRange: CMTimeRange(start: .zero, duration: composition.duration)
+                renderSize = CGSize(
+                    width: (sourceWidth * scale).rounded(.down),
+                    height: (sourceHeight * scale).rounded(.down)
                 )
-                let instruction = AVVideoCompositionInstruction(configuration: instructionConfiguration)
+                finalTransform = preferredTransform.concatenating(
+                    CGAffineTransform(scaleX: scale, y: scale)
+                )
 
-                let nominalFrameRate = try await compVideoTrack.load(.nominalFrameRate)
-                var compositionConfiguration = try await AVVideoComposition.Configuration(
-                    for: composition,
-                    prototypeInstruction: instruction
-                )
-                compositionConfiguration.renderSize = renderSize
-                compositionConfiguration.frameDuration = CMTime(
-                    value: 1,
-                    timescale: CMTimeScale(nominalFrameRate > 0 ? nominalFrameRate : 30)
-                )
-                videoComp = AVVideoComposition(configuration: compositionConfiguration)
-                
-                logger.info("Scaling composition from \(Int(sourceWidth))x\(Int(sourceHeight)) to \(Int(renderWidth))x\(Int(renderHeight))")
+                logger.info("Scaling composition from \(Int(sourceWidth))x\(Int(sourceHeight)) to \(Int(renderSize.width))x\(Int(renderSize.height))")
             }
         }
-        
-        return (composition, audioMix, videoComp)
+
+        let instruction = AVMutableVideoCompositionInstruction()
+        instruction.timeRange = CMTimeRange(start: .zero, duration: composition.duration)
+
+        let layerInstruction = AVMutableVideoCompositionLayerInstruction(assetTrack: compositionVideoTrack)
+        layerInstruction.setTransform(finalTransform, at: .zero)
+        instruction.layerInstructions = [layerInstruction]
+
+        let videoComposition = AVMutableVideoComposition()
+        videoComposition.instructions = [instruction]
+        videoComposition.renderSize = renderSize
+        videoComposition.frameDuration = CMTime(
+            value: 1,
+            timescale: CMTimeScale(nominalFrameRate > 0 ? nominalFrameRate : 30)
+        )
+
+        if !overlayCues.isEmpty {
+            videoComposition.animationTool = makeOverlayAnimationTool(
+                renderSize: renderSize,
+                cues: overlayCues
+            )
+        }
+
+        return videoComposition
     }
+
+    private static func makeOverlayAnimationTool(
+        renderSize: CGSize,
+        cues: [PreviewOverlayCue]
+    ) -> AVVideoCompositionCoreAnimationTool {
+        let parentLayer = CALayer()
+        parentLayer.frame = CGRect(origin: .zero, size: renderSize)
+
+        let videoLayer = CALayer()
+        videoLayer.frame = parentLayer.frame
+        parentLayer.addSublayer(videoLayer)
+
+        let overlayLayer = CALayer()
+        overlayLayer.frame = parentLayer.frame
+        parentLayer.addSublayer(overlayLayer)
+
+        for cue in cues {
+            overlayLayer.addSublayer(
+                makeTimestampPillLayer(
+                    text: cue.text,
+                    renderSize: renderSize,
+                    startTime: CMTimeGetSeconds(cue.compositionStart),
+                    duration: CMTimeGetSeconds(cue.displayDuration)
+                )
+            )
+        }
+
+        return AVVideoCompositionCoreAnimationTool(
+            postProcessingAsVideoLayer: videoLayer,
+            in: parentLayer
+        )
+    }
+
+    private static func makeTimestampPillLayer(
+        text: String,
+        renderSize: CGSize,
+        startTime: TimeInterval,
+        duration: TimeInterval
+    ) -> CALayer {
+        let fontSize = max(18, min(renderSize.width * 0.028, 32))
+        let horizontalPadding = fontSize * 0.65
+        let verticalPadding = fontSize * 0.34
+        let margin = max(18, min(renderSize.width * 0.03, 32))
+
+        let attributedText = NSAttributedString(
+            string: text,
+            attributes: [
+                .font: previewTimestampFont(size: fontSize),
+                .foregroundColor: previewTimestampTextColor()
+            ]
+        )
+        let textBounds = attributedText.boundingRect(
+            with: CGSize(width: renderSize.width, height: renderSize.height),
+            options: [.usesLineFragmentOrigin, .usesFontLeading],
+            context: nil
+        ).integral
+
+        let pillWidth = ceil(textBounds.width + (horizontalPadding * 2))
+        let pillHeight = ceil(textBounds.height + (verticalPadding * 2))
+
+        let pillLayer = CALayer()
+        pillLayer.frame = CGRect(
+            x: margin,
+            y: margin,
+            width: pillWidth,
+            height: pillHeight
+        )
+        pillLayer.backgroundColor = previewTimestampBackgroundColor().cgColor
+        pillLayer.cornerRadius = pillHeight / 2
+        pillLayer.opacity = 0
+
+        let textLayer = CATextLayer()
+        textLayer.string = attributedText
+        textLayer.alignmentMode = .left
+        textLayer.contentsScale = 2
+        textLayer.frame = CGRect(
+            x: horizontalPadding,
+            y: (pillHeight - textBounds.height) / 2,
+            width: textBounds.width,
+            height: textBounds.height
+        )
+        pillLayer.addSublayer(textLayer)
+
+        let animation = CAKeyframeAnimation(keyPath: "opacity")
+        animation.values = [0, 1, 1, 0]
+        animation.keyTimes = [0, 0.001, 0.999, 1]
+        animation.beginTime = AVCoreAnimationBeginTimeAtZero + startTime
+        animation.duration = max(0.01, duration)
+        animation.isRemovedOnCompletion = false
+        animation.fillMode = .both
+        pillLayer.add(animation, forKey: "extractTimestampVisibility")
+
+        return pillLayer
+    }
+
+    static func formatExtractTimestamp(seconds: Double) -> String {
+        let totalSeconds = max(0, Int(seconds.rounded(.down)))
+        let hours = totalSeconds / 3600
+        let minutes = (totalSeconds % 3600) / 60
+        let seconds = totalSeconds % 60
+        return String(format: "%02d:%02d:%02d", hours, minutes, seconds)
+    }
+
+    #if canImport(AppKit)
+    private static func previewTimestampFont(size: CGFloat) -> NSFont {
+        NSFont.monospacedDigitSystemFont(ofSize: size, weight: .semibold)
+    }
+
+    private static func previewTimestampTextColor() -> NSColor {
+        .white
+    }
+
+    private static func previewTimestampBackgroundColor() -> NSColor {
+        NSColor(calibratedWhite: 0.08, alpha: 0.84)
+    }
+    #elseif canImport(UIKit)
+    private static func previewTimestampFont(size: CGFloat) -> UIFont {
+        UIFont.monospacedDigitSystemFont(ofSize: size, weight: .semibold)
+    }
+
+    private static func previewTimestampTextColor() -> UIColor {
+        .white
+    }
+
+    private static func previewTimestampBackgroundColor() -> UIColor {
+        UIColor(white: 0.08, alpha: 0.84)
+    }
+    #endif
     
     /// Export using SJSAssetExportSession (custom exporter with fine-grained codec/bitrate control)
     private static func exportWithSJSSession(
