@@ -714,6 +714,74 @@ struct PreviewGenerationLogic {
             }
         }
 
+        if #available(macOS 26, iOS 26, *) {
+            return try await buildConfiguredVideoComposition(
+                composition: composition,
+                compositionVideoTrack: compositionVideoTrack,
+                overlayCues: overlayCues,
+                finalTransform: finalTransform,
+                renderSize: renderSize,
+                nominalFrameRate: nominalFrameRate
+            )
+        }
+
+        return buildLegacyVideoComposition(
+            composition: composition,
+            compositionVideoTrack: compositionVideoTrack,
+            overlayCues: overlayCues,
+            finalTransform: finalTransform,
+            renderSize: renderSize,
+            nominalFrameRate: nominalFrameRate
+        )
+    }
+
+    @available(macOS 26, iOS 26, *)
+    private static func buildConfiguredVideoComposition(
+        composition: AVMutableComposition,
+        compositionVideoTrack: AVMutableCompositionTrack,
+        overlayCues: [PreviewOverlayCue],
+        finalTransform: CGAffineTransform,
+        renderSize: CGSize,
+        nominalFrameRate: Float
+    ) async throws -> AVVideoComposition {
+        var layerConfiguration = AVVideoCompositionLayerInstruction.Configuration(assetTrack: compositionVideoTrack)
+        layerConfiguration.setTransform(finalTransform, at: .zero)
+        let layerInstruction = AVVideoCompositionLayerInstruction(configuration: layerConfiguration)
+
+        let instructionConfiguration = AVVideoCompositionInstruction.Configuration(
+            layerInstructions: [layerInstruction],
+            timeRange: CMTimeRange(start: .zero, duration: composition.duration)
+        )
+        let instruction = AVVideoCompositionInstruction(configuration: instructionConfiguration)
+
+        var configuration = try await AVVideoComposition.Configuration(
+            for: composition,
+            prototypeInstruction: instruction
+        )
+        configuration.renderSize = renderSize
+        configuration.frameDuration = CMTime(
+            value: 1,
+            timescale: CMTimeScale(nominalFrameRate > 0 ? nominalFrameRate : 30)
+        )
+
+        if !overlayCues.isEmpty {
+            configuration.animationTool = makeOverlayAnimationTool(
+                renderSize: renderSize,
+                cues: overlayCues
+            )
+        }
+
+        return AVVideoComposition(configuration: configuration)
+    }
+
+    private static func buildLegacyVideoComposition(
+        composition: AVMutableComposition,
+        compositionVideoTrack: AVMutableCompositionTrack,
+        overlayCues: [PreviewOverlayCue],
+        finalTransform: CGAffineTransform,
+        renderSize: CGSize,
+        nominalFrameRate: Float
+    ) -> AVVideoComposition {
         let instruction = AVMutableVideoCompositionInstruction()
         instruction.timeRange = CMTimeRange(start: .zero, duration: composition.duration)
 
@@ -765,10 +833,15 @@ struct PreviewGenerationLogic {
             )
         }
 
-        return AVVideoCompositionCoreAnimationTool(
-            postProcessingAsVideoLayer: videoLayer,
-            in: parentLayer
-        )
+        if #available(macOS 26, iOS 26, *) {
+            let configuration = AVVideoCompositionCoreAnimationTool.Configuration(
+                postProcessingAsVideoLayer: videoLayer,
+                containingLayer: parentLayer
+            )
+            return AVVideoCompositionCoreAnimationTool(configuration: configuration)
+        }
+
+        return AVVideoCompositionCoreAnimationTool(postProcessingAsVideoLayer: videoLayer, in: parentLayer)
     }
 
     private static func makeTimestampPillLayer(
