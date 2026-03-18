@@ -343,6 +343,8 @@ struct PreviewGenerationLogic {
         if cancellationCheck() { throw PreviewError.cancelled }
         
         // Compose
+        // AVVideoCompositionCoreAnimationTool (used for timestamp pills) is not supported
+        // during live AVPlayerItem playback — omit overlay cues in this path.
         progressHandler(0.2, .composing, nil, "Composing \(timestamps.count) segments...")
         let compositionResult = try await composeVideoSegments(
             asset: asset,
@@ -351,13 +353,14 @@ struct PreviewGenerationLogic {
             playbackSpeed: playbackSpeed,
             includeAudio: config.includeAudio,
             maxResolutionRaw: config.exportMaxResolutionRaw,
+            includeOverlayCues: false,
             video: video,
             progressHandler: progressHandler,
             cancellationCheck: cancellationCheck
         )
-        
+
         if cancellationCheck() { throw PreviewError.cancelled }
-        
+
         // Create player item from composition
         progressHandler(0.8, .composing, nil, "Creating player item...")
 
@@ -508,6 +511,7 @@ struct PreviewGenerationLogic {
         playbackSpeed: Double,
         includeAudio: Bool,
         maxResolutionRaw: String?,
+        includeOverlayCues: Bool = true,
         video: VideoInput,
         progressHandler: @escaping @Sendable (Double, PreviewGenerationStatus, URL?, String?) -> Void,
         cancellationCheck: @escaping @Sendable () -> Bool
@@ -668,7 +672,7 @@ struct PreviewGenerationLogic {
             composition: composition,
             sourceVideoTrack: videoTrack,
             compositionVideoTrack: compositionVideoTrack,
-            overlayCues: overlayCues,
+            overlayCues: includeOverlayCues ? overlayCues : [],
             maxResolutionRaw: maxResolutionRaw
         )
         
