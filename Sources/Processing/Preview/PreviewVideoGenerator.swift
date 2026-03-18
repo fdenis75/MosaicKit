@@ -886,16 +886,22 @@ struct PreviewGenerationLogic {
         pillLayer.cornerRadius = pillHeight / 2
         pillLayer.opacity = 0
 
-        let textLayer = CATextLayer()
-        textLayer.string = attributedText
-        textLayer.alignmentMode = .left
-        textLayer.contentsScale = 2
+        // CATextLayer does not render reliably in AVVideoCompositionCoreAnimationTool's
+        // offline export context. Render the text into a CGImage via CoreText instead
+        // and use a plain CALayer whose .contents is the image.
+        let textLayer = CALayer()
         textLayer.frame = CGRect(
             x: horizontalPadding,
             y: (pillHeight - textBounds.height) / 2,
             width: textBounds.width,
             height: textBounds.height
         )
+        textLayer.contents = renderTextToCGImage(
+            text: text,
+            fontSize: fontSize,
+            size: CGSize(width: textBounds.width, height: textBounds.height)
+        )
+        textLayer.contentsGravity = .resize
         pillLayer.addSublayer(textLayer)
 
         let animation = CAKeyframeAnimation(keyPath: "opacity")
@@ -908,6 +914,55 @@ struct PreviewGenerationLogic {
         pillLayer.add(animation, forKey: "extractTimestampVisibility")
 
         return pillLayer
+    }
+
+    /// Render `text` into a CGImage using CoreText.
+    ///
+    /// CoreText draws in a bottom-left-origin CGContext, which is the same coordinate
+    /// system used by AVVideoCompositionCoreAnimationTool during offline export on both
+    /// macOS and iOS. This avoids the rendering problems that `CATextLayer` exhibits
+    /// in that context (text invisible or misplaced).
+    private static func renderTextToCGImage(
+        text: String,
+        fontSize: CGFloat,
+        size: CGSize
+    ) -> CGImage? {
+        let width  = Int(ceil(size.width))
+        let height = Int(ceil(size.height))
+        guard width > 0, height > 0 else { return nil }
+
+        // Build a CoreText line with CGColor so the foreground colour survives
+        // the CGContext rendering path (NSColor/UIColor are not safe here).
+        #if canImport(AppKit)
+        let ctFont = previewTimestampFont(size: fontSize) as CTFont
+        #elseif canImport(UIKit)
+        let ctFont = previewTimestampFont(size: fontSize) as CTFont
+        #endif
+        let attributes: [CFString: Any] = [
+            kCTFontAttributeName: ctFont,
+            kCTForegroundColorAttributeName: CGColor(red: 1, green: 1, blue: 1, alpha: 1)
+        ]
+        let cfString = CFAttributedStringCreate(nil, text as CFString, attributes as CFDictionary)!
+        let line = CTLineCreateWithAttributedString(cfString)
+
+        let colorSpace = CGColorSpaceCreateDeviceRGB()
+        guard let ctx = CGContext(
+            data: nil,
+            width: width,
+            height: height,
+            bitsPerComponent: 8,
+            bytesPerRow: 0,
+            space: colorSpace,
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ) else { return nil }
+
+        // Centre the glyphs vertically within the image using CoreText metrics.
+        let bounds = CTLineGetBoundsWithOptions(line, [])
+        let baselineY = (CGFloat(height) - bounds.height) / 2 - bounds.origin.y
+        ctx.textPosition = CGPoint(x: 0, y: baselineY)
+        CTLineDraw(line, ctx)
+
+        return ctx.makeImage()
     }
 
     static func formatExtractTimestamp(seconds: Double) -> String {
