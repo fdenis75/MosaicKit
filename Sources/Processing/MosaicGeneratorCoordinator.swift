@@ -361,7 +361,7 @@ public actor MosaicGeneratorCoordinator<Generator: MosaicGeneratorProtocol> {
         return try await withThrowingTaskGroup(of: MosaicGenerationResult.self) { group in
             let signpostVideoID = signposter.makeSignpostID()
             for (urlIndex, fileURL) in fileURLs.enumerated() {
-                if effectiveConcurrencyLimit != self.concurrencyLimit {
+                if self.concurrencyLimit != 0 && effectiveConcurrencyLimit != self.concurrencyLimit {
                     signposter.emitEvent("applying change of concurrency", id: signpostID,
                                         "Active: \(activeTaskCount)/\(effectiveConcurrencyLimit)")
                     effectiveConcurrencyLimit = self.concurrencyLimit
@@ -561,7 +561,7 @@ public actor MosaicGeneratorCoordinator<Generator: MosaicGeneratorProtocol> {
         return try await withThrowingTaskGroup(of: MosaicGenerationResult.self) { group in
             let signpostVideoID = signposter.makeSignpostID()
             for (videoIndex, video) in prioritizedVideos.enumerated() {
-                if effectiveConcurrencyLimit != self.concurrencyLimit {
+                if self.concurrencyLimit != 0 && effectiveConcurrencyLimit != self.concurrencyLimit {
                     signposter.emitEvent("applying change of concurrency",id: signpostID,
                                          "Active: \(activeTasks)/\(effectiveConcurrencyLimit)")
                     effectiveConcurrencyLimit = self.concurrencyLimit
