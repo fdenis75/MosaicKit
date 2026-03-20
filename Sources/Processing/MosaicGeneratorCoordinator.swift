@@ -316,6 +316,118 @@ public actor MosaicGeneratorCoordinator<Generator: MosaicGeneratorProtocol> {
     public func generateMosaicsforbatch(videos: [VideoInput], config: MosaicConfiguration, forIphone: Bool = false, progressHandler: @escaping @Sendable (MosaicGenerationProgress) -> Void) async throws -> [MosaicGenerationResult] {
         return try await generateMosaicsForVideos(videos, config: config, forIphone: forIphone, progressHandler: progressHandler)
     }
+
+    /// Generate mosaics for an array of file URLs, creating VideoInput lazily inside each task
+    /// - Parameters:
+    ///   - fileURLs: The file URLs to generate mosaics for
+    ///   - config: The configuration for mosaic generation
+    ///   - forIphone: Whether to use iPhone-optimized layout
+    ///   - progressHandler: Handler for progress updates
+    /// - Returns: Array of generation results
+    public func generateMosaicsForFiles(
+        _ fileURLs: [URL],
+        config: MosaicConfiguration,
+        forIphone: Bool = false,
+        progressHandler: @escaping @Sendable (MosaicGenerationProgress) -> Void
+    ) async throws -> [MosaicGenerationResult] {
+        logger.debug("🎬 Starting mosaic generation for \(fileURLs.count) file URLs")
+        let signpostID = signposter.makeSignpostID()
+        let globalState = signposter.beginInterval("Starting mosaic Generation for batch", id: signpostID)
+        defer { signposter.endInterval("Starting mosaic Generation for batch", globalState) }
+
+        let concurrencyState = signposter.beginInterval("Concurrency setup", id: signpostID)
+        var effectiveConcurrencyLimit: Int
+        if self.concurrencyLimit == 0 {
+            let processorCount = ProcessInfo.processInfo.activeProcessorCount
+            let systemMemory = ProcessInfo.processInfo.physicalMemory
+            let memoryGB = Double(systemMemory) / 1_073_741_824.0
+            let cpuBasedLimit = max(2, processorCount / 2)
+            let memoryPerTask = Double(config.width) * config.density.factor / 2000.0
+            let memoryBasedLimit = max(2, Int(memoryGB / memoryPerTask))
+            effectiveConcurrencyLimit = min(memoryBasedLimit, cpuBasedLimit)
+            logger.debug("⚙️ Using dynamic concurrency limit of \(effectiveConcurrencyLimit) (CPU cores: \(processorCount), Memory: \(Int(memoryGB))GB)")
+        } else {
+            effectiveConcurrencyLimit = self.concurrencyLimit
+            logger.debug("⚙️ Using configured concurrency limit: \(effectiveConcurrencyLimit)")
+        }
+        signposter.endInterval("Concurrency setup", concurrencyState)
+
+        var results: [MosaicGenerationResult] = []
+        var completed = 0
+        var successCount = 0
+        var failureCount = 0
+        var activeTaskCount = 0
+
+        return try await withThrowingTaskGroup(of: MosaicGenerationResult.self) { group in
+            let signpostVideoID = signposter.makeSignpostID()
+            for (urlIndex, fileURL) in fileURLs.enumerated() {
+                if effectiveConcurrencyLimit != self.concurrencyLimit {
+                    signposter.emitEvent("applying change of concurrency", id: signpostID,
+                                        "Active: \(activeTaskCount)/\(effectiveConcurrencyLimit)")
+                    effectiveConcurrencyLimit = self.concurrencyLimit
+                }
+
+                while activeTaskCount >= effectiveConcurrencyLimit {
+                    logger.debug("Threshold reached: \(activeTaskCount)/\(effectiveConcurrencyLimit), waiting for task completion")
+                    signposter.emitEvent("Waiting for slot", id: signpostID,
+                                        "Active: \(activeTaskCount)/\(effectiveConcurrencyLimit)")
+                    if let result = try await group.next() {
+                        results.append(result)
+                        completed += 1
+                        activeTaskCount -= 1
+                        signposter.emitEvent("Result arrived", id: signpostID)
+                        if result.isSuccess { successCount += 1 } else { failureCount += 1 }
+                        let overallProgress = Double(completed) / Double(fileURLs.count)
+                        logger.debug("🔄 Progress: \(Int(overallProgress * 100))% (\(completed)/\(fileURLs.count) complete)")
+                    }
+                }
+
+                activeTaskCount += 1
+                signposter.emitEvent("Task Added to Group", id: signpostID,
+                                     "URL: \(fileURL.lastPathComponent), Index: \(urlIndex), Active: \(activeTaskCount)/\(effectiveConcurrencyLimit)")
+
+                group.addTask(priority: .medium) { @Sendable in
+                    try Task.checkCancellation()
+
+                    let videoProcessState = self.signposter.beginInterval("processing video", id: signpostVideoID,
+                                                                           "URL: \(fileURL.lastPathComponent)")
+                    do {
+                        // Create VideoInput here to avoid blocking the main loop
+                        let video = await VideoInput(url: fileURL)
+                        self.logger.debug("starting generation for \(fileURL.lastPathComponent)")
+                        let result = try await self.generateMosaic(
+                            for: video,
+                            config: config,
+                            forIphone: forIphone,
+                            progressHandler: progressHandler
+                        )
+                        self.signposter.endInterval("processing video", videoProcessState,
+                                                     "URL: \(fileURL.lastPathComponent)")
+                        self.logger.debug("finished generation for \(fileURL.lastPathComponent)")
+                        return result
+                    } catch {
+                        self.signposter.endInterval("processing video", videoProcessState,
+                                                     "Error URL: \(fileURL.lastPathComponent)")
+                        let video = await VideoInput(url: fileURL)
+                        return MosaicGenerationResult(video: video, error: error)
+                    }
+                }
+            }
+
+            while let result = try await group.next() {
+                self.logger.debug("result arrived")
+                results.append(result)
+                completed += 1
+                activeTaskCount -= 1
+                if result.isSuccess { successCount += 1 } else { failureCount += 1 }
+                let overallProgress = Double(completed) / Double(fileURLs.count)
+                logger.debug("🔄 Progress: \(Int(overallProgress * 100))% (\(completed)/\(fileURLs.count) complete)")
+            }
+
+            logger.debug("✅ Mosaic generation completed - Success: \(successCount), Failed: \(failureCount), Total: \(fileURLs.count)")
+            return results
+        }
+    }
     /// Generate mosaics for all videos in a smart folder
     /// - Parameters:
     ///   - smartFolder: The smart folder to generate mosaics for
