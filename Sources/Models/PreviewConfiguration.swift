@@ -14,6 +14,16 @@ public struct PreviewConfiguration: Codable, Sendable, Hashable {
     /// Target duration for the preview video (in seconds)
     public var targetDuration: TimeInterval
 
+    /// Minimum duration for each extract (in seconds).
+    ///
+    /// Set to `nil` to disable minimum extract duration adjustment.
+    public var minimumExtractDuration: TimeInterval?
+
+    /// Maximum playback speed multiplier.
+    ///
+    /// Set to `nil` to allow the calculated playback speed without an upper cap.
+    public var maximumPlaybackSpeed: Double?
+
     /// Density level determining the number of extracts
     public var density: DensityConfig
 
@@ -76,7 +86,8 @@ public struct PreviewConfiguration: Codable, Sendable, Hashable {
     // MARK: - CodingKeys
 
     private enum CodingKeys: String, CodingKey {
-        case targetDuration, density, format, includeAudio, outputDirectory
+        case targetDuration, minimumExtractDuration, maximumPlaybackSpeed
+        case density, format, includeAudio, outputDirectory
         case fullPathInName, compressionQuality, useNativeExport
         case exportPresetName, sJSExportPresetName
         /// Encodes/decodes as `"exportMaxResolution"` for backward compatibility
@@ -98,6 +109,8 @@ public struct PreviewConfiguration: Codable, Sendable, Hashable {
     /// ```
     public init(
         targetDuration: TimeInterval = 60,
+        minimumExtractDuration: TimeInterval? = 4.0,
+        maximumPlaybackSpeed: Double? = 1.5,
         density: DensityConfig = .m,
         format: VideoFormat = .mp4,
         includeAudio: Bool = true,
@@ -109,6 +122,8 @@ public struct PreviewConfiguration: Codable, Sendable, Hashable {
         sjSExportPresetName: SjSExportPreset? = .hevc
     ) {
         self.targetDuration = targetDuration
+        self.minimumExtractDuration = minimumExtractDuration
+        self.maximumPlaybackSpeed = maximumPlaybackSpeed
         self.density = density
         self.format = format
         self.includeAudio = includeAudio
@@ -128,6 +143,8 @@ public struct PreviewConfiguration: Codable, Sendable, Hashable {
     @available(macOS 26, iOS 26, *)
     public init(
         targetDuration: TimeInterval = 60,
+        minimumExtractDuration: TimeInterval? = 4.0,
+        maximumPlaybackSpeed: Double? = 1.5,
         density: DensityConfig = .m,
         format: VideoFormat = .mp4,
         includeAudio: Bool = true,
@@ -140,6 +157,8 @@ public struct PreviewConfiguration: Codable, Sendable, Hashable {
         maxResolution: ExportMaxResolution? = ._1080p
     ) {
         self.targetDuration = targetDuration
+        self.minimumExtractDuration = minimumExtractDuration
+        self.maximumPlaybackSpeed = maximumPlaybackSpeed
         self.density = density
         self.format = format
         self.includeAudio = includeAudio
@@ -164,6 +183,16 @@ public struct PreviewConfiguration: Codable, Sendable, Hashable {
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         targetDuration = try container.decode(TimeInterval.self, forKey: .targetDuration)
+        if container.contains(.minimumExtractDuration) {
+            minimumExtractDuration = try container.decodeIfPresent(TimeInterval.self, forKey: .minimumExtractDuration)
+        } else {
+            minimumExtractDuration = 4.0
+        }
+        if container.contains(.maximumPlaybackSpeed) {
+            maximumPlaybackSpeed = try container.decodeIfPresent(Double.self, forKey: .maximumPlaybackSpeed)
+        } else {
+            maximumPlaybackSpeed = 1.5
+        }
         density = try container.decode(DensityConfig.self, forKey: .density)
         format = try container.decode(VideoFormat.self, forKey: .format)
         includeAudio = try container.decode(Bool.self, forKey: .includeAudio)
@@ -182,6 +211,8 @@ public struct PreviewConfiguration: Codable, Sendable, Hashable {
     public func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(targetDuration, forKey: .targetDuration)
+        try container.encode(minimumExtractDuration, forKey: .minimumExtractDuration)
+        try container.encode(maximumPlaybackSpeed, forKey: .maximumPlaybackSpeed)
         try container.encode(density, forKey: .density)
         try container.encode(format, forKey: .format)
         try container.encode(includeAudio, forKey: .includeAudio)
@@ -248,27 +279,24 @@ public struct PreviewConfiguration: Codable, Sendable, Hashable {
     }
     
 
-    /// Minimum duration for each extract (in seconds)
-    public static let minimumExtractDuration: TimeInterval = 4.0
-
-    /// Maximum playback speed multiplier
-    public static let maximumPlaybackSpeed: Double = 1.5
-
     /// Calculate the duration per extract and playback speed
     /// - Parameter videoDuration: Duration of the input video in seconds
     /// - Returns: Tuple of (extractDuration, playbackSpeed)
     public func calculateExtractParameters(forVideoDuration videoDuration: TimeInterval) -> (extractDuration: TimeInterval, playbackSpeed: Double) {
         let count = extractCount(forVideoDuration: videoDuration)
         let baseExtractDuration = targetDuration / Double(count)
+        guard let minimumExtractDuration = normalizedMinimumExtractDuration else {
+            return (baseExtractDuration, 1.0)
+        }
 
-        if baseExtractDuration >= Self.minimumExtractDuration {
-            // Each extract can be at least 2 seconds at normal speed
+        if baseExtractDuration >= minimumExtractDuration {
+            // Each extract can meet the configured minimum duration at normal speed.
             return (baseExtractDuration, 1.0)
         } else {
             // Need to speed up playback to fit extracts
-            let minimumTotalDuration = Self.minimumExtractDuration * Double(count)
+            let minimumTotalDuration = minimumExtractDuration * Double(count)
             let requiredSpeed = minimumTotalDuration / targetDuration
-            let cappedSpeed = min(requiredSpeed, Self.maximumPlaybackSpeed)
+            let cappedSpeed = normalizedMaximumPlaybackSpeed.map { min(requiredSpeed, $0) } ?? requiredSpeed
 
             // Calculate actual extract duration based on capped speed
             let actualExtractDuration = targetDuration * cappedSpeed / Double(count)
@@ -307,7 +335,8 @@ public struct PreviewConfiguration: Codable, Sendable, Hashable {
             let codec = sJSExportPresetName?.displayString ?? "default"
             exportLabel = "\(codec)_sjs"
         }
-        let configHash = "\(durationLabel)_\(density.name)_\(format.rawValue)_\(audioLabel)_\(exportLabel)_\(resolution)"
+        let timingLabel = extractTimingFilenameComponent.map { "_\($0)" } ?? ""
+        let configHash = "\(durationLabel)_\(density.name)_\(format.rawValue)_\(audioLabel)_\(exportLabel)_\(resolution)\(timingLabel)"
       
         if fullPathInName {
             // Use full path in filename
@@ -335,16 +364,61 @@ public struct PreviewConfiguration: Codable, Sendable, Hashable {
         }
     }
 
+    private var extractTimingFilenameComponent: String? {
+        let usesDefaultMinimum = minimumExtractDuration == 4.0
+        let usesDefaultMaximum = maximumPlaybackSpeed == 1.5
+
+        guard !usesDefaultMinimum || !usesDefaultMaximum else {
+            return nil
+        }
+
+        let minimumLabel = minimumExtractDuration.map { "min\(Self.filenameNumber($0))s" } ?? "minoff"
+        let maximumLabel = maximumPlaybackSpeed.map { "max\(Self.filenameNumber($0))x" } ?? "maxoff"
+        return "\(minimumLabel)_\(maximumLabel)"
+    }
+
+    private static func filenameNumber(_ value: Double) -> String {
+        var formatted = String(format: "%.2f", value)
+        while formatted.hasSuffix("0") {
+            formatted.removeLast()
+        }
+        if formatted.hasSuffix(".") {
+            formatted.removeLast()
+        }
+        return formatted
+            .replacingOccurrences(of: "-", with: "m")
+            .replacingOccurrences(of: ".", with: "p")
+    }
+
     // MARK: - Hashable
 
     public func hash(into hasher: inout Hasher) {
         hasher.combine(targetDuration)
+        hasher.combine(minimumExtractDuration)
+        hasher.combine(maximumPlaybackSpeed)
         hasher.combine(density)
         hasher.combine(format)
         hasher.combine(includeAudio)
         hasher.combine(compressionQuality)
         hasher.combine(useNativeExport)
         hasher.combine(exportPresetName)
+    }
+
+    private var normalizedMinimumExtractDuration: TimeInterval? {
+        guard let minimumExtractDuration,
+              minimumExtractDuration.isFinite,
+              minimumExtractDuration > 0 else {
+            return nil
+        }
+        return minimumExtractDuration
+    }
+
+    private var normalizedMaximumPlaybackSpeed: Double? {
+        guard let maximumPlaybackSpeed,
+              maximumPlaybackSpeed.isFinite else {
+            return nil
+        }
+        return max(1.0, maximumPlaybackSpeed)
     }
 }
 

@@ -184,17 +184,18 @@ public actor MetalMosaicGenerator: MosaicGeneratorProtocol {
                 let processor = self.thumbnailProcessor
                 let thumbnailSizes = layout.thumbnailSizes
                 let labelConfig = overlayConfig.frameLabel
+                let useAccurateTimestamps = mutableConfig.useAccurateTimestamps
                 // Collect per-frame average colours for the DNA strip (if enabled)
                 let colorCollector = overlayConfig.colorDNA.show ? FrameColorCollector() : nil
 
                 // Start producer task to burn labels in parallel
-                Task {
+                Task { [processor, videoURL, layout, asset, useAccurateTimestamps, thumbnailSizes, labelConfig, colorCollector, continuation] in
                     do {
                         let rawStream = processor.extractFramesStream(
                             from: videoURL,
                             layout: layout,
                             asset: asset,
-                            accurate: mutableConfig.useAccurateTimestamps
+                            accurate: useAccurateTimestamps
                         )
 
                         try await withThrowingTaskGroup(of: Void.self) { group in
@@ -376,16 +377,17 @@ public actor MetalMosaicGenerator: MosaicGeneratorProtocol {
             let processor = self.thumbnailProcessor
             let thumbnailSizes = layout.thumbnailSizes
             let labelConfig = overlayConfig.frameLabel
+            let useAccurateTimestamps = mutableConfig.useAccurateTimestamps
             let colorCollector = overlayConfig.colorDNA.show ? FrameColorCollector() : nil
 
             // Start producer task to burn labels in parallel
-            Task {
+            Task { [processor, videoURL, layout, asset, useAccurateTimestamps, thumbnailSizes, labelConfig, colorCollector, continuation] in
                 do {
                     let rawStream = processor.extractFramesStream(
                         from: videoURL,
                         layout: layout,
                         asset: asset,
-                        accurate: mutableConfig.useAccurateTimestamps
+                        accurate: useAccurateTimestamps
                     )
 
                     try await withThrowingTaskGroup(of: Void.self) { group in
@@ -526,10 +528,6 @@ public actor MetalMosaicGenerator: MosaicGeneratorProtocol {
         
         let times = calculateExtractionTimes(duration: duration, count: count)
 
-        // Dynamically adjust concurrency based on system capabilities
-        let processorCount = ProcessInfo.processInfo.activeProcessorCount
-        let concurrencyLimit = min(max(processorCount - 1, 4), 16) // At least 4, at most 16
-        
         let generator = AVAssetImageGenerator(asset: asset)
         generator.appliesPreferredTrackTransform = true
         
@@ -537,48 +535,22 @@ public actor MetalMosaicGenerator: MosaicGeneratorProtocol {
         generator.requestedTimeToleranceAfter = accurate ? .zero : CMTime(seconds: 0.5, preferredTimescale: 600)
         generator.requestedTimeToleranceBefore = accurate ? .zero : CMTime(seconds: 0.5, preferredTimescale: 600)
         
-        // We'll maintain at most `concurrencyLimit` child tasks in-flight without blocking.
-        var inFlight: [Task<(Int, CGImage, String), Error>] = []
-        var nextIndexToStart = 0
-        var completed = 0
-        let totalFrames = times.count
         var collected: [(Int, CGImage, String)] = []
-        
-        func startNextIfPossible() {
-            while nextIndexToStart < totalFrames && inFlight.count < concurrencyLimit {
-                let index = nextIndexToStart
-                let time = times[index]
-                nextIndexToStart += 1
-                let t = Task<(Int, CGImage, String), Error> {
-                    if Task.isCancelled { throw CancellationError() }
-                    let imageRef = try await generator.image(at: time)
-                    let ts = self.formatTimestamp(seconds: imageRef.actualTime.seconds)
-                    return (index, imageRef.image, ts)
-                }
-                inFlight.append(t)
-            }
-        }
-        
-        // Prime the initial batch
-        startNextIfPossible()
-        
-        while !inFlight.isEmpty {
+
+        var currentIndex = 0
+        for await result in generator.images(for: times) {
             if Task.isCancelled {
-                inFlight.forEach { $0.cancel() }
                 throw CancellationError()
             }
 
-            // Await the next available task (take the first one)
-            let task = inFlight.removeFirst()
-            do {
-                let result = try await task.value
-                collected.append(result)
-                completed += 1
-                // Start more tasks if we have remaining work
-                startNextIfPossible()
-            } catch {
-                // Cancel remaining tasks and propagate the error
-                inFlight.forEach { $0.cancel() }
+            let index = currentIndex
+            currentIndex += 1
+
+            switch result {
+            case .success(requestedTime: _, image: let image, actualTime: let actualTime):
+                let timestamp = formatTimestamp(seconds: actualTime.seconds)
+                collected.append((index, image, timestamp))
+            case .failure(requestedTime: _, error: let error):
                 throw error
             }
         }

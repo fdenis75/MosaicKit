@@ -14,6 +14,37 @@ struct PreviewConfigurationTests {
         #expect(normal.compressionQuality == 0.42)
     }
 
+    @Test("PreviewConfiguration exposes optional extract timing controls")
+    func optionalExtractTimingControls() async throws {
+        let defaultConfig = PreviewConfiguration()
+        #expect(defaultConfig.minimumExtractDuration == 4.0)
+        #expect(defaultConfig.maximumPlaybackSpeed == 1.5)
+
+        let disabledConfig = PreviewConfiguration(
+            targetDuration: 30,
+            minimumExtractDuration: nil,
+            maximumPlaybackSpeed: nil,
+            density: .xxs
+        )
+        let params = disabledConfig.calculateExtractParameters(forVideoDuration: 10_800)
+        #expect(params.playbackSpeed == 1.0)
+        #expect(params.extractDuration > 0)
+
+        let data = try JSONEncoder().encode(disabledConfig)
+        let decoded = try JSONDecoder().decode(PreviewConfiguration.self, from: data)
+        #expect(decoded.minimumExtractDuration == nil)
+        #expect(decoded.maximumPlaybackSpeed == nil)
+
+        let video = await makeVideoInput(path: "/tmp/preview-tests/source clip.mov")
+        let defaultFilename = defaultConfig.generateFilename(for: video)
+        let customFilename = PreviewConfiguration(
+            minimumExtractDuration: 2.5,
+            maximumPlaybackSpeed: 2.0
+        ).generateFilename(for: video)
+        #expect(customFilename != defaultFilename)
+        #expect(customFilename.contains("min2p5s_max2x"))
+    }
+
     @Test("PreviewConfiguration base extract count map matches density")
     func baseExtractCountMap() {
         #expect(PreviewConfiguration(density: .xxl).baseExtractCount == 4)
@@ -95,16 +126,18 @@ struct PreviewConfigurationTests {
     }
 
     @Test("Preview extract parameter calculation honors min duration and speed cap")
-    func extractParameterCalculation() {
+    func extractParameterCalculation() throws {
         let fastConfig = PreviewConfiguration(
             targetDuration: 30,
             density: .xxs,
             compressionQuality: 0.8
         )
         let fastParams = fastConfig.calculateExtractParameters(forVideoDuration: 10_800)
+        let fastMinimumExtractDuration = try #require(fastConfig.minimumExtractDuration)
+        let fastMaximumPlaybackSpeed = try #require(fastConfig.maximumPlaybackSpeed)
         #expect(fastParams.extractDuration > 0)
-        #expect(fastParams.extractDuration <= PreviewConfiguration.minimumExtractDuration)
-        #expect(fastParams.playbackSpeed <= PreviewConfiguration.maximumPlaybackSpeed)
+        #expect(fastParams.extractDuration <= fastMinimumExtractDuration)
+        #expect(fastParams.playbackSpeed <= fastMaximumPlaybackSpeed)
         #expect(fastParams.playbackSpeed >= 1.0)
 
         let relaxedConfig = PreviewConfiguration(
@@ -113,8 +146,9 @@ struct PreviewConfigurationTests {
             compressionQuality: 0.8
         )
         let relaxedParams = relaxedConfig.calculateExtractParameters(forVideoDuration: 300)
+        let relaxedMinimumExtractDuration = try #require(relaxedConfig.minimumExtractDuration)
         #expect(relaxedParams.playbackSpeed == 1.0)
-        #expect(relaxedParams.extractDuration >= PreviewConfiguration.minimumExtractDuration)
+        #expect(relaxedParams.extractDuration >= relaxedMinimumExtractDuration)
     }
 
     @Test("Preview helper static methods are consistent")

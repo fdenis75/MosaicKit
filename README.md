@@ -452,14 +452,16 @@ Every preview extract also displays its source start timestamp as a bottom-left 
 
 ```swift
 public struct PreviewConfiguration {
-    var targetDuration: TimeInterval  // Target preview length in seconds
-    var density: DensityConfig        // Number of clips (same levels as mosaic)
-    var format: VideoFormat           // .mp4, .mov, .hevc, etc.
-    var includeAudio: Bool            // Include audio track in preview
-    var outputDirectory: URL?         // Output folder (nil = video's parent directory)
-    var fullPathInName: Bool          // Embed full source path in filename
-    var compressionQuality: Double    // 0.0–1.0
-    var useNativeExport: Bool         // AVAssetExportSession vs SJSAssetExportSession
+    public var targetDuration: TimeInterval          // Target preview length in seconds
+    public var minimumExtractDuration: TimeInterval? // Per-clip floor, nil disables
+    public var maximumPlaybackSpeed: Double?         // Speed cap, nil disables
+    public var density: DensityConfig                // Number of clips (same levels as mosaic)
+    public var format: VideoFormat                   // .mp4, .mov, .hevc, etc.
+    public var includeAudio: Bool                    // Include audio track in preview
+    public var outputDirectory: URL?                 // Output folder (nil = video's parent directory)
+    public var fullPathInName: Bool                  // Embed full source path in filename
+    public var compressionQuality: Double            // 0.0–1.0
+    public var useNativeExport: Bool                 // AVAssetExportSession vs SJSAssetExportSession
 }
 ```
 
