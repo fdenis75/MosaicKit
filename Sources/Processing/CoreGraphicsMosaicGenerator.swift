@@ -492,13 +492,8 @@ public actor CoreGraphicsMosaicGenerator: MosaicGeneratorProtocol {
         var baseOutputDirectory: URL
         var mosaicURL: URL!
 
-        // Use structured output directory if metadata is available
-        guard let rootFolder = config.outputdirectory else {
-            logger.error("❌ No output directory specified in configuration")
-            throw MosaicError.saveFailed(URL(fileURLWithPath: "/dev/null"),
-                                        NSError(domain: "com.mosaickit", code: -1,
-                                               userInfo: [NSLocalizedDescriptionKey: "Missing output directory"]))
-        }
+        // Use the video's folder when no explicit output directory is configured.
+        let rootFolder = config.outputdirectory ?? video.url.deletingLastPathComponent()
 
         // Generate structured path: {root}/{service}/{creator}/{configHash}/
         baseOutputDirectory = config.generateOutputDirectory(rootDirectory: rootFolder, videoInput: video)
