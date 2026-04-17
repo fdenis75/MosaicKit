@@ -136,6 +136,26 @@ public actor CoreGraphicsMosaicGenerator: MosaicGeneratorProtocol {
                 )
                 logger.debug("📏 \(video.title) Layout calculated - Size: \(layout.mosaicSize.width)x\(layout.mosaicSize.height), Thumbnails: \(layout.thumbCount)")
 
+                // Animation-only mode: skip mosaic entirely
+                if config.gifMode == .gifOnly {
+                    let animURL = config.animatedOutputURL(for: video)
+                    try FileManager.default.createDirectory(
+                        at: animURL.deletingLastPathComponent(),
+                        withIntermediateDirectories: true,
+                        attributes: nil
+                    )
+                    let gifFrames = try await thumbnailProcessor.extractFramesForGif(
+                        from: videoURL,
+                        asset: asset,
+                        count: layout.thumbCount,
+                        gifSize: config.gifSize,
+                        accurate: config.useAccurateTimestamps
+                    )
+                    try AnimatedGifGenerator.save(frames: gifFrames, to: animURL, format: config.animatedFormat)
+                    logger.debug("💾 Animation-only saved to: \(animURL.path)")
+                    return animURL
+                }
+
                 // Extract frames using ThumbnailProcessor
                 let frames = try await thumbnailProcessor.extractThumbnails(
                     from: videoURL,
@@ -244,6 +264,21 @@ public actor CoreGraphicsMosaicGenerator: MosaicGeneratorProtocol {
                     progress: 0.999,
                     status: .savingMosaic
                 ))
+
+                // Generate animated image alongside the mosaic when requested
+                if config.gifMode == .withMosaic {
+                    let animURL = mosaicURL.deletingPathExtension()
+                        .appendingPathExtension(config.animatedFormat.fileExtension)
+                    let gifFrames = try await thumbnailProcessor.extractFramesForGif(
+                        from: videoURL,
+                        asset: asset,
+                        count: layout.thumbCount,
+                        gifSize: config.gifSize,
+                        accurate: config.useAccurateTimestamps
+                    )
+                    try AnimatedGifGenerator.save(frames: gifFrames, to: animURL, format: config.animatedFormat)
+                    logger.debug("💾 Animation saved to: \(animURL.path)")
+                }
 
                 return mosaicURL
             } catch {

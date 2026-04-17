@@ -1,5 +1,6 @@
 import Foundation
 import CoreGraphics
+import ImageIO
 
 /// A platform-independent, Codable color representation for mosaic backgrounds.
 public struct MosaicColor: Codable, Sendable, Equatable {
@@ -69,6 +70,15 @@ public struct MosaicConfiguration: Codable, Sendable {
     /// watermark, and Color DNA strip.
     public var overlay: OverlayConfiguration
 
+    /// Controls whether an animated GIF is created and how.
+    public var gifMode: GifCreationMode
+
+    /// Controls the output dimensions of the animated GIF frames.
+    public var gifSize: GifSize
+
+    /// Container format for the animated image export.
+    public var animatedFormat: AnimatedFormat
+
     // MARK: - Initialization
 
     /// Creates a new MosaicConfiguration instance.
@@ -84,7 +94,10 @@ public struct MosaicConfiguration: Codable, Sendable {
         fullPathInName: Bool = false,
         useMovieColorsForBg: Bool = true,
         backgroundColor: MosaicColor = .defaultGray,
-        overlay: OverlayConfiguration = .default
+        overlay: OverlayConfiguration = .default,
+        gifMode: GifCreationMode = .disabled,
+        gifSize: GifSize = .nochange,
+        animatedFormat: AnimatedFormat = .gif
     ) {
         self.width = width
         self.density = density
@@ -98,6 +111,9 @@ public struct MosaicConfiguration: Codable, Sendable {
         self.useMovieColorsForBg = useMovieColorsForBg
         self.backgroundColor = backgroundColor
         self.overlay = overlay
+        self.gifMode = gifMode
+        self.gifSize = gifSize
+        self.animatedFormat = animatedFormat
     }
 
     /// Creates a MosaicConfiguration instance.
@@ -130,6 +146,9 @@ public struct MosaicConfiguration: Codable, Sendable {
         self.useMovieColorsForBg = !forIphone
         self.backgroundColor = .defaultGray
         self.overlay = .default
+        self.gifMode = .disabled
+        self.gifSize = .nochange
+        self.animatedFormat = .gif
     }
 
     /// Default configuration for mosaic generation
@@ -156,6 +175,25 @@ public struct MosaicConfiguration: Codable, Sendable {
     public var configurationHash: String {
         let aspectRatioString = layout.aspectRatio.rawValue.replacingOccurrences(of: ":", with: "-")
         return "\(width)_\(density.name)_\(aspectRatioString)_\(layout.layoutType.rawValue)"
+    }
+
+    /// Returns the URL where the animated image would be saved for a given video.
+    /// Placed in the same directory as the mosaic, same base filename, with the
+    /// extension determined by `animatedFormat` (`.gif`, `.heics`, or `.webp`).
+    public func animatedOutputURL(for video: VideoInput) -> URL {
+        let rootFolder = outputdirectory ?? video.url.deletingLastPathComponent()
+        let outputDir = generateOutputDirectory(rootDirectory: rootFolder, videoInput: video)
+        let originalFilename = video.url.deletingPathExtension().lastPathComponent
+        let mosaicFilename = generateFilename(originalFilename: originalFilename, videoInput: video)
+        
+        let animFilename = "\(gifSize.name) -" + (mosaicFilename as NSString).deletingPathExtension + ".\(animatedFormat.fileExtension)"
+        return outputDir.appendingPathComponent(animFilename)
+    }
+
+    /// Returns the URL where the animated GIF would be saved for a given video.
+    @available(*, deprecated, renamed: "animatedOutputURL(for:)")
+    public func gifOutputURL(for video: VideoInput) -> URL {
+        animatedOutputURL(for: video)
     }
 
     /// Sanitize a string for use in file paths
@@ -225,6 +263,73 @@ public struct MosaicConfiguration: Codable, Sendable {
 
         // Add config hash and extension
         return "\(filename)_\(configurationHash).\(format.fileExtension)"
+    }
+}
+
+/// Output container format for the animated image export.
+public enum AnimatedFormat: String, Codable, Sendable {
+    /// Animated GIF (`com.compuserve.gif`). Universal compatibility.
+    case gif
+    /// Animated HEIC sequence (`public.heics`). Better quality and compression; Apple platforms only.
+    case heic
+    /// Animated WebP (`org.webmproject.webp`). Good compression; wide web compatibility.
+    case webp
+
+    /// File extension for the format.
+    public var fileExtension: String {
+        switch self {
+        case .gif:  return "gif"
+        case .heic: return "heics"
+        case .webp: return "webp"
+        }
+    }
+
+    /// UTI identifier used by `CGImageDestination`.
+    public var uti: String {
+        switch self {
+        case .gif:  return "com.compuserve.gif"
+        case .heic: return "public.heics"
+        case .webp: return "org.webmproject.webp"
+        }
+    }
+
+    /// Whether this format can be written on the current platform.
+    /// GIF and HEIC use `CGImageDestination`; WebP uses the bundled `webp.swift` encoder (always available).
+    public var isWritable: Bool {
+        if self == .webp { return true }
+        let supported = CGImageDestinationCopyTypeIdentifiers() as? [String] ?? []
+        return supported.contains(uti)
+    }
+}
+
+/// Controls whether and how an animated GIF is created alongside the mosaic.
+public enum GifCreationMode: String, Codable, Sendable {
+    /// No GIF is created (default).
+    case disabled
+    /// Create both the mosaic and an animated GIF.
+    case withMosaic
+    /// Create only the animated GIF, skipping mosaic generation.
+    case gifOnly
+    
+    
+}
+
+/// Output size preset for the animated GIF frames.
+public enum GifSize: String, Codable, Sendable {
+    /// Same dimensions as the source video (no downscaling).
+    case nochange
+    /// Scale frames down so height ≤ 720 px (720p).
+    case large
+    /// Scale frames down so height ≤ 540 px (540p).
+    case small
+    
+    public var name: String {
+        switch self {
+        case .nochange: return "nochange"
+        case .large: return "large"
+        case .small: return "small"
+            
+        }
     }
 }
 

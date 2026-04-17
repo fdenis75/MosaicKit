@@ -168,6 +168,62 @@ public final class ThumbnailProcessor: @unchecked Sendable {
         }
     }
     
+    /// Extract raw frames for animated GIF creation (no timestamp overlay).
+    /// Uses a separate `AVAssetImageGenerator` pass sized according to `gifSize`.
+    /// - Parameters:
+    ///   - file: Video file URL.
+    ///   - asset: Video asset to extract frames from.
+    ///   - count: Number of frames to extract (should match the mosaic frame count).
+    ///   - gifSize: Size constraint for the extracted frames.
+    ///   - accurate: Whether to use accurate (frame-perfect) timestamp extraction.
+    /// - Returns: Array of raw `CGImage` frames in temporal order.
+    public func extractFramesForGif(
+        from file: URL,
+        asset: AVAsset,
+        count: Int,
+        gifSize: GifSize,
+        accurate: Bool = false
+    ) async throws -> [CGImage] {
+        let duration = try await asset.load(.duration).seconds
+        let generator = AVAssetImageGenerator(asset: asset)
+        generator.appliesPreferredTrackTransform = true
+
+        if accurate {
+            generator.requestedTimeToleranceBefore = .zero
+            generator.requestedTimeToleranceAfter = .zero
+        } else {
+            generator.requestedTimeToleranceBefore = CMTime(seconds: 1.0, preferredTimescale: 600)
+            generator.requestedTimeToleranceAfter = CMTime(seconds: 1.0, preferredTimescale: 600)
+        }
+
+        switch gifSize {
+        case .nochange:
+            break
+        case .large:
+            generator.maximumSize = CGSize(width: 1280, height: 720)
+        case .small:
+            generator.maximumSize = CGSize(width: 960, height: 540)
+        }
+
+        let times = calculateExtractionTimes(duration: duration, count: count)
+        var frames: [Int: CGImage] = [:]
+        var currentIndex = 0
+
+        for await result in generator.images(for: times) {
+            let index = currentIndex
+            currentIndex += 1
+            switch result {
+            case .success(_, let image, _):
+                frames[index] = image
+            case .failure(let requestedTime, let error):
+                logger.warning("⚠️ GIF frame extraction failed at \(self.formatTimestamp(seconds: requestedTime.seconds)): \(error.localizedDescription)")
+            }
+        }
+
+        logger.debug("✅ GIF frame extraction complete — \(frames.count)/\(times.count) frames")
+        return (0..<times.count).compactMap { frames[$0] }
+    }
+
     /// Extract thumbnails from video with timestamps as an async stream
     /// - Parameters:
     ///   - file: Video file URL

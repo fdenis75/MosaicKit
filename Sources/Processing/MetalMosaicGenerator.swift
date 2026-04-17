@@ -144,11 +144,31 @@ public actor MetalMosaicGenerator: MosaicGeneratorProtocol {
                 // MARK: - FIX: Create a mutable copy of config and use the static method
                 var mutableConfig = config // Create a mutable copy
                 mutableConfig.updateAspectRatio(new: AspectRatio.findNearest(to: layout.mosaicSize)) // Call on mutable copy using static method
-                
+
                 let layoutTime = CFAbsoluteTimeGetCurrent()
                 let executionTime = layoutTime - startTime
                 print("layout process in \(executionTime) seconds")
-                
+
+                // Animation-only mode: skip mosaic entirely
+                if mutableConfig.gifMode == .gifOnly {
+                    let animURL = mutableConfig.animatedOutputURL(for: video)
+                    try FileManager.default.createDirectory(
+                        at: animURL.deletingLastPathComponent(),
+                        withIntermediateDirectories: true,
+                        attributes: nil
+                    )
+                    let gifFrames = try await thumbnailProcessor.extractFramesForGif(
+                        from: videoURL,
+                        asset: asset,
+                        count: layout.thumbCount,
+                        gifSize: mutableConfig.gifSize,
+                        accurate: mutableConfig.useAccurateTimestamps
+                    )
+                    try AnimatedGifGenerator.save(frames: gifFrames, to: animURL, format: mutableConfig.animatedFormat)
+                    logger.debug("💾 Animation-only saved to: \(animURL.path)")
+                    return animURL
+                }
+
                 // Extract frames using VideoToolbox for hardware acceleration
        /*         progressHandlers[videoID]?(MosaicGenerationProgress(
                     video: video,
@@ -272,17 +292,28 @@ public actor MetalMosaicGenerator: MosaicGeneratorProtocol {
                     config: config,
                     forIphone: forIphone
                 )
-                
+
                 progressHandlers[videoID]?(MosaicGenerationProgress(
                     video: video,
                     progress: 0.999,
                     status: .savingMosaic
                 ))
-                
-             //   await MainActor.run {
-               //     video.mosaicURL = mosaicURL.absoluteString
-                //}
-                
+
+                // Generate animated image alongside the mosaic when requested
+                if mutableConfig.gifMode == .withMosaic {
+                    let animURL = mosaicURL.deletingPathExtension()
+                        .appendingPathExtension(mutableConfig.animatedFormat.fileExtension)
+                    let gifFrames = try await thumbnailProcessor.extractFramesForGif(
+                        from: videoURL,
+                        asset: asset,
+                        count: layout.thumbCount,
+                        gifSize: mutableConfig.gifSize,
+                        accurate: mutableConfig.useAccurateTimestamps
+                    )
+                    try AnimatedGifGenerator.save(frames: gifFrames, to: animURL, format: mutableConfig.animatedFormat)
+                    logger.debug("💾 Animation saved to: \(animURL.path)")
+                }
+
                 return mosaicURL
             } catch {
                 throw error
