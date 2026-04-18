@@ -1341,7 +1341,10 @@ struct PreviewGenerationLogic {
 
         exportSession.outputURL = outputURL
         exportSession.outputFileType = config.format.avFileType
+        
+#if os(macOS)
         exportSession.allowsParallelizedExport = true
+        #endif
         exportSession.shouldOptimizeForNetworkUse = true
 
         // Apply video composition for resolution scaling

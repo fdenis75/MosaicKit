@@ -5,7 +5,7 @@ import PackageDescription
 
 let package = Package(
     name: "MosaicKit",
-    platforms: [.macOS(.v15), .iOS(.v15), .macCatalyst(.v15)],
+    platforms: [.macOS(.v26), .iOS(.v26), .macCatalyst(.v26)],
     products: [
         .library(
             name: "MosaicKit",
