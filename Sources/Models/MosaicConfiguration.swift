@@ -97,7 +97,7 @@ public struct MosaicConfiguration: Codable, Sendable {
         overlay: OverlayConfiguration = .default,
         gifMode: GifCreationMode = .disabled,
         gifSize: GifSize = .nochange,
-        animatedFormat: AnimatedFormat = .gif
+        animatedFormat: AnimatedFormat = .webp
     ) {
         self.width = width
         self.density = density
@@ -115,7 +115,64 @@ public struct MosaicConfiguration: Codable, Sendable {
         self.gifSize = gifSize
         self.animatedFormat = animatedFormat
     }
-
+    
+    public init(
+        density: DensityConfig = .default,
+        outputdirectory: URL? = nil,
+        fullPathInName: Bool = false,
+        gifMode: GifCreationMode = .disabled,
+        gifSize: GifSize = .nochange,
+        animatedFormat: AnimatedFormat = .webp
+    ) {
+        self.width = 2500
+        self.density = density
+        self.format = .heif
+        self.layout = .default
+        self.includeMetadata = true
+        self.useAccurateTimestamps = false
+        self.compressionQuality = 0.3
+        self.outputdirectory = outputdirectory
+        self.fullPathInName = fullPathInName
+        self.useMovieColorsForBg = false
+        self.backgroundColor = .defaultGray
+        self.overlay = .default
+        self.gifMode = gifMode
+        self.gifSize = gifSize
+        self.animatedFormat = animatedFormat
+    }
+    
+    public init(
+        width: Int = 5120,
+        density: DensityConfig = .default,
+        format: OutputFormat = .heif,
+        layout: LayoutConfiguration = .default,
+        includeMetadata: Bool = true,
+        useAccurateTimestamps: Bool = false,
+        compressionQuality: Double = 0.4,
+        outputdirectory: URL? = nil,
+        fullPathInName: Bool = false,
+        useMovieColorsForBg: Bool = true,
+        backgroundColor: MosaicColor = .defaultGray,
+        overlay: OverlayConfiguration = .default,
+        
+    ) {
+        self.width = width
+        self.density = density
+        self.format = format
+        self.layout = layout
+        self.includeMetadata = includeMetadata
+        self.useAccurateTimestamps = useAccurateTimestamps
+        self.compressionQuality = compressionQuality
+        self.outputdirectory = outputdirectory
+        self.fullPathInName = fullPathInName
+        self.useMovieColorsForBg = useMovieColorsForBg
+        self.backgroundColor = backgroundColor
+        self.overlay = overlay
+        self.gifMode = .disabled
+        self.gifSize = .small
+        self.animatedFormat = .webp
+    }
+    
     /// Creates a MosaicConfiguration instance.
     /// - Note: The `forIphone` parameter no longer controls the background color.
     ///   Use `useMovieColorsForBg` and `backgroundColor` instead.
