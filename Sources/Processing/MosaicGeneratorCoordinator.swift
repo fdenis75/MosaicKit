@@ -1,6 +1,6 @@
-@preconcurrency import Foundation
+import Foundation
 import OSLog
-@preconcurrency import CoreImage
+import CoreImage
 
 // @available(macOS 26, iOS 26, *)
 public struct MosaicGenerationResult: Sendable {
@@ -122,7 +122,8 @@ public actor MosaicGeneratorCoordinator<Generator: MosaicGeneratorProtocol> {
     public let mosaicGenerator: Generator
     public var concurrencyLimit: Int
     public var activeTasks: [UUID: Task<MosaicGenerationResult, Error>] = [:]
-    public var progressHandlers: [UUID: (MosaicGenerationProgress) -> Void] = [:]
+    private var activeImageTasks: [UUID: Task<MosaicGenerationImage, Error>] = [:]
+    private var progressHandlers: [UUID: (MosaicGenerationProgress) -> Void] = [:]
 
     // MARK: - Initialization
 
@@ -295,13 +296,13 @@ public actor MosaicGeneratorCoordinator<Generator: MosaicGeneratorProtocol> {
             }
         }
 
-        // Wait for task to complete
-        let result = try await task.value
+        activeImageTasks[videoID] = task
+        defer {
+            activeImageTasks[videoID] = nil
+            progressHandlers[videoID] = nil
+        }
 
-        // Clean up
-        progressHandlers[videoID] = nil
-
-        return result
+        return try await task.value
     }
 
     /// Generate mosaics for videos in a folder
@@ -460,17 +461,18 @@ public actor MosaicGeneratorCoordinator<Generator: MosaicGeneratorProtocol> {
          let videoID = video.id
 
         // Cancel task
-        activeTasks[videoID]?.cancel() // Use unwrapped ID
-        activeTasks[videoID] = nil // Use unwrapped ID
+        activeTasks[videoID]?.cancel()
+        activeTasks[videoID] = nil
+        activeImageTasks[videoID]?.cancel()
+        activeImageTasks[videoID] = nil
 
         // Report cancellation
-        progressHandlers[videoID]?(MosaicGenerationProgress( // Use unwrapped ID
+        progressHandlers[videoID]?(MosaicGenerationProgress(
             video: video,
             progress: 0.0,
             status: .cancelled
         ))
-
-        progressHandlers[videoID] = nil // Use unwrapped ID
+        progressHandlers[videoID] = nil
 
         // Cancel in generator - direct await instead of fire-and-forget Task
         await mosaicGenerator.cancel(for: video)
@@ -481,12 +483,12 @@ public actor MosaicGeneratorCoordinator<Generator: MosaicGeneratorProtocol> {
         logger.debug("❌ Cancelling all mosaic generation tasks")
 
         // Cancel all tasks
-        for (_, task) in activeTasks {
-            task.cancel()
-        }
+        for (_, task) in activeTasks { task.cancel() }
+        for (_, task) in activeImageTasks { task.cancel() }
 
         // Clear state
         activeTasks.removeAll()
+        activeImageTasks.removeAll()
         progressHandlers.removeAll()
 
         // Cancel in generator - direct await instead of fire-and-forget Task

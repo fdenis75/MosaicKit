@@ -90,9 +90,12 @@ public final class LayoutProcessor {
     ) -> MosaicLayout {
         logger.debug("🎯 Starting layout calculation - AR: \(originalAspectRatio), Count: \(thumbnailCount), Width: \(mosaicWidth), target AR: \(self.mosaicAspectRatio)")
         logger.debug("⚙️ Layout mode: \(layoutType.rawValue), Density: \(density.name)")
-        
+
+        let cacheKey = "\(originalAspectRatio)-\(thumbnailCount)-\(mosaicWidth)-\(density.name)-\(layoutType.rawValue)"
+        if let cached = layoutCache[cacheKey] { return cached }
+
         let layout: MosaicLayout
-        
+
         switch layoutType {
         case .iphone:
             layout = calculateiPhoneLayout(
@@ -127,13 +130,14 @@ public final class LayoutProcessor {
                 mosaicWidth: mosaicWidth
             )
         }
-        
+
+        layoutCache[cacheKey] = layout
         return layout
     }
-    
-    
-    
-    
+
+
+
+
     /// Calculate auto layout based on screen size
     private func calculateAutoLayout(
         originalAspectRatio: CGFloat,
@@ -187,6 +191,8 @@ public final class LayoutProcessor {
                     // Generate positions and sizes with spacing
                     var positions: [(x: Int, y: Int)] = []
                     var thumbnailSizes: [CGSize] = []
+                    positions.reserveCapacity(thumbnailCount)
+                    thumbnailSizes.reserveCapacity(thumbnailCount)
                     let spacing: CGFloat = 5 // 5-pixel spacing for visual separation
                     
                     // Adjust thumbnail size to account for spacing
@@ -283,6 +289,8 @@ public final class LayoutProcessor {
         if !targetCountRange.contains(totalCount) { continue }
         var positions: [Position] = []
         var sizes: [CGSize] = []
+        positions.reserveCapacity(totalCount)
+        sizes.reserveCapacity(totalCount)
 
         var yCursor: CGFloat = 0
 
@@ -375,8 +383,10 @@ public final class LayoutProcessor {
                 return nil
             }
             var positions: [(x: Int, y: Int)] = []
+            positions.reserveCapacity(adjustedRows * cols)
+            thumbnailSizes.reserveCapacity(adjustedRows * cols)
             var y: CGFloat = 0
-            
+
             for row in 0..<adjustedRows {
                 var x: CGFloat = 0
                 for col in 0..<cols {
@@ -471,6 +481,8 @@ public final class LayoutProcessor {
         // Generate positions and sizes with dynamic scaling
         var positions: [(x: Int, y: Int)] = []
         var thumbnailSizes: [CGSize] = []
+        positions.reserveCapacity(thumbnailCount)
+        thumbnailSizes.reserveCapacity(thumbnailCount)
         var currentY: CGFloat = 0
         var currentX: CGFloat = 0
         for row in 0..<rows {
@@ -688,6 +700,8 @@ public final class LayoutProcessor {
         // Generate positions and sizes
         var positions: [(x: Int, y: Int)] = []
         var thumbnailSizes: [CGSize] = []
+        positions.reserveCapacity(actualThumbCount)
+        thumbnailSizes.reserveCapacity(actualThumbCount)
         let singleThumbSize = CGSize(width: thumbWidth, height: thumbHeight)
 
         for i in 0..<actualThumbCount {

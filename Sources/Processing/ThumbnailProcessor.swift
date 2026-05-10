@@ -13,7 +13,7 @@ import UIKit
 
 /// A processor for extracting and managing video thumbnails
 // @available(macOS 26, iOS 26, *)
-public final class ThumbnailProcessor: @unchecked Sendable {
+public final class ThumbnailProcessor: Sendable {
     private let logger = Logger(subsystem: "com.mosaicKit", category: "thumbnail-processor")
     private let config: MosaicConfiguration
     public let signposter = OSSignposter(subsystem: "com.mosaicKit", category: "thumbnail-processor")
@@ -238,19 +238,20 @@ public final class ThumbnailProcessor: @unchecked Sendable {
         accurate: Bool = false
     ) -> AsyncThrowingStream<(index: Int, image: CGImage, timestamp: String), Error> {
         return AsyncThrowingStream { continuation in
-            Task {
+            let task = Task {
                 do {
                     // Create local asset to avoid capturing non-Sendable AVAsset
                     let localAsset = AVURLAsset(url: file)
                     let duration = try await localAsset.load(.duration).seconds
                     let generator = configureGenerator(for: localAsset, accurate: accurate, preview: false, layout: layout)
                     let times = calculateExtractionTimes(duration: duration, count: layout.positions.count)
-                    
+
                     var currentIndex = 0
                     for await result in generator.images(for: times) {
+                        if Task.isCancelled { break }
                         let index = currentIndex
                         currentIndex += 1
-                        
+
                         switch result {
                         case .success(_, let image, let actualTime):
                              let timestamp = formatTimestamp(seconds: actualTime.seconds)
@@ -264,6 +265,7 @@ public final class ThumbnailProcessor: @unchecked Sendable {
                     continuation.finish(throwing: error)
                 }
             }
+            continuation.onTermination = { _ in task.cancel() }
         }
     }
     
@@ -797,9 +799,7 @@ public final class ThumbnailProcessor: @unchecked Sendable {
             return "Duration: \(String(format: "%02d:%02d:%02d", h, m, s))"
         case .fileSize:
             guard let size = video.fileSize else { return nil }
-            let fmt = ByteCountFormatter()
-            fmt.allowedUnits = [.useGB, .useMB, .useKB]; fmt.countStyle = .file
-            return "Size: \(fmt.string(fromByteCount: size))"
+            return "Size: \(ThumbnailProcessor.fileSizeFormatter.string(fromByteCount: size))"
         case .resolution:
             return "Resolution: \(Int(video.width ?? 0))×\(Int(video.height ?? 0))"
         case .codec:
@@ -1013,12 +1013,23 @@ public final class ThumbnailProcessor: @unchecked Sendable {
         context.restoreGState()
     }
     
+    private nonisolated(unsafe) static let bitrateFormatter: ByteCountFormatter = {
+        let f = ByteCountFormatter()
+        f.allowedUnits = [.useGB, .useMB, .useKB]
+        f.countStyle = .binary
+        return f
+    }()
+
+    private nonisolated(unsafe) static let fileSizeFormatter: ByteCountFormatter = {
+        let f = ByteCountFormatter()
+        f.allowedUnits = [.useGB, .useMB, .useKB]
+        f.countStyle = .file
+        return f
+    }()
+
     private func formatBitrate(_ bitrate: Int64?) -> String {
         guard let bitrate = bitrate else { return "Unknown" }
-        let formatter = ByteCountFormatter()
-        formatter.allowedUnits = [.useGB, .useMB, .useKB]
-        formatter.countStyle = .binary
-        return formatter.string(fromByteCount: bitrate) + "/s"
+        return ThumbnailProcessor.bitrateFormatter.string(fromByteCount: bitrate) + "/s"
     }
     
     /// Add timestamp overlay to the thumbnail image with Apple-inspired design

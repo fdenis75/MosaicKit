@@ -4,6 +4,7 @@ import MetalKit
 import CoreImage
 import CoreVideo
 import OSLog
+import Synchronization
 import DominantColors
 
 #if os(iOS)
@@ -34,10 +35,17 @@ public final class MetalImageProcessor: @unchecked Sendable {
     private let borderPipeline: MTLComputePipelineState
     // Note: shadowPipeline removed - unused in codebase
     
-    // Performance metrics
-    private var lastExecutionTime: CFAbsoluteTime = 0
-    private var totalExecutionTime: CFAbsoluteTime = 0
-    private var operationCount: Int = 0
+    private lazy var ciContext = CIContext(mtlDevice: device)
+
+    private nonisolated(unsafe) static let bitrateFormatter: ByteCountFormatter = {
+        let f = ByteCountFormatter()
+        f.allowedUnits = [.useGB, .useMB, .useKB]
+        f.countStyle = .binary
+        return f
+    }()
+
+    // Performance metrics — protected by a Mutex for Sendable conformance
+    private let _metrics = Mutex<(last: CFAbsoluteTime, total: CFAbsoluteTime, count: Int)>((last: 0, total: 0, count: 0))
     
     // MARK: - Initialization
     
@@ -554,13 +562,14 @@ public final class MetalImageProcessor: @unchecked Sendable {
         }
 
         // Step 3: Select top colors and create gradient
-        let top3LightColors = allColors.sorted { color1, color2 in
-            let components1 = color1.components ?? [0, 0, 0, 1]
-            let components2 = color2.components ?? [0, 0, 0, 1]
-            let brightness1 = (components1[0] + components1[1] + components1[2]) / 3.0
-            let brightness2 = (components2[0] + components2[1] + components2[2]) / 3.0
-            return brightness1 > brightness2
-        }.prefix(3)
+        let top3LightColors = allColors
+            .map { color -> (CGColor, CGFloat) in
+                let c = color.components ?? [0, 0, 0, 1]
+                return (color, (c[0] + c[1] + c[2]) / 3)
+            }
+            .sorted { $0.1 > $1.1 }
+            .map(\.0)
+            .prefix(3)
        
         // Step 4: Generate gradient image
         let gradientImage: CGImage?
@@ -614,7 +623,6 @@ public final class MetalImageProcessor: @unchecked Sendable {
         blurFilter.setValue(12.0, forKey: kCIInputRadiusKey)
         guard let outputCI = blurFilter.outputImage else { return nil }
 
-        let ciContext = CIContext()
         let cropped = outputCI.cropped(to: ciImage.extent)
         guard let blurredCG = ciContext.createCGImage(cropped, from: cropped.extent) else { return nil }
         
@@ -699,8 +707,8 @@ public final class MetalImageProcessor: @unchecked Sendable {
         let startTime = CFAbsoluteTimeGetCurrent()
         defer { trackPerformance(startTime: startTime) }
       
-        print("🎨 Starting Metal-accelerated mosaic generation - Frames: \(frames.count)")
-        print("📐 Layout size: \(layout.mosaicSize.width)x\(layout.mosaicSize.height)")
+        logger.debug("🎨 Starting Metal-accelerated mosaic generation - Frames: \(frames.count)")
+        logger.debug("📐 Layout size: \(layout.mosaicSize.width)x\(layout.mosaicSize.height)")
         
         // Determine if we need space for the metadata header
         let hasMetadata = config.includeMetadata && metadataHeader != nil
@@ -1112,12 +1120,14 @@ public final class MetalImageProcessor: @unchecked Sendable {
     /// Get performance metrics for the Metal processor
     /// - Returns: A dictionary of performance metrics
     public func getPerformanceMetrics() -> [String: Any] {
-        return [
-            "averageExecutionTime": operationCount > 0 ? totalExecutionTime / Double(operationCount) : 0,
-            "totalExecutionTime": totalExecutionTime,
-            "operationCount": operationCount,
-            "lastExecutionTime": lastExecutionTime
-        ]
+        _metrics.withLock { m in
+            [
+                "averageExecutionTime": m.count > 0 ? m.total / Double(m.count) : 0,
+                "totalExecutionTime": m.total,
+                "operationCount": m.count,
+                "lastExecutionTime": m.last
+            ]
+        }
     }
     
     // MARK: - Private Methods
@@ -1162,9 +1172,11 @@ public final class MetalImageProcessor: @unchecked Sendable {
     
     private func trackPerformance(startTime: CFAbsoluteTime) {
         let executionTime = CFAbsoluteTimeGetCurrent() - startTime
-        lastExecutionTime = executionTime
-        totalExecutionTime += executionTime
-        operationCount += 1
+        _metrics.withLock {
+            $0.last = executionTime
+            $0.total += executionTime
+            $0.count += 1
+        }
     }
     
     private func formatMetadata(_ metadata: VideoMetadata) -> String {
@@ -1175,10 +1187,7 @@ public final class MetalImageProcessor: @unchecked Sendable {
         }
         
         if let bitrate = metadata.bitrate {
-            let formatter = ByteCountFormatter()
-            formatter.allowedUnits = [.useGB, .useMB, .useKB]
-            formatter.countStyle = .binary
-            lines.append("Bitrate: \(formatter.string(fromByteCount: bitrate))/s")
+            lines.append("Bitrate: \(MetalImageProcessor.bitrateFormatter.string(fromByteCount: bitrate))/s")
         }
         
         for (key, value) in metadata.custom {

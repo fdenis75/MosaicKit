@@ -20,6 +20,8 @@ public final class CoreGraphicsImageProcessor: @unchecked Sendable {
     private let logger = Logger(subsystem: "com.mosaicKit", category: "cg-processor")
     private let signposter = OSSignposter(subsystem: "com.mosaicKit", category: "cg-processor")
 
+    private lazy var ciContext = CIContext()
+
     // Buffer pool for reusable vImage buffers
     private var bufferPool: [vImage_Buffer] = []
     private let poolLock = NSLock()
@@ -245,13 +247,14 @@ public final class CoreGraphicsImageProcessor: @unchecked Sendable {
         }
 
         // Step 3: Select top colors
-        let top3LightColors = allColors.sorted { color1, color2 in
-            let components1 = color1.components ?? [0, 0, 0, 1]
-            let components2 = color2.components ?? [0, 0, 0, 1]
-            let brightness1 = (components1[0] + components1[1] + components1[2]) / 3.0
-            let brightness2 = (components2[0] + components2[1] + components2[2]) / 3.0
-            return brightness1 > brightness2
-        }.prefix(3)
+        let top3LightColors = allColors
+            .map { color -> (CGColor, CGFloat) in
+                let c = color.components ?? [0, 0, 0, 1]
+                return (color, (c[0] + c[1] + c[2]) / 3)
+            }
+            .sorted { $0.1 > $1.1 }
+            .map(\.0)
+            .prefix(3)
 
         // Step 4: Generate gradient image
         let gradientImage: CGImage?
@@ -314,7 +317,6 @@ public final class CoreGraphicsImageProcessor: @unchecked Sendable {
         blurFilter.setValue(12.0, forKey: kCIInputRadiusKey)
         guard let outputCI = blurFilter.outputImage else { return nil }
 
-        let ciContext = CIContext()
         let cropped = outputCI.cropped(to: ciImage.extent)
         guard let blurredCG = ciContext.createCGImage(cropped, from: cropped.extent) else { return nil }
 
@@ -358,96 +360,91 @@ public final class CoreGraphicsImageProcessor: @unchecked Sendable {
 
         // Create background image
         progressHandler?(0.1)
-        var mosaicImage: CGImage
+        let backgroundImage: CGImage
         if config.useMovieColorsForBg {
             if let background = processImagesToBackground(
                 images: frames.map { $0.image },
                 maxColors: 5,
                 outputSize: mosaicSize
             ) {
-                mosaicImage = background
+                backgroundImage = background
             } else {
-                // Fallback to gray if color extraction fails
                 let color = SIMD4<Float>(0.5, 0.5, 0.5, 1.0)
-                mosaicImage = try createFilledImage(size: mosaicSize, color: color)
+                backgroundImage = try createFilledImage(size: mosaicSize, color: color)
             }
         } else {
-            // Use the configured solid background color
             let bg = config.backgroundColor
             let color = SIMD4<Float>(Float(bg.red), Float(bg.green), Float(bg.blue), Float(bg.alpha))
-            mosaicImage = try createFilledImage(size: mosaicSize, color: color)
+            backgroundImage = try createFilledImage(size: mosaicSize, color: color)
         }
         progressHandler?(0.2)
 
-        // If we have a metadata header, composite it at the top of the mosaic
-        if hasMetadata, let headerImage = metadataHeader {
-            logger.debug("🏷️ Adding metadata header - Size: \(headerImage.width)×\(headerImage.height)")
-            mosaicImage = try compositeImage(
-                headerImage,
-                onto: mosaicImage,
-                at: CGPoint(x: 0, y: 0)
-            )
+        // Allocate one CGContext for the entire mosaic — O(N) instead of O(N²)
+        let mosaicW = Int(mosaicSize.width)
+        let mosaicH = Int(mosaicSize.height)
+        guard let context = CGContext(
+            data: nil,
+            width: mosaicW,
+            height: mosaicH,
+            bitsPerComponent: 8,
+            bytesPerRow: mosaicW * 4,
+            space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ) else {
+            throw CoreGraphicsProcessorError.contextCreationFailed
         }
 
-        // Process frames in batches to maintain performance
-        let batchSize = 20
-        let totalBatches = (frames.count + batchSize - 1) / batchSize
+        // Draw background once
+        context.draw(backgroundImage, in: CGRect(x: 0, y: 0, width: mosaicW, height: mosaicH))
+
+        // Draw metadata header directly into the context
+        if hasMetadata, let headerImage = metadataHeader {
+            logger.debug("🏷️ Adding metadata header - Size: \(headerImage.width)×\(headerImage.height)")
+            context.draw(headerImage, in: CGRect(x: 0, y: 0, width: headerImage.width, height: headerImage.height))
+        }
+
         progressHandler?(0.3)
 
-        for batchStart in stride(from: 0, to: frames.count, by: batchSize) {
-            let batchEnd = min(batchStart + batchSize, frames.count)
-            let batchFrames = frames[batchStart..<batchEnd]
-            let currentBatch = batchStart / batchSize
+        // Draw each frame directly into the persistent context
+        for (actualIndex, frame) in frames.enumerated() {
+            guard actualIndex < layout.positions.count else { break }
 
-            logger.debug("🔄 Processing batch \(currentBatch + 1)/\(totalBatches): frames \(batchStart+1)-\(batchEnd)")
+            let position = layout.positions[actualIndex]
+            let size = layout.thumbnailSizes[actualIndex]
+            let frameRect = renderRect(
+                for: position,
+                size: size,
+                spacing: config.layout.spacing,
+                metadataHeight: hasMetadata ? CGFloat(metadataHeight) : 0
+            )
 
-            for (index, frame) in batchFrames.enumerated() {
-                let actualIndex = batchStart + index
-                guard actualIndex < layout.positions.count else { break }
+            let scaledFrame: CGImage
+            if frame.image.width != Int(frameRect.width) || frame.image.height != Int(frameRect.height) {
+                scaledFrame = try scaleImage(frame.image, to: frameRect.size)
+            } else {
+                scaledFrame = frame.image
+            }
 
-                let position = layout.positions[actualIndex]
-                let size = layout.thumbnailSizes[actualIndex]
-                let frameRect = renderRect(
-                    for: position,
-                    size: size,
-                    spacing: config.layout.spacing,
-                    metadataHeight: hasMetadata ? CGFloat(metadataHeight) : 0
-                )
+            drawFrame(scaledFrame, into: context, at: frameRect, visual: config.layout.visual)
 
-                // Scale the frame if needed
-                let scaledFrame: CGImage
-                if frame.image.width != Int(frameRect.width) || frame.image.height != Int(frameRect.height) {
-                    scaledFrame = try scaleImage(
-                        frame.image,
-                        to: frameRect.size
-                    )
-                } else {
-                    scaledFrame = frame.image
-                }
+            let frameProgress = 0.3 + (0.6 * Double(actualIndex + 1) / Double(frames.count))
+            progressHandler?(frameProgress)
 
-                mosaicImage = try compositeFrame(
-                    scaledFrame,
-                    onto: mosaicImage,
-                    in: frameRect,
-                    visual: config.layout.visual
-                )
-
-                // Update progress based on frame completion
-                let frameProgress = 0.3 + (0.6 * Double(actualIndex + 1) / Double(frames.count))
-                progressHandler?(frameProgress)
-
-                if Task.isCancelled {
-                    logger.warning("❌ Mosaic creation cancelled")
-                    throw CoreGraphicsProcessorError.cancelled
-                }
+            if Task.isCancelled {
+                logger.warning("❌ Mosaic creation cancelled")
+                throw CoreGraphicsProcessorError.cancelled
             }
         }
 
+        guard let finalImage = context.makeImage() else {
+            throw CoreGraphicsProcessorError.cgImageCreationFailed
+        }
+
         let generationTime = CFAbsoluteTimeGetCurrent() - startTime
-        logger.debug("✅ Core Graphics mosaic generation complete - Size: \(mosaicImage.width)x\(mosaicImage.height) in \(generationTime) seconds")
+        logger.debug("✅ Core Graphics mosaic generation complete - Size: \(mosaicW)x\(mosaicH) in \(generationTime) seconds")
         progressHandler?(1.0)
 
-        return mosaicImage
+        return finalImage
     }
 
     /// Get performance metrics for the Core Graphics processor
@@ -480,6 +477,32 @@ public final class CoreGraphicsImageProcessor: @unchecked Sendable {
             width: max(1, size.width - (inset * 2)),
             height: max(1, size.height - (inset * 2))
         )
+    }
+
+    private func drawFrame(_ image: CGImage, into context: CGContext, at rect: CGRect, visual: VisualSettings) {
+        if visual.addShadow, let shadowSettings = visual.shadowSettings, shadowSettings.opacity > 0 {
+            context.saveGState()
+            context.setShadow(
+                offset: shadowSettings.offset,
+                blur: max(0, shadowSettings.radius),
+                color: CGColor(gray: 0, alpha: max(0, min(1, shadowSettings.opacity)))
+            )
+            context.draw(image, in: rect)
+            context.restoreGState()
+        } else {
+            context.draw(image, in: rect)
+        }
+
+        if visual.addBorder {
+            let maxBorderWidth = min(rect.width, rect.height) / 2.0
+            let borderWidth = min(max(0, visual.borderWidth), maxBorderWidth)
+            if borderWidth > 0 {
+                context.setStrokeColor(borderColor(for: visual.borderColor))
+                context.setLineWidth(borderWidth)
+                let strokeRect = rect.insetBy(dx: borderWidth / 2.0, dy: borderWidth / 2.0)
+                context.stroke(strokeRect)
+            }
+        }
     }
 
     private func compositeFrame(

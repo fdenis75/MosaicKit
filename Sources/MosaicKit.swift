@@ -127,7 +127,7 @@ import CoreGraphics
 // @available(macOS 26, iOS 26, *)
 public final class MosaicGenerator {
     private let logger = Logger(label: "com.mosaickit")
-    private let internalGenerator: Any?
+    private let internalGenerator: (any MosaicGeneratorProtocol)?
     private let generatorPreference: MosaicGeneratorFactory.GeneratorPreference
 
     /// Initialize a mosaic generator with default platform preference
@@ -162,7 +162,7 @@ public final class MosaicGenerator {
     ) async throws -> URL {
         logger.info("Generating mosaic from \(videoURL.lastPathComponent)")
 
-        guard let generator = internalGenerator as? any MosaicGeneratorProtocol else {
+        guard let generator = internalGenerator else {
             throw MosaicError.invalidConfiguration("Generator not available")
         }
 
@@ -210,7 +210,7 @@ public final class MosaicGenerator {
     ) async throws -> CGImage {
         logger.info("Generating mosaic image from \(videoURL.lastPathComponent)")
 
-        guard let generator = internalGenerator as? any MosaicGeneratorProtocol else {
+        guard let generator = internalGenerator else {
             throw MosaicError.invalidConfiguration("Generator not available")
         }
 

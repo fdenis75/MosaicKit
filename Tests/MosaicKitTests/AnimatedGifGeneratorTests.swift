@@ -161,6 +161,7 @@ struct AnimatedGifGeneratorTests {
         var config = makeMinimalConfig(outputDirectory: outputDir)
         config.gifMode = .withMosaic
         config.gifSize = .small
+        config.animatedFormat = .gif
 
         let result = try await coordinator.generateMosaic(for: video, config: config) { _ in }
 
@@ -193,12 +194,13 @@ struct AnimatedGifGeneratorTests {
         let outputDir = FileManager.default.temporaryDirectory
             .appendingPathComponent("MosaicKitGifOnly-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: outputDir, withIntermediateDirectories: true)
- //       defer { try? FileManager.default.removeItem(at: outputDir) }
+        defer { try? FileManager.default.removeItem(at: outputDir) }
 
         let coordinator = try createDefaultMosaicCoordinator(concurrencyLimit: 1)
         var config = makeMinimalConfig(outputDirectory: outputDir)
         config.gifMode = .gifOnly
         config.gifSize = .small
+        config.animatedFormat = .gif
 
         let result = try await coordinator.generateMosaic(for: video, config: config) { _ in }
 
@@ -281,18 +283,18 @@ struct AnimatedGifGeneratorTests {
     }
     
     
-    @Test("create all versionsq")
+    @Test("create all versions")
     func createAllModes() async throws {
-     
         let videoURL = try embeddedVideoURL
         let video = try await VideoInput(from: videoURL)
 
         let outputDir = FileManager.default.temporaryDirectory
             .appendingPathComponent("MosaicKitWebP-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: outputDir, withIntermediateDirectories: true)
-        
+        defer { try? FileManager.default.removeItem(at: outputDir) }
+
         let coordinator = try createDefaultMosaicCoordinator(concurrencyLimit: 1)
-        var config = makeMinimalConfig(outputDirectory: videoURL.deletingLastPathComponent())
+        var config = makeMinimalConfig(outputDirectory: outputDir)
         config.gifMode = .gifOnly
         
         for density in [DensityConfig.xxl, .m, .xs] {
@@ -326,7 +328,7 @@ struct AnimatedGifGeneratorTests {
         let outputDir = FileManager.default.temporaryDirectory
             .appendingPathComponent("MosaicKitGifLarge-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: outputDir, withIntermediateDirectories: true)
- //       defer { try? FileManager.default.removeItem(at: outputDir) }
+        defer { try? FileManager.default.removeItem(at: outputDir) }
 
         let coordinator = try createDefaultMosaicCoordinator(concurrencyLimit: 1)
         var config = makeMinimalConfig(outputDirectory: outputDir)
@@ -351,7 +353,7 @@ struct AnimatedGifGeneratorTests {
         let outputDir = FileManager.default.temporaryDirectory
             .appendingPathComponent("MosaicKitGifNochange-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: outputDir, withIntermediateDirectories: true)
-     //   defer { try? FileManager.default.removeItem(at: outputDir) }
+        defer { try? FileManager.default.removeItem(at: outputDir) }
 
         let coordinator = try createDefaultMosaicCoordinator(concurrencyLimit: 1)
         var config = makeMinimalConfig(outputDirectory: outputDir)
@@ -372,11 +374,9 @@ struct AnimatedGifGeneratorTests {
 
     private var embeddedVideoURL: URL {
         get throws {
-          /*  guard let url = Bundle.module.url(forResource: "test_video", withExtension: "mp4") else {
+            guard let url = Bundle.module.url(forResource: "test_video", withExtension: "mp4") else {
                 throw TestError.embeddedAssetMissing
-            }*/
-            
-            let url = URL(fileURLWithPath: "/Volumes/Ext-6TB-2/Studios/Wake Up n Fuck/Solo/Georgia Koneva/Georgia Koneva - Wunf 398.mp4")
+            }
             return url
         }
     }

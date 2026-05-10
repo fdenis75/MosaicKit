@@ -13,7 +13,8 @@ public actor PreviewGeneratorCoordinator {
     private let logger = Logger(subsystem: "com.mosaickit", category: "PreviewGeneratorCoordinator")
 
     /// Active generation tasks keyed by video ID
-    private var activeTasks: [UUID: Task<PreviewGenerationResult, Error>] = [:]
+    private var activeTasks: [UUID: Task<URL, Error>] = [:]
+    private var activeCompositionTasks: [UUID: Task<AVPlayerItem, Error>] = [:]
 
     /// Progress handlers for each video, storing the VideoInput alongside the handler
     private var progressHandlers: [UUID: (video: VideoInput, handler: @Sendable (PreviewGenerationProgress) -> Void)] = [:]
@@ -59,22 +60,22 @@ public actor PreviewGeneratorCoordinator {
             await previewGenerator.setProgressHandler(for: video, handler: handler)
         }
 
-        // Generate preview
-        do {
-            let outputURL = try await previewGenerator.generate(for: video, config: config)
-            logger.info("Preview generated: \(outputURL.lastPathComponent)")
-
-            // Cleanup
+        let task = Task<URL, Error> { [previewGenerator, video, config] in
+            try await previewGenerator.generate(for: video, config: config)
+        }
+        activeTasks[video.id] = task
+        defer {
+            activeTasks.removeValue(forKey: video.id)
             progressHandlers.removeValue(forKey: video.id)
+        }
 
+        do {
+            let outputURL = try await task.value
+            logger.info("Preview generated: \(outputURL.lastPathComponent)")
             return outputURL
         } catch {
             logger.error("Preview generation failed: \(error.localizedDescription)")
-
-            // Report failure
             progressHandlers[video.id]?.handler(.failed(for: video, error: error))
-            progressHandlers.removeValue(forKey: video.id)
-
             throw error
         }
     }
@@ -98,22 +99,22 @@ public actor PreviewGeneratorCoordinator {
             await previewGenerator.setProgressHandler(for: video, handler: handler)
         }
 
-        // Generate composition
-        do {
-            let playerItem = try await previewGenerator.generateComposition(for: video, config: config)
-            logger.info("Preview composition generated successfully")
-
-            // Cleanup
+        let task = Task<AVPlayerItem, Error> { [previewGenerator, video, config] in
+            try await previewGenerator.generateComposition(for: video, config: config)
+        }
+        activeCompositionTasks[video.id] = task
+        defer {
+            activeCompositionTasks.removeValue(forKey: video.id)
             progressHandlers.removeValue(forKey: video.id)
+        }
 
+        do {
+            let playerItem = try await task.value
+            logger.info("Preview composition generated successfully")
             return playerItem
         } catch {
             logger.error("Preview composition generation failed: \(error.localizedDescription)")
-
-            // Report failure
             progressHandlers[video.id]?.handler(.failed(for: video, error: error))
-            progressHandlers.removeValue(forKey: video.id)
-
             throw error
         }
     }
@@ -266,6 +267,8 @@ public actor PreviewGeneratorCoordinator {
         // Cancel the task
         activeTasks[video.id]?.cancel()
         activeTasks.removeValue(forKey: video.id)
+        activeCompositionTasks[video.id]?.cancel()
+        activeCompositionTasks.removeValue(forKey: video.id)
 
         // Cancel in generator
         await previewGenerator.cancel(for: video)
@@ -280,10 +283,10 @@ public actor PreviewGeneratorCoordinator {
         logger.info("Cancelling all preview generations")
 
         // Cancel all tasks
-        for (_, task) in activeTasks {
-            task.cancel()
-        }
+        for (_, task) in activeTasks { task.cancel() }
+        for (_, task) in activeCompositionTasks { task.cancel() }
         activeTasks.removeAll()
+        activeCompositionTasks.removeAll()
 
         // Cancel in generator
         await previewGenerator.cancelAll()

@@ -144,6 +144,7 @@ struct ErrorTypesTests {
         #expect(VideoError.processingFailed(sampleURL, underlying).underlyingError != nil)
         #expect(VideoError.metadataExtractionFailed(sampleURL, underlying).underlyingError != nil)
         #expect(VideoError.thumbnailGenerationFailed(sampleURL, underlying).underlyingError != nil)
+        #expect(VideoError.frameExtractionFailed(sampleURL, underlying).underlyingError != nil)
 
         #expect(VideoError.fileNotFound(sampleURL).underlyingError == nil)
         #expect(VideoError.accessDenied(sampleURL).underlyingError == nil)
@@ -157,6 +158,9 @@ struct ErrorTypesTests {
         #expect(VideoError.metadataExtractionFailed(sampleURL, underlying).associatedURL == sampleURL)
         #expect(VideoError.processingFailed(sampleURL, underlying).associatedURL == sampleURL)
         #expect(VideoError.thumbnailGenerationFailed(sampleURL, underlying).associatedURL == sampleURL)
+        #expect(VideoError.accessDenied(sampleURL).associatedURL == sampleURL)
+        #expect(VideoError.invalidFormat(sampleURL).associatedURL == sampleURL)
+        #expect(VideoError.frameExtractionFailed(sampleURL, underlying).associatedURL == sampleURL)
         #expect(VideoError.cancelled.associatedURL == nil)
     }
 

@@ -1,6 +1,7 @@
 import Foundation
 import AVFoundation
 import OSLog
+import Synchronization
 import QuartzCore
 import UniformTypeIdentifiers
 import SJSAssetExportSession
@@ -11,45 +12,30 @@ import UIKit
 #endif
 
 /// Thread-safe cancellation token
-class CancellationToken: @unchecked Sendable {
-    private let lock = NSLock()
-    private var _isCancelled = false
+final class CancellationToken: Sendable {
+    private let _cancelled = Mutex<Bool>(false)
 
-    var isCancelled: Bool {
-        lock.lock()
-        defer { lock.unlock() }
-        return _isCancelled
-    }
+    var isCancelled: Bool { _cancelled.withLock { $0 } }
 
-    func cancel() {
-        lock.lock()
-        _isCancelled = true
-        lock.unlock()
-    }
+    func cancel() { _cancelled.withLock { $0 = true } }
 }
 
 /// Thread-safe tracker for the last time export progress changed.
 /// Used to detect stalled exports that stop making forward progress.
-class ExportProgressTracker: @unchecked Sendable {
-    private let lock = NSLock()
-    private var _lastProgressTime: Date = Date()
-    private var _lastProgressValue: Double = -1
+final class ExportProgressTracker: Sendable {
+    private struct State { var time: Date = Date(); var value: Double = -1 }
+    private let _state = Mutex<State>(State())
 
     /// Record that progress changed. Only updates the timestamp when the value actually moves.
     func recordProgress(_ value: Double) {
-        lock.lock()
-        defer { lock.unlock() }
-        if value != _lastProgressValue {
-            _lastProgressValue = value
-            _lastProgressTime = Date()
+        _state.withLock { s in
+            if value != s.value { s.value = value; s.time = Date() }
         }
     }
 
     /// Seconds since the last time progress actually changed.
     var secondsSinceLastProgress: TimeInterval {
-        lock.lock()
-        defer { lock.unlock() }
-        return Date().timeIntervalSince(_lastProgressTime)
+        _state.withLock { Date().timeIntervalSince($0.time) }
     }
 }
 
@@ -1112,6 +1098,8 @@ struct PreviewGenerationLogic {
             
             // Perform the export
             do {
+                // Safe: composition is created and fully configured on this actor before the cast;
+                // SJSAssetExportSession only reads the asset during the export call below.
                 nonisolated(unsafe) let compositionAsset = composition as AVAsset
 
                 if let vc = videoComposition {

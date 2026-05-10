@@ -291,6 +291,7 @@ public actor CoreGraphicsMosaicGenerator: MosaicGeneratorProtocol {
         defer {
             generationTasks[videoID] = nil
             progressHandlers[videoID] = nil
+            frameCache[videoID] = nil
         }
 
         return try await task.value
@@ -309,7 +310,10 @@ public actor CoreGraphicsMosaicGenerator: MosaicGeneratorProtocol {
         layoutProcessor.mosaicAspectRatio = config.layout.aspectRatio.ratio
 
         let startTime = CFAbsoluteTimeGetCurrent()
-        defer { trackPerformance(startTime: startTime) }
+        defer {
+            trackPerformance(startTime: startTime)
+            progressHandlers[videoID] = nil
+        }
 
         do {
             logger.debug("Video details - Duration: \(video.duration ?? 0.0)s, Size: \(video.fileSize ?? 0) bytes")

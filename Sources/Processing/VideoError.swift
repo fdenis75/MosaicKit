@@ -58,9 +58,10 @@ public enum VideoError: Error, LocalizedError, Equatable {
         switch self {
         case .metadataExtractionFailed(_, let error),
              .thumbnailGenerationFailed(_, let error),
-             .processingFailed(_, let error):
+             .processingFailed(_, let error),
+             .frameExtractionFailed(_, let error):
             return error
-        case .fileNotFound, .videoTrackNotFound, .accessDenied, .invalidFormat, .frameExtractionFailed, .cancelled:
+        case .fileNotFound, .videoTrackNotFound, .accessDenied, .invalidFormat, .cancelled:
             return nil
         }
     }
@@ -72,9 +73,12 @@ public enum VideoError: Error, LocalizedError, Equatable {
              .metadataExtractionFailed(let url, _),
              .videoTrackNotFound(let url),
              .thumbnailGenerationFailed(let url, _),
-             .processingFailed(let url, _):
+             .processingFailed(let url, _),
+             .accessDenied(let url),
+             .invalidFormat(let url),
+             .frameExtractionFailed(let url, _):
             return url
-        case .accessDenied, .invalidFormat, .frameExtractionFailed, .cancelled:
+        case .cancelled:
             return nil
         }
     }

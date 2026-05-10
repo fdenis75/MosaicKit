@@ -147,7 +147,7 @@ public actor MetalMosaicGenerator: MosaicGeneratorProtocol {
 
                 let layoutTime = CFAbsoluteTimeGetCurrent()
                 let executionTime = layoutTime - startTime
-                print("layout process in \(executionTime) seconds")
+                logger.debug("layout process in \(executionTime) seconds")
 
                 // Animation-only mode: skip mosaic entirely
                 if mutableConfig.gifMode == .gifOnly {
@@ -209,7 +209,7 @@ public actor MetalMosaicGenerator: MosaicGeneratorProtocol {
                 let colorCollector = overlayConfig.colorDNA.show ? FrameColorCollector() : nil
 
                 // Start producer task to burn labels in parallel
-                Task { [processor, videoURL, layout, asset, useAccurateTimestamps, thumbnailSizes, labelConfig, colorCollector, continuation] in
+                let producerTask = Task { [processor, videoURL, layout, asset, useAccurateTimestamps, thumbnailSizes, labelConfig, colorCollector, continuation] in
                     do {
                         let rawStream = processor.extractFramesStream(
                             from: videoURL,
@@ -220,6 +220,7 @@ public actor MetalMosaicGenerator: MosaicGeneratorProtocol {
 
                         try await withThrowingTaskGroup(of: Void.self) { group in
                             for try await (index, rawImage, timestamp) in rawStream {
+                                if Task.isCancelled { break }
                                 group.addTask {
                                     if let collector = colorCollector {
                                         let color = OverlayProcessor.averageColor(of: rawImage)
@@ -242,6 +243,7 @@ public actor MetalMosaicGenerator: MosaicGeneratorProtocol {
                         continuation.finish(throwing: error)
                     }
                 }
+                continuation.onTermination = { _ in producerTask.cancel() }
 
                 // Generate mosaic using Metal with streaming input
                 var mosaic = try await metalProcessor.generateMosaicStream(
@@ -324,8 +326,9 @@ public actor MetalMosaicGenerator: MosaicGeneratorProtocol {
         defer {
             generationTasks[videoID] = nil
             progressHandlers[videoID] = nil
+            frameCache[videoID] = nil
         }
-        
+
         return try await task.value
     }
 
@@ -340,7 +343,10 @@ public actor MetalMosaicGenerator: MosaicGeneratorProtocol {
         layoutProcessor.mosaicAspectRatio = config.layout.aspectRatio.ratio
 
         let startTime = CFAbsoluteTimeGetCurrent()
-        defer { trackPerformance(startTime: startTime) }
+        defer {
+            trackPerformance(startTime: startTime)
+            progressHandlers[videoID] = nil
+        }
 
         do {
             let videoURL = video.url
@@ -412,7 +418,7 @@ public actor MetalMosaicGenerator: MosaicGeneratorProtocol {
             let colorCollector = overlayConfig.colorDNA.show ? FrameColorCollector() : nil
 
             // Start producer task to burn labels in parallel
-            Task { [processor, videoURL, layout, asset, useAccurateTimestamps, thumbnailSizes, labelConfig, colorCollector, continuation] in
+            let producerTask = Task { [processor, videoURL, layout, asset, useAccurateTimestamps, thumbnailSizes, labelConfig, colorCollector, continuation] in
                 do {
                     let rawStream = processor.extractFramesStream(
                         from: videoURL,
@@ -423,6 +429,7 @@ public actor MetalMosaicGenerator: MosaicGeneratorProtocol {
 
                     try await withThrowingTaskGroup(of: Void.self) { group in
                         for try await (index, rawImage, timestamp) in rawStream {
+                            if Task.isCancelled { break }
                             group.addTask {
                                 if let collector = colorCollector {
                                     let color = OverlayProcessor.averageColor(of: rawImage)
@@ -445,6 +452,7 @@ public actor MetalMosaicGenerator: MosaicGeneratorProtocol {
                     continuation.finish(throwing: error)
                 }
             }
+            continuation.onTermination = { _ in producerTask.cancel() }
 
             // Generate mosaic using Metal with streaming input
             var mosaic = try await metalProcessor.generateMosaicStream(

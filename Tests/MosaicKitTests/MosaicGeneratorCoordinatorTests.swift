@@ -3,7 +3,8 @@ import Testing
 @testable import MosaicKit
 
 struct MosaicGeneratorCoordinatorTests {
-    private static let defaultMediaFolderPath = "/Users/francois/Downloads/testvidsnodelete"
+    // Set MOSAICKIT_TEST_VIDEOS_DIR env var to a folder of test videos to enable folder/batch tests
+    private static let defaultMediaFolderPath = "/tmp/mosaickit-test-videos"
     private static let folderPathEnvKey = "MOSAICKIT_TEST_VIDEOS_DIR"
     private static let supportedExtensions: Set<String> = ["mp4", "mov", "m4v", "avi", "mkv"]
     
