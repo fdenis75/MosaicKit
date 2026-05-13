@@ -17,7 +17,7 @@ A high-performance Swift package for generating video mosaics with Metal-acceler
 - 📊 **Overlay Annotations** - Per-frame labels (timestamp, index), customisable metadata headers, watermarks, and Color DNA strips
 - 🎬 **Video Preview Generation** - Create short highlight reels from any video, either exported to file or as a live `AVPlayerItem` composition
 
-## New in 1.1.5
+## New in 1.1.16
 
 - **Skip-if-exists (`overwrite`)** — Both `MosaicConfiguration` and `PreviewConfiguration` now accept `overwrite: Bool` (default `false`). When `false`, the generators check for an existing output file *before* extracting any frames and return the existing URL immediately, saving significant CPU and I/O time in incremental batch workflows.
 - **Custom output directory templates** — Set `outputDirectoryTemplate` on either configuration to a token string such as `"{root}/{service}/{creator}/{density}"` and the library will resolve it at generation time. When `nil`, the existing default directory logic is unchanged.
@@ -48,7 +48,7 @@ Add MosaicKit to your `Package.swift`:
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/fdenis75/MosaicKit.git", from: "1.1.4")
+    .package(url: "https://github.com/fdenis75/MosaicKit.git", from: "1.1.16")
 ]
 ```
 
