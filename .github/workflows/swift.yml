@@ -5,20 +5,52 @@ name: Swift
 
 on:
   push:
-    branches: [ "main" ]
+    branches: [ "main", "claude/**" ]
   pull_request:
     branches: [ "main" ]
 
+concurrency:
+  group: swift-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
 jobs:
   build:
-
-    runs-on: macos-latest
+    name: Build on ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # macOS 26: exercises the full code path including resolution downscaling.
+        os: [macos-26]
+    runs-on: ${{ matrix.os }}
     env:
       MOSAICKIT_SUITE_MODE: none
 
     steps:
     - uses: actions/checkout@v4
+
+    - uses: swift-actions/setup-swift@v3
+      with:
+        swift-version: "6.2"
+
+    - name: Get swift version
+      run: swift --version
+
+    - name: Cache SwiftPM artifacts
+      uses: actions/cache@v4
+      with:
+        path: |
+          .build
+          ~/.swiftpm
+          ~/Library/Caches/org.swift.swiftpm
+        key: ${{ runner.os }}-${{ matrix.os }}-spm-${{ hashFiles('Package.swift', 'Package.resolved') }}
+        restore-keys: |
+          ${{ runner.os }}-${{ matrix.os }}-spm-
+
     - name: Build
       run: swift build -v
+
     - name: Run tests
-      run: swift test -v
+      run: swift test --parallel
