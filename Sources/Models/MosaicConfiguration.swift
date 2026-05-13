@@ -79,6 +79,30 @@ public struct MosaicConfiguration: Codable, Sendable {
     /// Container format for the animated image export.
     public var animatedFormat: AnimatedFormat
 
+    /// Whether to overwrite existing output files. When `false` (default),
+    /// generation short-circuits and returns the existing URL if the output
+    /// file already exists at the resolved path.
+    public var overwrite: Bool = false
+
+    /// Optional token-based template controlling the output directory layout.
+    ///
+    /// When `nil` (default), the legacy `{root}/{service}/{creator}/{configHash}/`
+    /// layout is used. When set, the template is resolved against the following
+    /// tokens (unknown tokens are left as-is, empty tokens are skipped):
+    /// `{root}`, `{service}`, `{creator}`, `{hash}`, `{width}`, `{density}`,
+    /// `{aspectRatio}`, `{layout}`, `{date}`.
+    public var outputDirectoryTemplate: String? = nil
+
+    /// Optional token-based template controlling the output filename.
+    ///
+    /// When `nil` (default), the legacy filename layout is used. When set, the
+    /// template is resolved against the following tokens: `{name}`, `{ext}`,
+    /// `{width}`, `{density}`, `{aspectRatio}`, `{layout}`, `{hash}`,
+    /// `{service}`, `{creator}`, `{postID}`, `{date}`. The template must end
+    /// with `{ext}` or a literal extension; if no extension is present,
+    /// `.{ext}` is appended automatically.
+    public var filenameTemplate: String? = nil
+
     // MARK: - Initialization
 
     /// Creates a new MosaicConfiguration instance.
@@ -267,6 +291,12 @@ public struct MosaicConfiguration: Codable, Sendable {
     ///   - videoInput: The video input containing organizational metadata
     /// - Returns: The full output directory URL
     public func generateOutputDirectory(rootDirectory: URL, videoInput: VideoInput) -> URL {
+        // When a custom template is provided, resolve it instead of using the
+        // legacy {service}/{creator}/{configHash} layout.
+        if let template = outputDirectoryTemplate {
+            return resolveDirectoryTemplate(template, rootURL: rootDirectory, videoInput: videoInput)
+        }
+
         var path = rootDirectory
 
         // Add service name if available
@@ -285,6 +315,80 @@ public struct MosaicConfiguration: Codable, Sendable {
         return path
     }
 
+    /// Resolve `outputDirectoryTemplate` against the available token set.
+    ///
+    /// - Parameters:
+    ///   - template: The raw template string containing `{token}` placeholders.
+    ///   - rootURL: The root URL used to substitute `{root}` and as the
+    ///     absolute base for the resulting URL.
+    ///   - videoInput: Source of `{service}`, `{creator}`, and related tokens.
+    /// - Returns: The resolved output directory URL.
+    private func resolveDirectoryTemplate(
+        _ template: String,
+        rootURL: URL,
+        videoInput: VideoInput
+    ) -> URL {
+        let today = Self.todayString()
+        let values: [String: String?] = [
+            "root": rootURL.path,
+            "service": videoInput.serviceName.map { Self.sanitizeForFilePath($0) },
+            "creator": videoInput.creatorName.map { Self.sanitizeForFilePath($0) },
+            "hash": configurationHash,
+            "width": String(width),
+            "density": density.name,
+            "aspectRatio": layout.aspectRatio.rawValue,
+            "layout": layout.layoutType.rawValue,
+            "date": today
+        ]
+
+        // Split template by "/" so that empty components (from nil tokens) can
+        // be filtered out cleanly. The `{root}` token, when present, is always
+        // taken as the absolute base — even if it isn't the first component.
+        let components = template.split(separator: "/", omittingEmptySubsequences: false).map(String.init)
+
+        var resolvedRoot: URL = rootURL
+        var trailing: [String] = []
+        var sawRoot = false
+
+        for (idx, component) in components.enumerated() {
+            // Replace tokens in this component; skip the component if it
+            // resolves to an empty string (e.g. nil service/creator).
+            let resolved = Self.applyTokens(to: component, values: values)
+
+            if !sawRoot && component.contains("{root}") {
+                // Use the root URL itself; any extra literal text around
+                // {root} is appended as a sub-path component if non-empty.
+                resolvedRoot = rootURL
+                let extra = resolved.replacingOccurrences(of: rootURL.path, with: "")
+                let trimmed = extra.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+                if !trimmed.isEmpty {
+                    trailing.append(trimmed)
+                }
+                sawRoot = true
+                continue
+            }
+
+            // Skip empty resolved components (e.g. when {service} was nil).
+            if resolved.isEmpty { continue }
+
+            // If the very first segment is an absolute path (e.g. user-supplied
+            // "/Volumes/Foo"), treat it as the absolute base.
+            if idx == 0 && !sawRoot && resolved.hasPrefix("/") {
+                resolvedRoot = URL(fileURLWithPath: resolved)
+                sawRoot = true
+                continue
+            }
+
+            trailing.append(resolved)
+        }
+
+        var result = resolvedRoot
+        for part in trailing {
+            result = result.appendingPathComponent(part)
+        }
+        return result
+    }
+
     /// Generate filename with post ID prefix
     /// Format: {postID}_{originalFilename}_{configHash}.{extension}
     /// Or with fullPathInName: _volumes_ext-3_dir1_dir2_{originalFilename}_{configHash}.{extension}
@@ -293,6 +397,14 @@ public struct MosaicConfiguration: Codable, Sendable {
     ///   - videoInput: The video input containing organizational metadata
     /// - Returns: The sanitized filename with configuration hash
     public func generateFilename(originalFilename: String, videoInput: VideoInput) -> String {
+        if let template = filenameTemplate {
+            return resolveFilenameTemplate(
+                template,
+                originalFilename: originalFilename,
+                videoInput: videoInput
+            )
+        }
+
         let sanitizedName = Self.sanitizeForFilePath(originalFilename)
 
         // Build base filename
@@ -320,6 +432,64 @@ public struct MosaicConfiguration: Codable, Sendable {
 
         // Add config hash and extension
         return "\(filename)_\(configurationHash).\(format.fileExtension)"
+    }
+
+    /// Resolve `filenameTemplate` against the available token set.
+    /// The template must end with `{ext}` or a literal extension; if no
+    /// extension is detected, `.{ext}` is appended automatically.
+    private func resolveFilenameTemplate(
+        _ template: String,
+        originalFilename: String,
+        videoInput: VideoInput
+    ) -> String {
+        let today = Self.todayString()
+        let values: [String: String?] = [
+            "name": Self.sanitizeForFilePath(originalFilename),
+            "ext": format.fileExtension,
+            "width": String(width),
+            "density": density.name,
+            "aspectRatio": layout.aspectRatio.rawValue,
+            "layout": layout.layoutType.rawValue,
+            "hash": configurationHash,
+            "service": videoInput.serviceName.map { Self.sanitizeForFilePath($0) },
+            "creator": videoInput.creatorName.map { Self.sanitizeForFilePath($0) },
+            "postID": videoInput.postID.map { Self.sanitizeForFilePath($0) },
+            "date": today
+        ]
+
+        var resolved = Self.applyTokens(to: template, values: values)
+
+        // Ensure the filename ends with an extension. The template can end
+        // with `{ext}` (already substituted) or a literal extension; if not,
+        // append `.{ext}` automatically.
+        let lastPathExt = (resolved as NSString).pathExtension
+        if lastPathExt.isEmpty {
+            resolved = "\(resolved).\(format.fileExtension)"
+        }
+
+        return resolved
+    }
+
+    /// Substitute `{token}` placeholders in `input` using the provided value
+    /// map. Tokens whose value is `nil` resolve to an empty string. Unknown
+    /// tokens are left untouched.
+    fileprivate static func applyTokens(to input: String, values: [String: String?]) -> String {
+        var output = input
+        for (key, value) in values {
+            let placeholder = "{\(key)}"
+            guard output.contains(placeholder) else { continue }
+            let replacement = value ?? ""
+            output = output.replacingOccurrences(of: placeholder, with: replacement)
+        }
+        return output
+    }
+
+    /// Current date formatted as `yyyy-MM-dd`.
+    fileprivate static func todayString() -> String {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "yyyy-MM-dd"
+        return formatter.string(from: Date())
     }
 }
 

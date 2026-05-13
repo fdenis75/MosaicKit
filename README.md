@@ -17,12 +17,20 @@ A high-performance Swift package for generating video mosaics with Metal-acceler
 - 📊 **Overlay Annotations** - Per-frame labels (timestamp, index), customisable metadata headers, watermarks, and Color DNA strips
 - 🎬 **Video Preview Generation** - Create short highlight reels from any video, either exported to file or as a live `AVPlayerItem` composition
 
+## New in 1.1.5
+
+- **Skip-if-exists (`overwrite`)** — Both `MosaicConfiguration` and `PreviewConfiguration` now accept `overwrite: Bool` (default `false`). When `false`, the generators check for an existing output file *before* extracting any frames and return the existing URL immediately, saving significant CPU and I/O time in incremental batch workflows.
+- **Custom output directory templates** — Set `outputDirectoryTemplate` on either configuration to a token string such as `"{root}/{service}/{creator}/{density}"` and the library will resolve it at generation time. When `nil`, the existing default directory logic is unchanged.
+- **Custom filename templates** — Set `filenameTemplate` to a token string such as `"{name}_{density}_{width}.{ext}"` to control the output filename. When `nil`, the existing filename logic is unchanged.
+
+All three new options are fully `Codable`/`Sendable` and default to backward-compatible values, so existing code requires no changes.
+
 ## New in 1.1.4
 
 - Adaptive metadata headers now size themselves from the actual rendered content instead of relying on thumbnail-row heuristics.
 - File paths get their own shrink-to-fit header row, which keeps long source URLs and paths readable.
 - Per-frame label typography now scales from the thumbnail’s dominant dimension for more consistent captions across portrait and landscape layouts.
-- Preview compositions and exported preview videos now show each extract's source timestamp in a bottom-left dark pill for the first second of the extract.
+- Preview compositions and exported preview videos now show each extract’s source timestamp in a bottom-left dark pill for the first second of the extract.
 - On macOS 26 / iOS 26, preview video composition setup now uses `AVVideoComposition.Configuration` and `AVVideoCompositionCoreAnimationTool.Configuration` instead of the older mutable composition setup.
 
 ## Requirements
@@ -119,15 +127,18 @@ print("Mosaic saved to: \(mosaicURL.path)")
 
 ```swift
 public struct MosaicConfiguration {
-    var width: Int                      // Output width (default: 5120)
-    var density: DensityConfig          // Frame density (default: .m)
-    var format: OutputFormat            // JPEG, PNG, or HEIF
-    var layout: LayoutConfiguration     // Layout settings
-    var includeMetadata: Bool           // Add metadata header
-    var useAccurateTimestamps: Bool     // Precise frame extraction
-    var compressionQuality: Double      // 0.0 to 1.0 (default: 0.4)
-    var outputdirectory: URL?           // Output directory
-    var overlay: OverlayConfiguration   // Per-frame labels, header, watermark, Color DNA
+    var width: Int                           // Output width (default: 5120)
+    var density: DensityConfig               // Frame density (default: .m)
+    var format: OutputFormat                 // JPEG, PNG, or HEIF
+    var layout: LayoutConfiguration          // Layout settings
+    var includeMetadata: Bool                // Add metadata header
+    var useAccurateTimestamps: Bool          // Precise frame extraction
+    var compressionQuality: Double           // 0.0 to 1.0 (default: 0.4)
+    var outputdirectory: URL?                // Root output directory
+    var overlay: OverlayConfiguration        // Per-frame labels, header, watermark, Color DNA
+    var overwrite: Bool                      // Overwrite existing files (default: false)
+    var outputDirectoryTemplate: String?     // Token-based directory path (nil = default)
+    var filenameTemplate: String?            // Token-based filename (nil = default)
 }
 ```
 
@@ -309,6 +320,99 @@ config.overlay = OverlayConfiguration(
 let mosaicURL = try await generator.generate(for: video, config: config)
 ```
 
+## Output Path Control
+
+### Skip existing files (`overwrite`)
+
+By default (`overwrite: false`) both generators check for the output file **before** extracting a single frame. If the file already exists, generation is skipped and the existing URL is returned. Set `overwrite: true` to regenerate unconditionally.
+
+```swift
+// Process a large library incrementally — already-generated mosaics are skipped automatically
+var config = MosaicConfiguration.default
+config.overwrite = false   // default — safe to omit
+
+// Force regeneration even when the file is present
+config.overwrite = true
+```
+
+The same flag applies to `PreviewConfiguration` for preview videos.
+
+### Custom output directory template
+
+Set `outputDirectoryTemplate` to a token string. Tokens are resolved at generation time; unknown tokens are left as-is.
+
+```swift
+// Group output by service and creator, then density
+config.outputDirectoryTemplate = "{root}/{service}/{creator}/{density}"
+
+// Flat structure with a date-based subfolder
+config.outputDirectoryTemplate = "{root}/{date}"
+```
+
+**Available tokens — `MosaicConfiguration`**
+
+| Token | Value |
+|---|---|
+| `{root}` | `outputdirectory` when set, otherwise the video's parent directory |
+| `{service}` | `videoInput.serviceName` (omitted if nil) |
+| `{creator}` | `videoInput.creatorName` (omitted if nil) |
+| `{hash}` | Full configuration hash (`{width}_{density}_{aspectRatio}_{layout}`) |
+| `{width}` | Output width in pixels |
+| `{density}` | Density name (e.g. `XL`, `M`) |
+| `{aspectRatio}` | Aspect ratio raw value (e.g. `16:9`) |
+| `{layout}` | Layout type raw value (e.g. `custom`) |
+| `{date}` | Today's date in `yyyy-MM-dd` format |
+
+**Available tokens — `PreviewConfiguration`**
+
+| Token | Value |
+|---|---|
+| `{root}` | `outputDirectory` when set, otherwise the video's parent directory |
+| `{duration}` | Formatted target duration (e.g. `60s`, `2m`, `1m30s`) |
+| `{density}` | Density name |
+| `{format}` | Format raw value (e.g. `mp4`) |
+| `{date}` | Today's date in `yyyy-MM-dd` format |
+
+### Custom filename template
+
+Set `filenameTemplate` to a token string. If no file extension is present in the resolved name, `.{ext}` is appended automatically.
+
+```swift
+// Mosaic: prefix with post ID, include density
+config.filenameTemplate = "{postID}_{name}_{density}.{ext}"
+
+// Preview: include duration and audio flag
+previewConfig.filenameTemplate = "{name}_prev_{duration}_{audio}.{ext}"
+```
+
+**Available tokens — `MosaicConfiguration`**
+
+| Token | Value |
+|---|---|
+| `{name}` | Original filename without extension (sanitized) |
+| `{ext}` | Output format extension (`heic`, `jpg`, `png`) |
+| `{width}` | Output width |
+| `{density}` | Density name |
+| `{aspectRatio}` | Aspect ratio raw value |
+| `{layout}` | Layout type raw value |
+| `{hash}` | Full configuration hash |
+| `{service}` | `videoInput.serviceName` |
+| `{creator}` | `videoInput.creatorName` |
+| `{postID}` | `videoInput.postID` |
+| `{date}` | `yyyy-MM-dd` |
+
+**Available tokens — `PreviewConfiguration`**
+
+| Token | Value |
+|---|---|
+| `{name}` | Original filename without extension |
+| `{ext}` | Format file extension |
+| `{duration}` | Formatted target duration |
+| `{density}` | Density name |
+| `{format}` | Format raw value |
+| `{audio}` | `"audio"` or `"noaudio"` |
+| `{date}` | `yyyy-MM-dd` |
+
 ## Advanced Usage
 
 ### Batch Processing
@@ -458,10 +562,13 @@ public struct PreviewConfiguration {
     public var density: DensityConfig                // Number of clips (same levels as mosaic)
     public var format: VideoFormat                   // .mp4, .mov, .hevc, etc.
     public var includeAudio: Bool                    // Include audio track in preview
-    public var outputDirectory: URL?                 // Output folder (nil = video's parent directory)
+    public var outputDirectory: URL?                 // Root output folder (nil = video's parent)
     public var fullPathInName: Bool                  // Embed full source path in filename
     public var compressionQuality: Double            // 0.0–1.0
     public var useNativeExport: Bool                 // AVAssetExportSession vs SJSAssetExportSession
+    public var overwrite: Bool                       // Overwrite existing files (default: false)
+    public var outputDirectoryTemplate: String?      // Token-based directory path (nil = default)
+    public var filenameTemplate: String?             // Token-based filename (nil = default)
 }
 ```
 

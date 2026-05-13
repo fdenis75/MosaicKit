@@ -273,6 +273,36 @@ config.overlay = OverlayConfiguration(
 )
 ```
 
+## Output Path Control
+
+### Skip existing files
+
+Both `MosaicConfiguration` and `PreviewConfiguration` expose an `overwrite` flag (default `false`). When `false`, the generator checks for the output file before doing any work and returns the existing URL immediately if it is already present — ideal for incremental batch runs.
+
+```swift
+var config = MosaicConfiguration.default
+config.overwrite = false   // skip if already generated (default)
+config.overwrite = true    // always regenerate
+```
+
+### Custom directory and filename templates
+
+Use token strings to fully control where output files are placed and how they are named:
+
+```swift
+// Group by creator, then density level
+config.outputDirectoryTemplate = "{root}/{creator}/{density}"
+
+// Name each file with density and date
+config.filenameTemplate = "{name}_{density}_{date}.{ext}"
+```
+
+Available tokens for `MosaicConfiguration`: `{root}`, `{service}`, `{creator}`, `{hash}`, `{width}`, `{density}`, `{aspectRatio}`, `{layout}`, `{date}` (directory); `{name}`, `{ext}`, `{width}`, `{density}`, `{aspectRatio}`, `{layout}`, `{hash}`, `{service}`, `{creator}`, `{postID}`, `{date}` (filename).
+
+Available tokens for `PreviewConfiguration`: `{root}`, `{duration}`, `{density}`, `{format}`, `{date}` (directory); `{name}`, `{ext}`, `{duration}`, `{density}`, `{format}`, `{audio}`, `{date}` (filename).
+
+When either template is `nil` (the default), the existing naming logic is used unchanged.
+
 ## Error Handling
 
 MosaicKit provides comprehensive error types:
@@ -308,6 +338,7 @@ Now that you've created your first mosaic, explore these topics:
 
 - ``MosaicGenerator``
 - ``MosaicConfiguration``
+- ``PreviewConfiguration``
 - ``DensityConfig``
 - ``LayoutConfiguration``
 - ``OverlayConfiguration``

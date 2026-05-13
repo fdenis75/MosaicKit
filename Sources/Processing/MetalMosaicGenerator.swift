@@ -95,6 +95,29 @@ public actor MetalMosaicGenerator: MosaicGeneratorProtocol {
             return try await existingTask.value
         }
         layoutProcessor.mosaicAspectRatio = config.layout.aspectRatio.ratio
+
+        // Early-exit: if the output already exists and `overwrite` is false,
+        // skip generation entirely and return the existing URL.
+        if !config.overwrite {
+            if config.gifMode == .gifOnly {
+                let animURL = config.animatedOutputURL(for: video)
+                if FileManager.default.fileExists(atPath: animURL.path) {
+                    logger.debug("⏭️ Animation already exists, skipping generation: \(animURL.path)")
+                    return animURL
+                }
+            } else {
+                let rootFolder = config.outputdirectory ?? video.url.deletingLastPathComponent()
+                let outputDir = config.generateOutputDirectory(rootDirectory: rootFolder, videoInput: video)
+                let originalFilename = video.url.deletingPathExtension().lastPathComponent
+                let filename = config.generateFilename(originalFilename: originalFilename, videoInput: video)
+                let mosaicURL = outputDir.appendingPathComponent(filename)
+                if FileManager.default.fileExists(atPath: mosaicURL.path) {
+                    logger.debug("⏭️ Mosaic already exists, skipping generation: \(mosaicURL.path)")
+                    return mosaicURL
+                }
+            }
+        }
+
         let task = Task<URL, Error> {
             let startTime = CFAbsoluteTimeGetCurrent()
             defer { trackPerformance(startTime: startTime) }
@@ -305,15 +328,23 @@ public actor MetalMosaicGenerator: MosaicGeneratorProtocol {
                 if mutableConfig.gifMode == .withMosaic {
                     let animURL = mosaicURL.deletingPathExtension()
                         .appendingPathExtension(mutableConfig.animatedFormat.fileExtension)
-                    let gifFrames = try await thumbnailProcessor.extractFramesForGif(
-                        from: videoURL,
-                        asset: asset,
-                        count: layout.thumbCount,
-                        gifSize: mutableConfig.gifSize,
-                        accurate: mutableConfig.useAccurateTimestamps
-                    )
-                    try AnimatedGifGenerator.save(frames: gifFrames, to: animURL, format: mutableConfig.animatedFormat)
-                    logger.debug("💾 Animation saved to: \(animURL.path)")
+
+                    if FileManager.default.fileExists(atPath: animURL.path) && !mutableConfig.overwrite {
+                        logger.debug("⏭️ Animation already exists, skipping animation save: \(animURL.path)")
+                    } else {
+                        if FileManager.default.fileExists(atPath: animURL.path) {
+                            try? FileManager.default.removeItem(at: animURL)
+                        }
+                        let gifFrames = try await thumbnailProcessor.extractFramesForGif(
+                            from: videoURL,
+                            asset: asset,
+                            count: layout.thumbCount,
+                            gifSize: mutableConfig.gifSize,
+                            accurate: mutableConfig.useAccurateTimestamps
+                        )
+                        try AnimatedGifGenerator.save(frames: gifFrames, to: animURL, format: mutableConfig.animatedFormat)
+                        logger.debug("💾 Animation saved to: \(animURL.path)")
+                    }
                 }
 
                 return mosaicURL

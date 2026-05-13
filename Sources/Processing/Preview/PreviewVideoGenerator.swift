@@ -65,11 +65,24 @@ public actor PreviewVideoGenerator {
         config: PreviewConfiguration
     ) async throws -> URL {
         logger.info("Starting preview generation for \(video.title)")
-        
+
+        // Early-exit: if the resolved output already exists and `overwrite` is
+        // false, short-circuit and return the existing URL.
+        if !config.overwrite {
+            let outputDir = config.generateOutputDirectory(for: video)
+            let filename = config.generateFilename(for: video)
+            let existingURL = outputDir.appendingPathComponent(filename)
+            if FileManager.default.fileExists(atPath: existingURL.path) {
+                logger.info("Preview already exists, skipping generation: \(existingURL.path)")
+                reportProgress(for: video, progress: 1.0, status: .completed, outputURL: existingURL)
+                return existingURL
+            }
+        }
+
         // Create cancellation token
         let token = CancellationToken()
         cancellationTokens[video.id] = token
-        
+
         defer {
             cancellationTokens.removeValue(forKey: video.id)
         }

@@ -58,6 +58,28 @@ public struct PreviewConfiguration: Codable, Sendable, Hashable {
     /// The SJSAssetExportSession preset to use when ``useNativeExport`` is false.
     public var sJSExportPresetName: SjSExportPreset?
 
+    /// Whether to overwrite existing output files. When `false` (default),
+    /// generation short-circuits and returns the existing URL if the output
+    /// file already exists at the resolved path.
+    public var overwrite: Bool = false
+
+    /// Optional token-based template controlling the output directory layout.
+    ///
+    /// When `nil` (default), the legacy `{root}/movieprev/` layout is used.
+    /// When set, the template is resolved against the following tokens:
+    /// `{root}`, `{duration}`, `{density}`, `{format}`, `{date}`. Empty tokens
+    /// are skipped; unknown tokens are left as-is.
+    public var outputDirectoryTemplate: String? = nil
+
+    /// Optional token-based template controlling the output filename.
+    ///
+    /// When `nil` (default), the legacy filename layout is used. When set, the
+    /// template is resolved against the following tokens: `{name}`, `{ext}`,
+    /// `{duration}`, `{density}`, `{format}`, `{audio}`, `{date}`. The template
+    /// must end with `{ext}` or a literal extension; if no extension is
+    /// present, `.{ext}` is appended automatically.
+    public var filenameTemplate: String? = nil
+
     /// Backing store for `exportMaxResolution`.
     ///
     /// Stored as a raw `String?` so `PreviewConfiguration` remains fully `Codable`
@@ -93,6 +115,7 @@ public struct PreviewConfiguration: Codable, Sendable, Hashable {
         /// Encodes/decodes as `"exportMaxResolution"` for backward compatibility
         /// even though the backing stored property is `_exportMaxResolutionRaw`.
         case exportMaxResolution
+        case overwrite, outputDirectoryTemplate, filenameTemplate
     }
 
     // MARK: - Initialization
@@ -206,6 +229,9 @@ public struct PreviewConfiguration: Codable, Sendable, Hashable {
         // ExportMaxResolution itself requires macOS 26+; storing as a raw value keeps
         // PreviewConfiguration Codable on macOS 15+.
         _exportMaxResolutionRaw = try container.decodeIfPresent(String.self, forKey: .exportMaxResolution) ?? "1080p"
+        overwrite = try container.decodeIfPresent(Bool.self, forKey: .overwrite) ?? false
+        outputDirectoryTemplate = try container.decodeIfPresent(String.self, forKey: .outputDirectoryTemplate)
+        filenameTemplate = try container.decodeIfPresent(String.self, forKey: .filenameTemplate)
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -223,6 +249,9 @@ public struct PreviewConfiguration: Codable, Sendable, Hashable {
         try container.encodeIfPresent(exportPresetName, forKey: .exportPresetName)
         try container.encodeIfPresent(sJSExportPresetName, forKey: .sJSExportPresetName)
         try container.encodeIfPresent(_exportMaxResolutionRaw, forKey: .exportMaxResolution)
+        try container.encode(overwrite, forKey: .overwrite)
+        try container.encodeIfPresent(outputDirectoryTemplate, forKey: .outputDirectoryTemplate)
+        try container.encodeIfPresent(filenameTemplate, forKey: .filenameTemplate)
     }
 
     // MARK: - Extract Calculation
@@ -313,6 +342,11 @@ public struct PreviewConfiguration: Codable, Sendable, Hashable {
     /// - Returns: URL for output directory
     public func generateOutputDirectory(for videoInput: VideoInput) -> URL {
         let baseDirectory = outputDirectory ?? videoInput.url.deletingLastPathComponent()
+
+        if let template = outputDirectoryTemplate {
+            return resolveDirectoryTemplate(template, rootURL: baseDirectory, videoInput: videoInput)
+        }
+
         return baseDirectory
             .appendingPathComponent("movieprev", isDirectory: true)
     }
@@ -323,6 +357,14 @@ public struct PreviewConfiguration: Codable, Sendable, Hashable {
     /// - Returns: Filename string
     public func generateFilename(for videoInput: VideoInput) -> String {
         let originalFilename = videoInput.url.deletingPathExtension().lastPathComponent
+
+        if let template = filenameTemplate {
+            return resolveFilenameTemplate(
+                template,
+                originalFilename: originalFilename,
+                videoInput: videoInput
+            )
+        }
 
         let durationLabel = formatDuration(targetDuration)
         let audioLabel = includeAudio ? "audio" : "noaudio"
@@ -337,7 +379,7 @@ public struct PreviewConfiguration: Codable, Sendable, Hashable {
         }
         let timingLabel = extractTimingFilenameComponent.map { "_\($0)" } ?? ""
         let configHash = "\(durationLabel)_\(density.name)_\(format.rawValue)_\(audioLabel)_\(exportLabel)_\(resolution)\(timingLabel)"
-      
+
         if fullPathInName {
             // Use full path in filename
             let sanitizedPath = videoInput.url.deletingLastPathComponent().path
@@ -347,6 +389,117 @@ public struct PreviewConfiguration: Codable, Sendable, Hashable {
         } else {
             return "\(originalFilename)_preview_\(configHash).\(format.fileExtension)"
         }
+    }
+
+    // MARK: - Template Resolution
+
+    /// Resolve `outputDirectoryTemplate` against the available token set.
+    private func resolveDirectoryTemplate(
+        _ template: String,
+        rootURL: URL,
+        videoInput: VideoInput
+    ) -> URL {
+        let today = Self.todayString()
+        let values: [String: String?] = [
+            "root": rootURL.path,
+            "duration": formatDuration(targetDuration),
+            "density": density.name,
+            "format": format.rawValue,
+            "date": today
+        ]
+
+        let components = template.split(separator: "/", omittingEmptySubsequences: false).map(String.init)
+
+        var resolvedRoot: URL = rootURL
+        var trailing: [String] = []
+        var sawRoot = false
+
+        for (idx, component) in components.enumerated() {
+            let resolved = Self.applyTokens(to: component, values: values)
+
+            if !sawRoot && component.contains("{root}") {
+                resolvedRoot = rootURL
+                let extra = resolved.replacingOccurrences(of: rootURL.path, with: "")
+                let trimmed = extra.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+                if !trimmed.isEmpty {
+                    trailing.append(trimmed)
+                }
+                sawRoot = true
+                continue
+            }
+
+            if resolved.isEmpty { continue }
+
+            if idx == 0 && !sawRoot && resolved.hasPrefix("/") {
+                resolvedRoot = URL(fileURLWithPath: resolved)
+                sawRoot = true
+                continue
+            }
+
+            trailing.append(resolved)
+        }
+
+        var result = resolvedRoot
+        for part in trailing {
+            result = result.appendingPathComponent(part)
+        }
+        return result
+    }
+
+    /// Resolve `filenameTemplate` against the available token set.
+    private func resolveFilenameTemplate(
+        _ template: String,
+        originalFilename: String,
+        videoInput: VideoInput
+    ) -> String {
+        let today = Self.todayString()
+        let values: [String: String?] = [
+            "name": Self.sanitizeForFilePath(originalFilename),
+            "ext": format.fileExtension,
+            "duration": formatDuration(targetDuration),
+            "density": density.name,
+            "format": format.rawValue,
+            "audio": includeAudio ? "audio" : "noaudio",
+            "date": today
+        ]
+
+        var resolved = Self.applyTokens(to: template, values: values)
+
+        let lastPathExt = (resolved as NSString).pathExtension
+        if lastPathExt.isEmpty {
+            resolved = "\(resolved).\(format.fileExtension)"
+        }
+
+        return resolved
+    }
+
+    /// Substitute `{token}` placeholders in `input` using the provided value
+    /// map. Tokens whose value is `nil` resolve to an empty string. Unknown
+    /// tokens are left untouched.
+    fileprivate static func applyTokens(to input: String, values: [String: String?]) -> String {
+        var output = input
+        for (key, value) in values {
+            let placeholder = "{\(key)}"
+            guard output.contains(placeholder) else { continue }
+            let replacement = value ?? ""
+            output = output.replacingOccurrences(of: placeholder, with: replacement)
+        }
+        return output
+    }
+
+    /// Sanitize a string for use in file paths.
+    fileprivate static func sanitizeForFilePath(_ string: String) -> String {
+        let invalidCharacters = CharacterSet(charactersIn: "/:@#$%^&*(){}[]|\\<>?\"'+,=!`~;")
+        let components = string.components(separatedBy: invalidCharacters)
+        return components.joined(separator: "_").replacingOccurrences(of: " ", with: "_")
+    }
+
+    /// Current date formatted as `yyyy-MM-dd`.
+    fileprivate static func todayString() -> String {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "yyyy-MM-dd"
+        return formatter.string(from: Date())
     }
 
     /// Format duration for filename (e.g., "30s", "1m", "2m30s")
