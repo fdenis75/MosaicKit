@@ -18,6 +18,33 @@
           }
         ]
       }
+    },
+    {
+      "id" : "4FFD5FE7-A4F3-49B2-9AAA-ECB4F2F4F9E2",
+      "name" : "Configuration 3",
+      "options" : {
+        "environmentVariableEntries" : [
+          {
+            "enabled" : false,
+            "key" : "MOSAICKIT_SUITE_MODE",
+            "value" : "folder"
+          },
+          {
+            "key" : "PREVIEW_COMBO_RUN",
+            "value" : "1"
+          },
+          {
+            "enabled" : false,
+            "key" : "MOSAIC_TARGET_FOLDER",
+            "value" : "\/Users\/francois\/Downloads\/testvidsnodelete\/output"
+          },
+          {
+            "enabled" : false,
+            "key" : "MOSAIC_TEST_VIDEO",
+            "value" : "\/Users\/francois\/Downloads\/testvidsnodelete\/bunnylicorne.mp4"
+          }
+        ]
+      }
     }
   ],
   "defaultOptions" : {
@@ -43,6 +70,12 @@
       "skippedTests" : {
         "suites" : [
           {
+            "name" : "AnimatedGifGeneratorTests"
+          },
+          {
+            "name" : "CombinationTests"
+          },
+          {
             "name" : "ErrorTypesTests"
           },
           {
@@ -62,6 +95,9 @@
           },
           {
             "name" : "PreviewConfigurationTests"
+          },
+          {
+            "name" : "PreviewVideoGeneratorTests"
           },
           {
             "name" : "ThumbnailProcessorTests"

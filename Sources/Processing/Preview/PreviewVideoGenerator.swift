@@ -208,6 +208,76 @@ public actor PreviewVideoGenerator {
     }
 }
 
+// MARK: - macOS background-focus monitor
+
+/// Polls `NSWorkspace` every 500 ms and emits an OSLog warning (visible in Console.app)
+/// plus a stdout line whenever another app steals focus from the export process.
+///
+/// This makes it straightforward to correlate a stall in the test output with a
+/// "process went to background" event:
+///
+/// ```
+/// [FOCUS ⬅️]  DJI_0080  backgrounded at 14:03:27.451  frontmost: Safari
+/// ...
+/// [FOCUS ▶️]  DJI_0080  foreground restored at 14:03:41.218  (14.8 s in background)
+/// ```
+///
+/// Read the logs live with:
+/// ```bash
+/// log stream --predicate 'subsystem == "com.mosaickit"' --level debug
+/// ```
+#if os(macOS)
+enum PreviewFocusMonitor {
+
+    private static let timeFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.dateFormat = "HH:mm:ss.SSS"
+        return f
+    }()
+
+    /// Starts the monitor and returns the background `Task` that drives it.
+    /// Call `task.cancel()` (or let a `defer` do it) to stop monitoring.
+    static func start(videoTitle: String, logger: Logger) -> Task<Void, Never> {
+        Task { @MainActor in
+            let ourPID    = ProcessInfo.processInfo.processIdentifier
+            var lastPID   = NSWorkspace.shared.frontmostApplication?.processIdentifier
+            var bgStart   = Date?.none
+
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 500_000_000)
+
+                let frontPID  = NSWorkspace.shared.frontmostApplication?.processIdentifier
+                guard frontPID != lastPID else { continue }
+                lastPID = frontPID
+
+                let ts = timeFormatter.string(from: Date())
+
+                if frontPID != ourPID {
+                    // Went to background
+                    bgStart = Date()
+                    let appName = NSWorkspace.shared.frontmostApplication?.localizedName ?? "?"
+                    let msg = "backgrounded at \(ts)  frontmost: \(appName)"
+                    logger.warning("[FOCUS ⬅️] \(videoTitle, privacy: .public)  \(msg, privacy: .public)")
+                    print("[FOCUS ⬅️]  \(videoTitle)  \(msg)")
+                    fflush(stdout)
+                } else {
+                    // Returned to foreground
+                    let elapsed = bgStart.map { String(format: "%.1f s in background", Date().timeIntervalSince($0)) } ?? ""
+                    let msg = "foreground restored at \(ts)  \(elapsed)"
+                    logger.info("[FOCUS ▶️] \(videoTitle, privacy: .public)  \(msg, privacy: .public)")
+                    print("[FOCUS ▶️]  \(videoTitle)  \(msg)")
+                    fflush(stdout)
+                    bgStart = nil
+                }
+            }
+        }
+    }
+}
+#endif
+
+// MARK: - Generation logic
+
 /// Logic for preview generation, isolated to MainActor to ensure AVFoundation safety
 // @available(macOS 26, iOS 26, *)
 struct PreviewGenerationLogic {
@@ -226,9 +296,29 @@ struct PreviewGenerationLogic {
         cancellationCheck: @escaping @Sendable () -> Bool
     ) async throws -> URL {
         logger.info("Starting preview generation logic for \(video.title)")
-        
+
+        // On macOS, the system throttles or briefly suspends background processes,
+        // which stalls AVAssetExportSession and AVVideoCompositionCoreAnimationTool
+        // (both depend on VideoToolbox / Core Animation resources that are
+        // deprioritised when another window has focus).
+        // Holding a .userInitiated activity token tells the scheduler to keep
+        // this process at full priority for the duration of the export.
+        #if os(macOS)
+        let exportActivity = ProcessInfo.processInfo.beginActivity(
+            options: [.userInitiated, .idleSystemSleepDisabled, .automaticTerminationDisabled],
+            reason: "MosaicKit preview video generation"
+        )
+        defer { ProcessInfo.processInfo.endActivity(exportActivity) }
+
+        // Background-focus monitor: logs to OSLog (Console.app) and stdout whenever
+        // another app steals focus from the exporting process. Useful for correlating
+        // export stalls with "went to background" events.
+        let focusMonitor = PreviewFocusMonitor.start(videoTitle: video.title, logger: logger)
+        defer { focusMonitor.cancel() }
+        #endif
+
         if cancellationCheck() { throw PreviewError.cancelled }
-        
+
         progressHandler(0.0, .analyzing, nil, nil)
         
         // Load asset
@@ -652,16 +742,16 @@ struct PreviewGenerationLogic {
         }
         
         // Create audio mix if we have audio and time-scaling is in play.
-        // .spectral is Apple's recommended algorithm for offline export (pitch-preserving,
-        // supports offline/preflight rendering). .varispeed is playback-only and causes
-        // AudioQueue rate-change conflicts ("scheduling rate change at unscaled t=X") during
-        // AVAssetExportSession offline render. Only attach the mix when speed != 1.0 because
-        // there is no pitch correction needed at natural speed.
+        // .timeDomain is used instead of .spectral: both support offline export, but .spectral's
+        // FFT-based pitch correction is CPU-intensive enough to stall the remakerOfflineMixer
+        // thread when the process is backgrounded. .timeDomain uses less CPU at the cost of
+        // minor artifacts above ~1.5×, which is acceptable for preview generation.
+        // .varispeed is playback-only and causes AudioQueue rate-change conflicts during export.
         var audioMix: AVMutableAudioMix?
         if let compAudioTrack = compositionAudioTrack, playbackSpeed != 1.0 {
             let params = AVMutableAudioMixInputParameters(track: compAudioTrack)
             params.trackID = compAudioTrack.trackID
-            params.audioTimePitchAlgorithm = .spectral
+            params.audioTimePitchAlgorithm = .timeDomain
             let mix = AVMutableAudioMix()
             mix.inputParameters = [params]
             audioMix = mix
@@ -1074,9 +1164,15 @@ struct PreviewGenerationLogic {
             )
             
             logger.info("SJS export: format=\(config.format.rawValue), q.uality=, audioBitrate=\(audioBitrate)")
-            
-            // Stall detection: cancel if no progress for 60 seconds
+
+            // Stall detection: cancel if no progress for the timeout period.
+            // macOS doubles the budget because a backgrounded process can legitimately
+            // pause for >60 s before the ProcessInfo activity assertion resumes it.
+            #if os(macOS)
+            let stallTimeout: TimeInterval = 120
+            #else
             let stallTimeout: TimeInterval = 60
+            #endif
             let progressTracker = ExportProgressTracker()
             progressTracker.recordProgress(0)
             let stallDetected = CancellationToken()
@@ -1109,30 +1205,37 @@ struct PreviewGenerationLogic {
             }
             defer { stallMonitor.cancel() }
             
-            // Perform the export
+            // Perform the export — detached at userInitiated priority so the export is
+            // not deprioritized when the calling process goes to the background.
             do {
                 // Safe: composition is created and fully configured on this actor before the cast;
                 // SJSAssetExportSession only reads the asset during the export call below.
                 nonisolated(unsafe) let compositionAsset = composition as AVAsset
+                nonisolated(unsafe) let exporterRef = exporter
 
                 if let vc = videoComposition {
+                    nonisolated(unsafe) let vcRef = vc
                     // Use the raw-settings overload so we can pass our custom video composition for scaling.
-                    try await exporter.export(
-                        asset: compositionAsset,
-                        audioOutputSettings: AudioOutputSettings.default.settingsDictionary,
-                        videoOutputSettings: videoConfig.settingsDictionary,
-                        composition: vc,
-                        to: outputURL,
-                        as: config.format.avFileType
-                    )
+                    try await Task.detached(priority: .userInitiated) {
+                        try await exporterRef.export(
+                            asset: compositionAsset,
+                            audioOutputSettings: AudioOutputSettings.default.settingsDictionary,
+                            videoOutputSettings: videoConfig.settingsDictionary,
+                            composition: vcRef,
+                            to: outputURL,
+                            as: config.format.avFileType
+                        )
+                    }.value
                 } else {
-                    try await exporter.export(
-                        asset: compositionAsset,
-                        audio: .default,
-                        video: videoConfig,
-                        to: outputURL,
-                        as: config.format.avFileType
-                    )
+                    try await Task.detached(priority: .userInitiated) {
+                        try await exporterRef.export(
+                            asset: compositionAsset,
+                            audio: .default,
+                            video: videoConfig,
+                            to: outputURL,
+                            as: config.format.avFileType
+                        )
+                    }.value
                 }
                 
                 progressTask.cancel()
@@ -1356,8 +1459,14 @@ struct PreviewGenerationLogic {
             exportSession.audioMix = mix
         }
 
-        // Stall detection: cancel if no progress for 60 seconds
+        // Stall detection: cancel if no progress for the timeout period.
+        // macOS doubles the budget because a backgrounded process can legitimately
+        // pause for >60 s before the ProcessInfo activity assertion resumes it.
+        #if os(macOS)
+        let stallTimeout: TimeInterval = 120
+        #else
         let stallTimeout: TimeInterval = 60
+        #endif
         let progressTracker = ExportProgressTracker()
         progressTracker.recordProgress(0)
 
@@ -1405,9 +1514,13 @@ struct PreviewGenerationLogic {
         }
         defer { cancellationMonitor.cancel() }
 
-        // Perform the export
+        // Perform the export — detached at userInitiated priority so the export is
+        // not deprioritized when the calling process goes to the background.
         do {
-            try await exportSession.export(to: outputURL, as: config.format.avFileType)
+            nonisolated(unsafe) let sessionRef = exportSession
+            try await Task.detached(priority: .userInitiated) {
+                try await sessionRef.export(to: outputURL, as: config.format.avFileType)
+            }.value
         } catch {
             if stallDetected.isCancelled {
                 try? FileManager.default.removeItem(at: outputURL)

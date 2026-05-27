@@ -48,7 +48,7 @@ public struct VideoInput: Codable, Hashable, Sendable {
     
     // MARK: - Organizational Metadata
     
-    /// Service name (e.g., "onlyfans", "fansly", "candfans")
+    /// // a first string that can be used to organize output (by service : Youtube, instagram, etc..)
     public let serviceName: String?
     
     /// Creator name for organizing output

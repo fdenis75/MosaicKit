@@ -736,7 +736,7 @@ public func createMosaicCoordinatorWithCoreGraphics(concurrencyLimit: Int = 0) t
 /// Creates a coordinator with the default generator for the current platform
 /// - Parameter concurrencyLimit: Maximum number of concurrent generation tasks
 /// - Returns: A coordinator with the optimal generator for this platform
-#if os(macOS)
+#if canImport(metal)
 public func createDefaultMosaicCoordinator(concurrencyLimit: Int = 0) throws -> MosaicGeneratorCoordinator<MetalMosaicGenerator> {
     try createMosaicCoordinatorWithMetal(concurrencyLimit: concurrencyLimit)
 }
