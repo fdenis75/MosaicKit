@@ -2,13 +2,13 @@
 
 A high-performance Swift package for generating video mosaics with Metal-accelerated image processing. Extract frames from videos and arrange them into beautiful, customizable mosaic layouts with optional metadata headers.
 
-![Platform](https://img.shields.io/badge/platform-macOS%2015%2B%20%7C%20iOS%2015%2B-blue)
+![Platform](https://img.shields.io/badge/platform-macOS%2026%2B%20%7C%20iOS%2026%2B-blue)
 ![Swift](https://img.shields.io/badge/Swift-6.2-orange)
 ![License](https://img.shields.io/badge/license-MIT-green)
 
 ## Features
 
-- 🚀 **Metal-Accelerated Processing** - Hardware-accelerated mosaic generation for maximum performance
+- 🚀 **Metal GPU Acceleration** - Hardware-accelerated mosaic generation on macOS, iOS, and macCatalyst
 - 🎨 **Multiple Layout Algorithms** - Classic, custom, auto-screen, dynamic, and iPhone-optimized layouts
 - ⚙️ **Configurable Density Levels** - From XXL (minimal) to XXS (maximal) frame extraction
 - 📦 **Multiple Output Formats** - JPEG, PNG, and HEIF with configurable compression
@@ -16,6 +16,13 @@ A high-performance Swift package for generating video mosaics with Metal-acceler
 - 🎯 **Hardware-Accelerated Frame Extraction** - Uses VideoToolbox for optimal performance
 - 📊 **Overlay Annotations** - Per-frame labels (timestamp, index), customisable metadata headers, watermarks, and Color DNA strips
 - 🎬 **Video Preview Generation** - Create short highlight reels from any video, either exported to file or as a live `AVPlayerItem` composition
+
+## New in 1.2.0
+
+- **Metal on iOS and macCatalyst** — Metal GPU acceleration is now used on all supported platforms. `CoreGraphicsMosaicGenerator` and `CoreGraphicsImageProcessor` have been removed; Metal has been available on iOS since iOS 8 and is fully supported on iOS 26+.
+- **`GeneratorPreference.preferCoreGraphics` removed** — Use `.auto` or `.preferMetal` (both select Metal). Existing calls to `.preferCoreGraphics` must be updated.
+- **Gradient background bug fixed on iOS** — `MetalImageProcessor.processImagesToMTLTexture` now correctly renders the dominant-colour gradient background on iOS (the iOS code path was previously a no-op).
+- **Unified colour algorithm** — `DominantColors` now uses `.euclidean` on all platforms.
 
 ## New in 1.1.18
 
@@ -39,10 +46,10 @@ All three new options are fully `Codable`/`Sendable` and default to backward-com
 
 ## Requirements
 
-- macOS 15.0+ or iOS 15.0+
+- macOS 26.0+ or iOS 26.0+
 - Xcode 16.0+
 - Swift 6.2+
-- Metal-capable device
+- Metal-capable device (guaranteed on all iOS 26+ and macOS 26+ devices)
 
 ## Installation
 
@@ -52,7 +59,7 @@ Add MosaicKit to your `Package.swift`:
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/fdenis75/MosaicKit.git", from: "1.1.18")
+    .package(url: "https://github.com/fdenis75/MosaicKit.git", from: "1.2.0")
 ]
 ```
 
@@ -810,7 +817,8 @@ let coordinator = MosaicGeneratorCoordinator(
 
 ### "Metal is not supported"
 - Ensure you're running on a Metal-capable device
-- Check minimum OS requirements (macOS 15+ / iOS 15+)
+- Check minimum OS requirements (macOS 26+ / iOS 26+)
+- Metal is guaranteed on all iOS 26+ and macOS 26+ devices; this error should not occur in practice
 
 ### Out of memory errors
 - Reduce mosaic width
