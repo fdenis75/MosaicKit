@@ -132,8 +132,8 @@ public struct PreviewConfiguration: Codable, Sendable, Hashable {
     /// ```
     public init(
         targetDuration: TimeInterval = 60,
-        minimumExtractDuration: TimeInterval? = 4.0,
-        maximumPlaybackSpeed: Double? = 1.5,
+        minimumExtractDuration: TimeInterval? = nil,
+        maximumPlaybackSpeed: Double? = nil,
         density: DensityConfig = .m,
         format: VideoFormat = .mp4,
         includeAudio: Bool = true,
@@ -166,8 +166,8 @@ public struct PreviewConfiguration: Codable, Sendable, Hashable {
     @available(macOS 26, iOS 26, *)
     public init(
         targetDuration: TimeInterval = 60,
-        minimumExtractDuration: TimeInterval? = 4.0,
-        maximumPlaybackSpeed: Double? = 1.5,
+        minimumExtractDuration: TimeInterval? = nil,
+        maximumPlaybackSpeed: Double? = nil,
         density: DensityConfig = .m,
         format: VideoFormat = .mp4,
         includeAudio: Bool = true,
@@ -206,16 +206,8 @@ public struct PreviewConfiguration: Codable, Sendable, Hashable {
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         targetDuration = try container.decode(TimeInterval.self, forKey: .targetDuration)
-        if container.contains(.minimumExtractDuration) {
-            minimumExtractDuration = try container.decodeIfPresent(TimeInterval.self, forKey: .minimumExtractDuration)
-        } else {
-            minimumExtractDuration = 4.0
-        }
-        if container.contains(.maximumPlaybackSpeed) {
-            maximumPlaybackSpeed = try container.decodeIfPresent(Double.self, forKey: .maximumPlaybackSpeed)
-        } else {
-            maximumPlaybackSpeed = 1.5
-        }
+        minimumExtractDuration = try container.decodeIfPresent(TimeInterval.self, forKey: .minimumExtractDuration)
+        maximumPlaybackSpeed = try container.decodeIfPresent(Double.self, forKey: .maximumPlaybackSpeed)
         density = try container.decode(DensityConfig.self, forKey: .density)
         format = try container.decode(VideoFormat.self, forKey: .format)
         includeAudio = try container.decode(Bool.self, forKey: .includeAudio)
@@ -518,10 +510,7 @@ public struct PreviewConfiguration: Codable, Sendable, Hashable {
     }
 
     private var extractTimingFilenameComponent: String? {
-        let usesDefaultMinimum = minimumExtractDuration == 4.0
-        let usesDefaultMaximum = maximumPlaybackSpeed == 1.5
-
-        guard !usesDefaultMinimum || !usesDefaultMaximum else {
+        guard minimumExtractDuration != nil || maximumPlaybackSpeed != nil else {
             return nil
         }
 
