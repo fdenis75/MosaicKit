@@ -327,7 +327,10 @@ public actor PreviewGeneratorCoordinator {
         let physicalMemoryGB = Double(ProcessInfo.processInfo.physicalMemory) / 1_073_741_824.0
         let memoryBasedLimit = max(2, Int(physicalMemoryGB / 0.5))
 
-        let optimal = min(cpuBasedLimit, memoryBasedLimit, 8)
+        // Limit dynamic concurrency of video exports to a maximum of 2.
+        // Hardware encoders (VideoToolbox) on Apple Silicon/iOS have limited physical channels (typically 2-3).
+        // Running more than 2 high-definition encodes concurrently causes resource starvation and VideoToolbox queue stalls.
+        let optimal = min(cpuBasedLimit, memoryBasedLimit, 2)
         logger.info("Calculated optimal concurrency: \(optimal) (CPU: \(cpuBasedLimit), Memory: \(memoryBasedLimit))")
 
         return optimal

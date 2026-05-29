@@ -317,6 +317,22 @@ struct PreviewGenerationLogic {
         defer { focusMonitor.cancel() }
         #endif
 
+        #if os(iOS)
+        // Request background execution time on iOS using key-value coding to remain 100% safe inside App Extensions
+        var backgroundTaskID: UIBackgroundTaskIdentifier = .invalid
+        if let sharedApp = NSClassFromString("UIApplication")?.value(forKeyPath: "sharedApplication") as? UIApplication {
+            backgroundTaskID = sharedApp.beginBackgroundTask(withName: "com.mosaickit.preview-export-\(video.id.uuidString)") {
+                sharedApp.endBackgroundTask(backgroundTaskID)
+            }
+        }
+        defer {
+            if backgroundTaskID != .invalid,
+               let sharedApp = NSClassFromString("UIApplication")?.value(forKeyPath: "sharedApplication") as? UIApplication {
+                sharedApp.endBackgroundTask(backgroundTaskID)
+            }
+        }
+        #endif
+
         if cancellationCheck() { throw PreviewError.cancelled }
 
         progressHandler(0.0, .analyzing, nil, nil)
@@ -349,6 +365,14 @@ struct PreviewGenerationLogic {
         
         // Compose
         progressHandler(0.2, .composing, nil, "Composing \(timestamps.count) segments...")
+        
+        // Resolve custom target size if using native export with a fixed preset
+        var customTargetSize: CGSize? = nil
+        if config.useNativeExport {
+            let preset = config.effectiveExportPreset
+            customTargetSize = resolutionLimit(for: preset)
+        }
+        
         let videoComposition = try await composeVideoSegments(
             asset: asset,
             timestamps: timestamps,
@@ -356,6 +380,7 @@ struct PreviewGenerationLogic {
             playbackSpeed: playbackSpeed,
             includeAudio: config.includeAudio,
             maxResolutionRaw: config.exportMaxResolutionRaw,
+            customTargetSize: customTargetSize,
             video: video,
             progressHandler: progressHandler,
             cancellationCheck: cancellationCheck
@@ -600,6 +625,7 @@ struct PreviewGenerationLogic {
         playbackSpeed: Double,
         includeAudio: Bool,
         maxResolutionRaw: String?,
+        customTargetSize: CGSize? = nil,
         includeOverlayCues: Bool = true,
         video: VideoInput,
         progressHandler: @escaping @Sendable (Double, PreviewGenerationStatus, URL?, String?) -> Void,
@@ -762,7 +788,8 @@ struct PreviewGenerationLogic {
             sourceVideoTrack: videoTrack,
             compositionVideoTrack: compositionVideoTrack,
             overlayCues: includeOverlayCues ? overlayCues : [],
-            maxResolutionRaw: maxResolutionRaw
+            maxResolutionRaw: maxResolutionRaw,
+            customTargetSize: customTargetSize
         )
         
         return (composition, audioMix, videoComp)
@@ -773,7 +800,8 @@ struct PreviewGenerationLogic {
         sourceVideoTrack: AVAssetTrack,
         compositionVideoTrack: AVMutableCompositionTrack,
         overlayCues: [PreviewOverlayCue],
-        maxResolutionRaw: String?
+        maxResolutionRaw: String?,
+        customTargetSize: CGSize? = nil
     ) async throws -> AVVideoComposition {
         let naturalSize = try await sourceVideoTrack.load(.naturalSize)
         let preferredTransform = try await sourceVideoTrack.load(.preferredTransform)
@@ -785,26 +813,38 @@ struct PreviewGenerationLogic {
         var renderSize = CGSize(width: sourceWidth, height: sourceHeight)
         var finalTransform = preferredTransform
 
+        // Resolve target constraints
+        var targetMaxWidth = sourceWidth
+        var targetMaxHeight = sourceHeight
+        var needsScaling = false
+
         if #available(macOS 26, iOS 26, *),
            let rawRes = maxResolutionRaw,
            let maxRes = ExportMaxResolution(rawValue: rawRes) {
-            let targetMaxWidth = CGFloat(maxRes.maxWidth)
-            let targetMaxHeight = CGFloat(maxRes.maxHeight)
+            targetMaxWidth = CGFloat(maxRes.maxWidth)
+            targetMaxHeight = CGFloat(maxRes.maxHeight)
+            needsScaling = true
+        }
 
-            if sourceWidth > targetMaxWidth || sourceHeight > targetMaxHeight {
-                let scaleX = targetMaxWidth / sourceWidth
-                let scaleY = targetMaxHeight / sourceHeight
-                let scale = min(scaleX, scaleY)
-                renderSize = CGSize(
-                    width: (sourceWidth * scale).rounded(.down),
-                    height: (sourceHeight * scale).rounded(.down)
-                )
-                finalTransform = preferredTransform.concatenating(
-                    CGAffineTransform(scaleX: scale, y: scale)
-                )
+        if let customSize = customTargetSize {
+            targetMaxWidth = min(targetMaxWidth, customSize.width)
+            targetMaxHeight = min(targetMaxHeight, customSize.height)
+            needsScaling = true
+        }
 
-                logger.info("Scaling composition from \(Int(sourceWidth))x\(Int(sourceHeight)) to \(Int(renderSize.width))x\(Int(renderSize.height))")
-            }
+        if needsScaling && (sourceWidth > targetMaxWidth || sourceHeight > targetMaxHeight) {
+            let scaleX = targetMaxWidth / sourceWidth
+            let scaleY = targetMaxHeight / sourceHeight
+            let scale = min(scaleX, scaleY)
+            renderSize = CGSize(
+                width: (sourceWidth * scale).rounded(.down),
+                height: (sourceHeight * scale).rounded(.down)
+            )
+            finalTransform = preferredTransform.concatenating(
+                CGAffineTransform(scaleX: scale, y: scale)
+            )
+
+            logger.info("Scaling composition from \(Int(sourceWidth))x\(Int(sourceHeight)) to \(Int(renderSize.width))x\(Int(renderSize.height))")
         }
 
         if #available(macOS 26, iOS 26, *) {
@@ -904,6 +944,9 @@ struct PreviewGenerationLogic {
         renderSize: CGSize,
         cues: [PreviewOverlayCue]
     ) -> AVVideoCompositionCoreAnimationTool {
+        CATransaction.begin()
+        CATransaction.setValue(kCFBooleanTrue, forKey: kCATransactionDisableActions)
+
         let parentLayer = CALayer()
         parentLayer.frame = CGRect(origin: .zero, size: renderSize)
 
@@ -926,15 +969,19 @@ struct PreviewGenerationLogic {
             )
         }
 
+        let tool: AVVideoCompositionCoreAnimationTool
         if #available(macOS 26, iOS 26, *) {
             let configuration = AVVideoCompositionCoreAnimationTool.Configuration(
                 postProcessingAsVideoLayer: videoLayer,
                 containingLayer: parentLayer
             )
-            return AVVideoCompositionCoreAnimationTool(configuration: configuration)
+            tool = AVVideoCompositionCoreAnimationTool(configuration: configuration)
+        } else {
+            tool = AVVideoCompositionCoreAnimationTool(postProcessingAsVideoLayer: videoLayer, in: parentLayer)
         }
 
-        return AVVideoCompositionCoreAnimationTool(postProcessingAsVideoLayer: videoLayer, in: parentLayer)
+        CATransaction.commit()
+        return tool
     }
 
     private static func makeTimestampPillLayer(
@@ -1390,6 +1437,19 @@ struct PreviewGenerationLogic {
                 return (videoConfig, audioBitrate)
             }
         }
+    
+    private static func resolutionLimit(for presetName: String) -> CGSize? {
+        if presetName.contains("3840x2160") {
+            return CGSize(width: 3840, height: 2160)
+        } else if presetName.contains("1920x1080") {
+            return CGSize(width: 1920, height: 1080)
+        } else if presetName.contains("960x540") {
+            return CGSize(width: 960, height: 540)
+        } else if presetName.contains("1280x720") {
+            return CGSize(width: 1280, height: 720)
+        }
+        return nil
+    }
     
 
     
