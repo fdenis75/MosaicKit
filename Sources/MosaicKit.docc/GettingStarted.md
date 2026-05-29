@@ -114,7 +114,7 @@ MosaicKit automatically selects the best generator for your platform, but you ca
 let generator = try MosaicGenerator()
 
 // Force Core Graphics on macOS (useful for testing iOS behavior)
-let cgGenerator = try MosaicGenerator(preference: .preferCoreGraphics)
+let metalGenerator = try MosaicGenerator(preference: .preferMetal)
 
 // Prefer Metal (macOS only, falls back to Core Graphics on iOS)
 let metalGenerator = try MosaicGenerator(preference: .preferMetal)
@@ -318,7 +318,7 @@ do {
     print("Invalid video: \(message)")
 } catch MosaicError.metalNotSupported {
     print("Metal not available, falling back to Core Graphics")
-    let cgGenerator = try MosaicGenerator(preference: .preferCoreGraphics)
+    let metalGenerator = try MosaicGenerator(preference: .preferMetal)
     // Retry with Core Graphics...
 } catch {
     print("Generation failed: \(error.localizedDescription)")

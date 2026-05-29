@@ -40,18 +40,16 @@ MosaicKit/
 
 ## Architecture
 
-### Dual-engine design
+### Single Metal engine
 
-MosaicKit has two concrete generator implementations behind a shared protocol:
+MosaicKit uses a single Metal GPU backend on all platforms (macOS, iOS, macCatalyst):
 
 | Class | Platform | Backend |
 |---|---|---|
-| `MetalMosaicGenerator` | macOS | Metal GPU (actor-isolated) |
-| `CoreGraphicsMosaicGenerator` | iOS / universal | Core Graphics + vImage/Accelerate |
+| `MetalMosaicGenerator` | macOS, iOS, macCatalyst | Metal GPU (actor-isolated) |
 
-`MosaicGeneratorFactory` picks the right implementation at runtime. The public convenience wrapper
-`MosaicKit.swift` / `MosaicGenerator` hides this behind `.auto`, `.preferMetal`,
-`.preferCoreGraphics` preferences.
+`MosaicGeneratorFactory` creates a `MetalMosaicGenerator` on all platforms. The public wrapper
+`MosaicKit.swift` / `MosaicGenerator` exposes `.auto` and `.preferMetal` preferences.
 
 ### Key types
 
@@ -59,13 +57,11 @@ MosaicKit has two concrete generator implementations behind a shared protocol:
 |---|---|---|
 | `MosaicGenerator` | `Sources/MosaicKit.swift` | Public entry point |
 | `MosaicGeneratorProtocol` | `Processing/MosaicGeneratorProtocol.swift` | Shared interface |
-| `MetalMosaicGenerator` | `Processing/MetalMosaicGenerator.swift` | macOS Metal engine (actor) |
-| `CoreGraphicsMosaicGenerator` | `Processing/CoreGraphicsMosaicGenerator.swift` | iOS/CPU engine |
+| `MetalMosaicGenerator` | `Processing/MetalMosaicGenerator.swift` | Metal engine (actor, all platforms) |
 | `MosaicGeneratorCoordinator` | `Processing/MosaicGeneratorCoordinator.swift` | Concurrent batch manager |
 | `LayoutProcessor` | `Processing/LayoutProcessor.swift` | Layout calculation + caching |
 | `ThumbnailProcessor` | `Processing/ThumbnailProcessor.swift` | Frame extraction |
 | `MetalImageProcessor` | `Processing/MetalImageProcessor.swift` | Metal shader dispatch |
-| `CoreGraphicsImageProcessor` | `Processing/CoreGraphicsImageProcessor.swift` | vImage-based processing |
 | `VideoMetadataExtractor` | `Processing/VideoMetadataExtractor.swift` | AVFoundation metadata |
 | `PreviewVideoGenerator` | `Processing/Preview/PreviewVideoGenerator.swift` | Highlight reel generation |
 | `MosaicConfiguration` | `Models/MosaicConfiguration.swift` | Main config struct |
@@ -78,7 +74,7 @@ MosaicKit has two concrete generator implementations behind a shared protocol:
 1. Extract video metadata (AVAsset / `VideoMetadataExtractor`)
 2. Extract frames (VideoToolbox hardware acceleration via `ThumbnailProcessor`)
 3. Calculate layout (`LayoutProcessor` – cached)
-4. Process images (Metal shaders or Core Graphics / vImage)
+4. Process images (Metal GPU shaders via `MetalImageProcessor`)
 5. Extract dominant colors (`DominantColors` package → smart background)
 6. Compose final mosaic with optional metadata overlay
 7. Encode & save (HEIF / JPEG / PNG via `VideoFormat`)

@@ -10,18 +10,15 @@ High-performance video mosaic generation with platform-optimized image processin
 
 ## Overview
 
-MosaicKit is a powerful Swift package that generates beautiful video mosaics by extracting frames from videos and arranging them into configurable layouts. The library leverages platform-specific optimizations to deliver maximum performance:
-
-- **macOS**: Metal GPU acceleration for blazing-fast processing
-- **iOS**: Core Graphics with vImage/Accelerate framework optimization
+MosaicKit is a powerful Swift package that generates beautiful video mosaics by extracting frames from videos and arranging them into configurable layouts. The library uses Metal GPU acceleration on all supported platforms (macOS, iOS, macCatalyst) for maximum performance.
 
 ### Key Features
 
-- **Dual Processing Engines**: Automatic selection of optimal processing engine based on platform
+- **Metal GPU Acceleration**: Single high-performance engine on every platform
 - **Multiple Layout Algorithms**: Classic, custom, auto, dynamic, and iPhone-optimized layouts
 - **Flexible Configuration**: Control density, aspect ratio, output format, and visual styling
 - **Batch Processing**: Generate mosaics for multiple videos with intelligent concurrency management
-- **Hardware Acceleration**: VideoToolbox for frame extraction, Metal/vImage for image processing
+- **Hardware Acceleration**: VideoToolbox for frame extraction, Metal for image processing
 - **Preview Generation**: Create condensed video previews from full-length videos
 
 ## Topics
@@ -58,10 +55,9 @@ MosaicKit is a powerful Swift package that generates beautiful video mosaics by 
 - ``LayoutType``
 - ``AspectRatio``
 
-### Platform-Specific Generators
+### Generator
 
 - ``MetalMosaicGenerator``
-- ``CoreGraphicsMosaicGenerator``
 
 ### Preview Generation
 

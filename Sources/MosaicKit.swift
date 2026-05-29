@@ -4,16 +4,13 @@ import CoreGraphics
 /// Main entry point for MosaicKit - Video Mosaic and Preview Generation Library
 ///
 /// MosaicKit provides:
-/// - **Mosaic Generation**: High-performance video mosaic generation with platform-specific optimizations
-///   - macOS: Metal-accelerated GPU processing (default) or Core Graphics
-///   - iOS: Core Graphics with vImage/Accelerate optimization (default)
+/// - **Mosaic Generation**: Metal GPU-accelerated video mosaic generation on all supported platforms
 /// - **Preview Generation**: Create condensed video previews from full-length videos
 ///
 /// ## Usage
 ///
 /// ### Mosaic Generation - Single Video (Default Generator)
 /// ```swift
-/// // Auto-selects Metal on macOS, Core Graphics on iOS
 /// let generator = try MosaicGenerator()
 /// let videoURL = URL(fileURLWithPath: "/path/to/video.mp4")
 /// let outputDir = URL(fileURLWithPath: "/path/to/output")
@@ -28,10 +25,7 @@ import CoreGraphics
 ///
 /// ### Mosaic Generation - Choosing a Specific Generator
 /// ```swift
-/// // Use Core Graphics on macOS (instead of Metal)
-/// let cgGenerator = try MosaicGenerator(preference: .preferCoreGraphics)
-///
-/// // Prefer Metal (macOS only, falls back to CG on iOS)
+/// // Explicitly prefer Metal (default and only option)
 /// let metalGenerator = try MosaicGenerator(preference: .preferMetal)
 /// ```
 ///
@@ -139,9 +133,8 @@ public final class MosaicGenerator {
 
     /// Initialize a mosaic generator with specified preference
     /// - Parameter preference: The preferred generator implementation
-    ///   - `.auto`: Metal on macOS, Core Graphics on iOS (default)
-    ///   - `.preferMetal`: Metal (macOS only, falls back to Core Graphics on iOS)
-    ///   - `.preferCoreGraphics`: Core Graphics (available on both platforms)
+    ///   - `.auto`: Metal GPU acceleration (default)
+    ///   - `.preferMetal`: Metal GPU acceleration (explicit)
     // @available(macOS 26, iOS 26, *)
     public init(preference: MosaicGeneratorFactory.GeneratorPreference) throws {
         self.generatorPreference = preference
@@ -174,19 +167,7 @@ public final class MosaicGenerator {
         var updatedConfig = config
         updatedConfig.outputdirectory = outputDirectory
 
-        // Log which generator is being used
-        switch generatorPreference {
-        case .auto:
-            #if os(macOS)
-            logger.info("Generating mosaic with Metal acceleration (auto-selected)...")
-            #else
-            logger.info("Generating mosaic with Core Graphics acceleration (auto-selected)...")
-            #endif
-        case .preferMetal:
-            logger.info("Generating mosaic with Metal acceleration (preferred)...")
-        case .preferCoreGraphics:
-            logger.info("Generating mosaic with Core Graphics acceleration (preferred)...")
-        }
+        logger.info("Generating mosaic with Metal acceleration...")
 
         // Generate mosaic using the selected generator
         let mosaicURL = try await generator.generate(
@@ -218,19 +199,7 @@ public final class MosaicGenerator {
         logger.debug("Loading video metadata from \(videoURL.lastPathComponent)")
         let video = try await VideoInput(from: videoURL)
 
-        // Log which generator is being used
-        switch generatorPreference {
-        case .auto:
-            #if os(macOS)
-            logger.info("Generating mosaic image with Metal acceleration (auto-selected)...")
-            #else
-            logger.info("Generating mosaic image with Core Graphics acceleration (auto-selected)...")
-            #endif
-        case .preferMetal:
-            logger.info("Generating mosaic image with Metal acceleration (preferred)...")
-        case .preferCoreGraphics:
-            logger.info("Generating mosaic image with Core Graphics acceleration (preferred)...")
-        }
+        logger.info("Generating mosaic image with Metal acceleration...")
 
         // Generate mosaic image using the selected generator
         let mosaicImage = try await generator.generateMosaicImage(

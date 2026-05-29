@@ -714,37 +714,20 @@ public actor MosaicGeneratorCoordinator<Generator: MosaicGeneratorProtocol> {
 
 // MARK: - Convenience Factory Functions
 
-/// Creates a coordinator with auto-generated Metal generator (macOS only)
+/// Creates a coordinator with a Metal generator
 /// - Parameter concurrencyLimit: Maximum number of concurrent generation tasks
 /// - Returns: A coordinator with Metal generator for maximum performance
-#if os(macOS)
 public func createMosaicCoordinatorWithMetal(concurrencyLimit: Int = 0) throws -> MosaicGeneratorCoordinator<MetalMosaicGenerator> {
     let generator = try MetalMosaicGenerator()
     return MosaicGeneratorCoordinator(mosaicGenerator: generator, concurrencyLimit: concurrencyLimit)
 }
-#endif
 
-/// Creates a coordinator with Core Graphics generator (cross-platform)
+/// Creates a coordinator with the default Metal generator
 /// - Parameter concurrencyLimit: Maximum number of concurrent generation tasks
-/// - Returns: A coordinator with Core Graphics generator
-// @available(macOS 26, iOS 26, *)
-public func createMosaicCoordinatorWithCoreGraphics(concurrencyLimit: Int = 0) throws -> MosaicGeneratorCoordinator<CoreGraphicsMosaicGenerator> {
-    let generator = try CoreGraphicsMosaicGenerator()
-    return MosaicGeneratorCoordinator(mosaicGenerator: generator, concurrencyLimit: concurrencyLimit)
-}
-
-/// Creates a coordinator with the default generator for the current platform
-/// - Parameter concurrencyLimit: Maximum number of concurrent generation tasks
-/// - Returns: A coordinator with the optimal generator for this platform
-#if canImport(metal)
+/// - Returns: A coordinator with Metal generator
 public func createDefaultMosaicCoordinator(concurrencyLimit: Int = 0) throws -> MosaicGeneratorCoordinator<MetalMosaicGenerator> {
     try createMosaicCoordinatorWithMetal(concurrencyLimit: concurrencyLimit)
 }
-#else
-public func createDefaultMosaicCoordinator(concurrencyLimit: Int = 0) throws -> MosaicGeneratorCoordinator<CoreGraphicsMosaicGenerator> {
-    try createMosaicCoordinatorWithCoreGraphics(concurrencyLimit: concurrencyLimit)
-}
-#endif
 
 // Placeholder for CoordinatorError - Define this properly elsewhere
 enum CoordinatorError: Error {
