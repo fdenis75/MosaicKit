@@ -7,12 +7,10 @@ import OSLog
 import Synchronization
 import DominantColors
 
-#if os(iOS)
-import UIKit
-typealias XImage = UIImage
-#elseif os(macOS)
+#if canImport(AppKit)
 import AppKit
-typealias XImage = NSImage
+#elseif canImport(UIKit)
+import UIKit
 #endif
 
 /// A Metal-based image processor for high-performance mosaic generation
@@ -535,7 +533,6 @@ public final class MetalImageProcessor: @unchecked Sendable {
         
         for image in sampledImages {
             do {
-                #if os(macOS)
                 let colors = try DominantColors.dominantColors(
                     image: image,
                     quality: .fair,
@@ -545,17 +542,6 @@ public final class MetalImageProcessor: @unchecked Sendable {
                     sorting: .lightness
                 )
                 allColors.append(contentsOf: colors)
-                #elseif os(iOS)
-                let colors = try DominantColors.dominantColors(
-                    image: image,
-                    quality: .fair,
-                    algorithm: .CIE94,
-                    maxCount: maxColors,
-                    options: flags,
-                    sorting: .lightness
-                )
-                allColors.append(contentsOf: colors)
-                #endif
             } catch {
                 logger.error("❌ Failed to extract colors: \(error.localizedDescription)")
             }
@@ -571,48 +557,34 @@ public final class MetalImageProcessor: @unchecked Sendable {
             .map(\.0)
             .prefix(3)
        
-        // Step 4: Generate gradient image
-        let gradientImage: CGImage?
-        #if os(iOS)
-        UIGraphicsBeginImageContext(outputSize)
-        guard let ctx = UIGraphicsGetCurrentContext() else { return nil }
-        #else
+        // Step 4: Generate gradient image using CGContext (cross-platform)
         let colorSpace = CGColorSpaceCreateDeviceRGB()
-        let ctx = CGContext(
+        guard let ctx = CGContext(
             data: nil,
-            width: Int(outputSize.width * 1.01),
-            height: Int(outputSize.height * 1.01),
+            width: Int(outputSize.width),
+            height: Int(outputSize.height),
             bitsPerComponent: 8,
             bytesPerRow: 0,
             space: colorSpace,
             bitmapInfo: CGImageAlphaInfo.premultipliedFirst.rawValue
-        )
-        #endif
-        //if the color array is empty, create a grey gradient
+        ) else { return nil }
+
         if top3LightColors.isEmpty {
-            let colorsArray: [CGColor] = [CGColor(red: 0.5, green: 0.5, blue: 0.5, alpha: 1.0), CGColor(red: 0.2, green: 0.2, blue: 0.2, alpha: 1.0)]
-            let cgColors = colorsArray as CFArray
-            _ = CGGradient(colorsSpace: CGColorSpaceCreateDeviceRGB(), colors: cgColors, locations: nil)!
+            ctx.setFillColor(CGColor(red: 0.5, green: 0.5, blue: 0.5, alpha: 1.0))
+            ctx.fill(CGRect(origin: .zero, size: outputSize))
         } else {
-            let colorsArray: [CGColor] = top3LightColors.map { $0 }
-            let cgColors = colorsArray as CFArray
-            let gradient = CGGradient(colorsSpace: CGColorSpaceCreateDeviceRGB(), colors: cgColors, locations: nil)!
-             #if os(macOS   )
-            ctx!.drawLinearGradient(gradient,
-                                    start: CGPoint.zero,
-                                    end: CGPoint(x: outputSize.width * 1.01 , y: outputSize.height  * 1.01 ),
-                                    options: [])
-            #else
-           // aaa
-            #endif
+            let cgColors = top3LightColors.map { $0 } as CFArray
+            if let gradient = CGGradient(colorsSpace: colorSpace, colors: cgColors, locations: nil) {
+                ctx.drawLinearGradient(
+                    gradient,
+                    start: .zero,
+                    end: CGPoint(x: outputSize.width, y: outputSize.height),
+                    options: []
+                )
+            }
         }
-        #if os(iOS)
-        gradientImage = UIGraphicsGetImageFromCurrentImageContext()?.cgImage
-        UIGraphicsEndImageContext()
-        #else
-            ctx!.flush()
-        gradientImage = ctx!.makeImage()
-        #endif
+        ctx.flush()
+        let gradientImage = ctx.makeImage()
 
         guard let imageForBlur = gradientImage else { return nil }
 
@@ -1220,26 +1192,3 @@ public enum MetalProcessorError: Error {
     case cancelled
 } 
 
-#if canImport(AppKit)
-private extension NSImage {
-    func pngData() -> Data? {
-        guard let tiffRepresentation = tiffRepresentation,
-              let bitmapImage = NSBitmapImageRep(data: tiffRepresentation) else {
-            return nil
-        }
-        return bitmapImage.representation(using: .png, properties: [:])
-    }
-    
-    func jpegData(compressionQuality: Double = 0.8) -> Data? {
-        guard let tiffRepresentation = tiffRepresentation,
-              let bitmapImage = NSBitmapImageRep(data: tiffRepresentation) else {
-            return nil
-        }
-        return bitmapImage.representation(using: .jpeg,
-                                        properties: [.compressionFactor: compressionQuality])
-    }
-}
-#elseif canImport(UIKit)
-// Adjust the usage in the code above to directly call the built-in UIImage method with CGFloat
-// No extension needed for UIImage as it already has pngData() and jpegData(compressionQuality:) methods
-#endif

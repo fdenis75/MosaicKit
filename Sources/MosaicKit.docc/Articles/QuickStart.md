@@ -243,7 +243,7 @@ do {
     let generator = try MosaicGenerator(preference: .preferMetal)
 } catch MosaicError.metalNotSupported {
     print("Metal not available, using Core Graphics")
-    let generator = try MosaicGenerator(preference: .preferCoreGraphics)
+    let generator = try MosaicGenerator(preference: .preferMetal)
 }
 ```
 

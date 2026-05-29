@@ -511,7 +511,7 @@ if let device = MTLCreateSystemDefaultDevice() {
 **Solution:** Use Core Graphics if Metal is unavailable or limited:
 
 ```swift
-let cgGenerator = try MosaicGenerator(preference: .preferCoreGraphics)
+let metalGenerator = try MosaicGenerator(preference: .preferMetal)
 ```
 
 ### High Memory Usage
@@ -543,7 +543,7 @@ Reduce batch size in Metal shader operations:
 ```swift
 // MosaicKit already uses optimal batch size (20 frames)
 // If still experiencing timeout, use Core Graphics:
-let cgGenerator = try MosaicGenerator(preference: .preferCoreGraphics)
+let metalGenerator = try MosaicGenerator(preference: .preferMetal)
 ```
 
 ## Benchmarking Best Practices
