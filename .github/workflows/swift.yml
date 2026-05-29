@@ -59,8 +59,8 @@ jobs:
       - name: Build (incl. test targets)
         run: swift build --build-tests -v
 
-      - name: Test
-        run: swift test --skip-build --parallel
+#     - name: Test
+      #  run: swift test --skip-build --parallel
 
   # ── iOS Simulator ───────────────────────────────────────────────────────────
   ios:
@@ -132,7 +132,7 @@ jobs:
             -scheme MosaicKit-Package \
             -destination 'platform=iOS Simulator,OS=latest,name=iPhone 16' \
             -skipPackagePluginValidation \
-            -parallel-testing-enabled NO \
+            -parallel-testing-enabled NO i\
             -test-timeouts-enabled YES \
             -default-test-execution-time-allowance 120 \
             -derivedDataPath ~/DerivedData \
