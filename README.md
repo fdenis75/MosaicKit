@@ -5,7 +5,7 @@ A high-performance Swift package for generating video mosaics with Metal-acceler
 ![Platform](https://img.shields.io/badge/platform-macOS%2026%2B%20%7C%20iOS%2026%2B-blue)
 ![Swift](https://img.shields.io/badge/Swift-6.2-orange)
 ![License](https://img.shields.io/badge/license-MIT-green)
-
+  
 ## Features
 
 - 🚀 **Metal GPU Acceleration** - Hardware-accelerated mosaic generation on macOS, iOS, and macCatalyst
