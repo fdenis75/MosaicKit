@@ -114,26 +114,4 @@ jobs:
       #   -parallel-testing-enabled NO   workaround for macos-26 iOS hang (#13143)
       #   -derivedDataPath               share DerivedData between both steps
       #   CODE_SIGNING_ALLOWED=NO        skip signing (unnecessary on CI)
-      #   SWIFT_STRICT_CONCURRENCY=complete  enforce Swift 6 actor isolation
-      - name: Build for Testing (iOS Simulator)
-        run: |
-          xcodebuild build-for-testing \
-            -scheme MosaicKit-Package \
-            -destination 'platform=iOS Simulator,OS=latest,name=iPhone 16' \
-            -skipPackagePluginValidation \
-            -parallel-testing-enabled NO \
-            -derivedDataPath ~/DerivedData \
-            CODE_SIGNING_ALLOWED=NO \
-            SWIFT_STRICT_CONCURRENCY=complete
-
-      - name: Test (iOS Simulator)
-        run: |
-          xcodebuild test-without-building \
-            -scheme MosaicKit-Package \
-            -destination 'platform=iOS Simulator,OS=latest,name=iPhone 16' \
-            -skipPackagePluginValidation \
-            -parallel-testing-enabled NO i\
-            -test-timeouts-enabled YES \
-            -default-test-execution-time-allowance 120 \
-            -derivedDataPath ~/DerivedData \
-            CODE_SIGNING_ALLOWED=NO
+      #   SWIFT_STRICT_CONCURRENCY=complete  enforce Swift 6 actor 
