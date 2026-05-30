@@ -319,16 +319,23 @@ struct PreviewGenerationLogic {
 
         #if os(iOS)
         // Request background execution time on iOS using key-value coding to remain 100% safe inside App Extensions
-        var backgroundTaskID: UIBackgroundTaskIdentifier = .invalid
+        let backgroundTaskID = Mutex<UIBackgroundTaskIdentifier>(.invalid)
         if let sharedApp = NSClassFromString("UIApplication")?.value(forKeyPath: "sharedApplication") as? UIApplication {
-            backgroundTaskID = sharedApp.beginBackgroundTask(withName: "com.mosaickit.preview-export-\(video.id.uuidString)") {
-                sharedApp.endBackgroundTask(backgroundTaskID)
+            let taskID = sharedApp.beginBackgroundTask(withName: "com.mosaickit.preview-export-\(video.id.uuidString)") {
+                let id = backgroundTaskID.withLock { $0 }
+                if id != .invalid {
+                    sharedApp.endBackgroundTask(id)
+                    backgroundTaskID.withLock { $0 = .invalid }
+                }
             }
+            backgroundTaskID.withLock { $0 = taskID }
         }
         defer {
-            if backgroundTaskID != .invalid,
+            let id = backgroundTaskID.withLock { $0 }
+            if id != .invalid,
                let sharedApp = NSClassFromString("UIApplication")?.value(forKeyPath: "sharedApplication") as? UIApplication {
-                sharedApp.endBackgroundTask(backgroundTaskID)
+                sharedApp.endBackgroundTask(id)
+                backgroundTaskID.withLock { $0 = .invalid }
             }
         }
         #endif
