@@ -4,17 +4,11 @@ import CoreImage
 import OSLog
 import Metal
 import VideoToolbox
+import UniformTypeIdentifiers
 #if canImport(AppKit)
 import AppKit
 #elseif canImport(UIKit)
 import UIKit
-#endif
-
-// Define a platform-specific image type if not already defined
-#if canImport(AppKit)
-typealias PlatformImage = NSImage
-#elseif canImport(UIKit)
-typealias PlatformImage = UIImage
 #endif
 
 /// Thread-safe accumulator for per-frame average colours used by the Color DNA strip.
@@ -735,43 +729,51 @@ public actor MetalMosaicGenerator: MosaicGeneratorProtocol {
             try FileManager.default.removeItem(at: mosaicURL)
         }
         
-        
-        // Convert CGImage to platform-specific image for saving
-        #if canImport(AppKit)
-        let platformImage = NSImage(cgImage: mosaic, size: .zero)
-        #elseif canImport(UIKit)
-        let platformImage = UIImage(cgImage: mosaic)
-        #endif
-        
-        let data: Data?
-        
+        let identifier: CFString
         switch config.format {
         case .jpeg:
-            data = getJpegData(from: platformImage, quality: config.compressionQuality)
-            guard let imageData = data else {
-                throw MosaicError.saveFailed(mosaicURL, NSError(domain: "com.mosaicKit", code: -1))
-            }
-
-            try imageData.write(to: mosaicURL)
+            identifier = UTType.jpeg.identifier as CFString
         case .png:
-            data = getPngData(from: platformImage)
-            guard let imageData = data else {
-                throw MosaicError.saveFailed(mosaicURL, NSError(domain: "com.mosaicKit", code: -1))
-            }
-
-            try imageData.write(to: mosaicURL)
+            identifier = UTType.png.identifier as CFString
         case .heif:
-            let heifDirectory = mosaicURL.deletingLastPathComponent()
-            let didStartAccessingHeifDirectory = heifDirectory.startAccessingSecurityScopedResource()
-            defer {
-                if didStartAccessingHeifDirectory {
-                    heifDirectory.stopAccessingSecurityScopedResource()
-                }
+            identifier = UTType.heic.identifier as CFString
+        }
+
+        // Use security scoped resource for HEIF
+        var didStartAccessingDirectory = false
+        if config.format == .heif {
+            let directory = mosaicURL.deletingLastPathComponent()
+            didStartAccessingDirectory = directory.startAccessingSecurityScopedResource()
+        }
+        defer {
+            if didStartAccessingDirectory {
+                mosaicURL.deletingLastPathComponent().stopAccessingSecurityScopedResource()
             }
-            try await saveAsHEIC(mosaic, to: mosaicURL, quality: Float(config.compressionQuality))
+        }
+
+        guard let destination = CGImageDestinationCreateWithURL(
+            mosaicURL as CFURL,
+            identifier,
+            1,
+            nil
+        ) else {
+            throw MosaicError.saveFailed(mosaicURL, NSError(domain: "com.mosaicKit", code: -1))
+        }
+
+        var options: [String: Any] = [:]
+        if config.format == .jpeg || config.format == .heif {
+            options[kCGImageDestinationLossyCompressionQuality as String] = config.compressionQuality
+        }
+        if config.format == .heif {
+            options[kCGImageDestinationEmbedThumbnail as String] = true
+            options[kCGImagePropertyHasAlpha as String] = false
         }
         
-        
+        CGImageDestinationAddImage(destination, mosaic, options as CFDictionary)
+
+        if !CGImageDestinationFinalize(destination) {
+            throw MosaicError.saveFailed(mosaicURL, NSError(domain: "com.mosaicKit", code: -1))
+        }
         
         return mosaicURL
     }
@@ -784,80 +786,4 @@ public actor MetalMosaicGenerator: MosaicGeneratorProtocol {
         totalGenerationTime += executionTime
         generationCount += 1
     }
-    
-    private func saveAsHEIC(_ image: CGImage, to url: URL, quality: Float) async throws {
-            guard let destination = CGImageDestinationCreateWithURL(
-                url as CFURL,
-                AVFileType.heic.rawValue as CFString,
-                1,
-                nil
-            ) else {
-                throw MosaicError.saveFailed(url, NSError(domain: "com.mosaicKit", code: -1))
-            }
-            
-            let options: [String: Any] = [
-                kCGImageDestinationLossyCompressionQuality as String: quality,
-                kCGImageDestinationEmbedThumbnail as String: true,
-                kCGImagePropertyHasAlpha as String: false
-            ]
-            
-            CGImageDestinationAddImage(destination, image, options as CFDictionary?)
-            
-            if !CGImageDestinationFinalize(destination) {
-                throw MosaicError.saveFailed(url, NSError(domain: "com.mosaicKit", code: -1))
-            }
-        }
-}
-
-// MARK: - Extensions
-
-#if canImport(AppKit)
-private extension NSImage {
-    func pngData() -> Data? {
-        guard let tiffRepresentation = tiffRepresentation,
-              let bitmapImage = NSBitmapImageRep(data: tiffRepresentation) else {
-            return nil
-        }
-        return bitmapImage.representation(using: .png, properties: [:])
-    }
-    
-    func jpegData(compressionQuality: Double = 0.8) -> Data? {
-        guard let tiffRepresentation = tiffRepresentation,
-              let bitmapImage = NSBitmapImageRep(data: tiffRepresentation) else {
-            return nil
-        }
-        return bitmapImage.representation(using: .jpeg, 
-                                        properties: [.compressionFactor: compressionQuality])
-    }
-}
-#elseif canImport(UIKit)
-// Adjust the usage in the code above to directly call the built-in UIImage method with CGFloat
-// No extension needed for UIImage as it already has pngData() and jpegData(compressionQuality:) methods
-#endif
-
-// Wrapper function to handle platform differences
-private func getJpegData(from image: Any, quality: Double) -> Data? {
-    #if canImport(AppKit)
-    if let nsImage = image as? NSImage {
-        return nsImage.jpegData(compressionQuality: quality)
-    }
-    #elseif canImport(UIKit)
-    if let uiImage = image as? UIImage {
-        return uiImage.jpegData(compressionQuality: CGFloat(quality))
-    }
-    #endif
-    return nil
-}
-
-private func getPngData(from image: Any) -> Data? {
-    #if canImport(AppKit)
-    if let nsImage = image as? NSImage {
-        return nsImage.pngData()
-    }
-    #elseif canImport(UIKit)
-    if let uiImage = image as? UIImage {
-        return uiImage.pngData()
-    }
-    #endif
-    return nil
 }
