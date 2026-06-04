@@ -61,7 +61,9 @@ public actor PreviewGeneratorCoordinator {
         }
 
         let task = Task<URL, Error> { [previewGenerator, video, config] in
-            try await previewGenerator.generate(for: video, config: config)
+            try await self.executeWithBackgroundRetry(videoTitle: video.title) {
+                try await previewGenerator.generate(for: video, config: config)
+            }
         }
         activeTasks[video.id] = task
         defer {
@@ -100,7 +102,9 @@ public actor PreviewGeneratorCoordinator {
         }
 
         let task = Task<AVPlayerItem, Error> { [previewGenerator, video, config] in
-            try await previewGenerator.generateComposition(for: video, config: config)
+            try await self.executeWithBackgroundRetry(videoTitle: video.title) {
+                try await previewGenerator.generateComposition(for: video, config: config)
+            }
         }
         activeCompositionTasks[video.id] = task
         defer {
@@ -166,7 +170,9 @@ public actor PreviewGeneratorCoordinator {
                         if let handler = progressHandler {
                             await self.previewGenerator.setProgressHandler(for: video, handler: handler)
                         }
-                        let playerItem = try await self.previewGenerator.generateComposition(for: video, config: config)
+                        let playerItem = try await self.executeWithBackgroundRetry(videoTitle: video.title) {
+                            try await self.previewGenerator.generateComposition(for: video, config: config)
+                        }
                         return PreviewCompositionResult.success(video: video, playerItem: playerItem)
                     } catch {
                         self.logger.error("Composition failed for: \(video.title) - \(error.localizedDescription)")
@@ -236,7 +242,9 @@ public actor PreviewGeneratorCoordinator {
                         if let handler = progressHandler {
                             await self.previewGenerator.setProgressHandler(for: video, handler: handler)
                         }
-                        let outputURL = try await self.previewGenerator.generate(for: video, config: config)
+                        let outputURL = try await self.executeWithBackgroundRetry(videoTitle: video.title) {
+                            try await self.previewGenerator.generate(for: video, config: config)
+                        }
                         return PreviewGenerationResult.success(video: video, outputURL: outputURL)
                     } catch {
                         self.logger.error("Generation failed for: \(video.title) - \(error.localizedDescription)")
@@ -334,6 +342,47 @@ public actor PreviewGeneratorCoordinator {
         logger.info("Calculated optimal concurrency: \(optimal) (CPU: \(cpuBasedLimit), Memory: \(memoryBasedLimit))")
 
         return optimal
+    }
+    
+    /// Executes a generation operation with automatic background suspension retry logic
+    private func executeWithBackgroundRetry<T: Sendable>(
+        videoTitle: String,
+        operation: @Sendable () async throws -> T
+    ) async throws -> T {
+        var attempt = 1
+        let maxAttempts = 3
+        
+        while true {
+            do {
+                await AppLifecycleMonitor.shared.waitUntilForeground()
+                return try await operation()
+            } catch {
+                let isStalled: Bool
+                if case PreviewError.exportStalled(_) = error {
+                    isStalled = true
+                } else if case PreviewError.encodingFailed(_, let underlyingError) = error {
+                    if let nsError = underlyingError as NSError?, nsError.domain == AVFoundationErrorDomain, nsError.code == -11847 {
+                        isStalled = true
+                    } else {
+                        isStalled = false
+                    }
+                } else if let nsError = error as NSError?, nsError.domain == AVFoundationErrorDomain, nsError.code == -11847 {
+                    isStalled = true
+                } else {
+                    isStalled = false
+                }
+                
+                if isStalled && attempt < maxAttempts {
+                    logger.warning("Export stalled/interrupted for \(videoTitle) (Attempt \(attempt)/\(maxAttempts)). Retrying when foregrounded...")
+                    attempt += 1
+                    // Wait until foreground before retrying
+                    await AppLifecycleMonitor.shared.waitUntilForeground()
+                    try? await Task.sleep(nanoseconds: 1_000_000_000)
+                    continue
+                }
+                throw error
+            }
+        }
     }
 }
 

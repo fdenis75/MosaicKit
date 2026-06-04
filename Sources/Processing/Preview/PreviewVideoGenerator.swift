@@ -914,6 +914,8 @@ struct PreviewGenerationLogic {
         return AVVideoComposition(configuration: configuration)
     }
 
+    @available(macOS, deprecated: 26.0, message: "Use buildConfiguredVideoComposition instead")
+    @available(iOS, deprecated: 26.0, message: "Use buildConfiguredVideoComposition instead")
     private static func buildLegacyVideoComposition(
         composition: AVMutableComposition,
         compositionVideoTrack: AVMutableCompositionTrack,
@@ -1265,24 +1267,22 @@ struct PreviewGenerationLogic {
                 // Safe: composition is created and fully configured on this actor before the cast;
                 // SJSAssetExportSession only reads the asset during the export call below.
                 nonisolated(unsafe) let compositionAsset = composition as AVAsset
-                nonisolated(unsafe) let exporterRef = exporter
 
                 if let vc = videoComposition {
-                    nonisolated(unsafe) let vcRef = vc
                     // Use the raw-settings overload so we can pass our custom video composition for scaling.
                     try await Task.detached(priority: .userInitiated) {
-                        try await exporterRef.export(
+                        try await exporter.export(
                             asset: compositionAsset,
                             audioOutputSettings: AudioOutputSettings.default.settingsDictionary,
                             videoOutputSettings: videoConfig.settingsDictionary,
-                            composition: vcRef,
+                            composition: vc,
                             to: outputURL,
                             as: config.format.avFileType
                         )
                     }.value
                 } else {
                     try await Task.detached(priority: .userInitiated) {
-                        try await exporterRef.export(
+                        try await exporter.export(
                             asset: compositionAsset,
                             audio: .default,
                             video: videoConfig,

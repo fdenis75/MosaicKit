@@ -27,12 +27,14 @@ MosaicKit is a powerful Swift package that generates beautiful video mosaics by 
 
 - <doc:GettingStarted>
 - <doc:QuickStart>
+- <doc:PreviewExporting>
 
 ### Architecture & Design
 
-- <doc:Architecture>
 - <doc:PlatformStrategy>
+- <doc:Architecture>
 - <doc:LayoutAlgorithms>
+- <doc:PerformanceGuide>
 
 ### Core Components
 

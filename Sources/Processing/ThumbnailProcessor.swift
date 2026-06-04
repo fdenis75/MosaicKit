@@ -65,7 +65,8 @@ public final class ThumbnailProcessor: Sendable {
             switch result {
             case .success(requestedTime: _, image: let image, actualTime: let actual):
                 let timestamp = self.formatTimestamp(seconds: actual.seconds)
-                extractedFrames.append((index: index, image: image, timestamp: timestamp))
+                let copiedImage = self.createDeepCopy(of: image) ?? image
+                extractedFrames.append((index: index, image: copiedImage, timestamp: timestamp))
             case .failure(requestedTime: let requestedTime, error: let error):
                 logger.warning("⚠️ Frame extraction failed at \(self.formatTimestamp(seconds: requestedTime.seconds)): \(error.localizedDescription)")
                 failedIndices.append(index)
@@ -108,7 +109,8 @@ public final class ThumbnailProcessor: Sendable {
                 switch result {
                 case .success(requestedTime: _, image: let image, actualTime: let actual):
                     let timestamp = self.formatTimestamp(seconds: actual.seconds)
-                    retriedFrames.append((index: originalIndex, image: image, timestamp: timestamp))
+                    let copiedImage = self.createDeepCopy(of: image) ?? image
+                    retriedFrames.append((index: originalIndex, image: copiedImage, timestamp: timestamp))
                     logger.debug("✅ Retry successful for frame \(originalIndex)")
                 case .failure(requestedTime: let requestedTime, error: let error):
                     logger.error("❌ Retry failed for frame \(originalIndex) at \(self.formatTimestamp(seconds: requestedTime.seconds)): \(error.localizedDescription)")
@@ -255,7 +257,8 @@ public final class ThumbnailProcessor: Sendable {
                         switch result {
                         case .success(_, let image, let actualTime):
                              let timestamp = formatTimestamp(seconds: actualTime.seconds)
-                             continuation.yield((index, image, timestamp))
+                             let copiedImage = self.createDeepCopy(of: image) ?? image
+                             continuation.yield((index, copiedImage, timestamp))
                         case .failure(let requestedTime, let error):
                             logger.warning("⚠️ Frame extraction failed at \(requestedTime.seconds): \(error.localizedDescription)")
                         }
@@ -579,6 +582,31 @@ public final class ThumbnailProcessor: Sendable {
         
         context?.fill(CGRect(origin: .zero, size: size))
         return context?.makeImage()
+    }
+    
+    /// Deep copies a CGImage to decouple it from AVAssetImageGenerator's buffer pool
+    private func createDeepCopy(of image: CGImage) -> CGImage? {
+        let width = image.width
+        let height = image.height
+        guard width > 0 && height > 0 else { return nil }
+        
+        let colorSpace = image.colorSpace ?? CGColorSpaceCreateDeviceRGB()
+        // Use bgra8Unorm equivalent which is fast on Apple Silicon
+        let bitmapInfo = CGBitmapInfo.byteOrder32Little.rawValue | CGImageAlphaInfo.premultipliedFirst.rawValue
+        
+        guard let context = CGContext(
+            data: nil,
+            width: width,
+            height: height,
+            bitsPerComponent: 8,
+            bytesPerRow: 0,
+            space: colorSpace,
+            bitmapInfo: bitmapInfo
+        ) else { return nil }
+        
+        context.interpolationQuality = .none
+        context.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
+        return context.makeImage()
     }
     
     /// Creates a metadata header image to be placed at the top of the mosaic
