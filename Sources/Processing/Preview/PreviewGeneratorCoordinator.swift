@@ -61,7 +61,7 @@ public actor PreviewGeneratorCoordinator {
         }
 
         let task = Task<URL, Error> { [previewGenerator, video, config] in
-            try await self.executeWithBackgroundRetry(videoTitle: video.title) {
+            try await self.executeWithBackgroundRetry(videoTitle: video.title, config: config) {
                 try await previewGenerator.generate(for: video, config: config)
             }
         }
@@ -102,7 +102,7 @@ public actor PreviewGeneratorCoordinator {
         }
 
         let task = Task<AVPlayerItem, Error> { [previewGenerator, video, config] in
-            try await self.executeWithBackgroundRetry(videoTitle: video.title) {
+            try await self.executeWithBackgroundRetry(videoTitle: video.title, config: config) {
                 try await previewGenerator.generateComposition(for: video, config: config)
             }
         }
@@ -170,7 +170,7 @@ public actor PreviewGeneratorCoordinator {
                         if let handler = progressHandler {
                             await self.previewGenerator.setProgressHandler(for: video, handler: handler)
                         }
-                        let playerItem = try await self.executeWithBackgroundRetry(videoTitle: video.title) {
+                        let playerItem = try await self.executeWithBackgroundRetry(videoTitle: video.title, config: config) {
                             try await self.previewGenerator.generateComposition(for: video, config: config)
                         }
                         return PreviewCompositionResult.success(video: video, playerItem: playerItem)
@@ -242,7 +242,7 @@ public actor PreviewGeneratorCoordinator {
                         if let handler = progressHandler {
                             await self.previewGenerator.setProgressHandler(for: video, handler: handler)
                         }
-                        let outputURL = try await self.executeWithBackgroundRetry(videoTitle: video.title) {
+                        let outputURL = try await self.executeWithBackgroundRetry(videoTitle: video.title, config: config) {
                             try await self.previewGenerator.generate(for: video, config: config)
                         }
                         return PreviewGenerationResult.success(video: video, outputURL: outputURL)
@@ -344,17 +344,23 @@ public actor PreviewGeneratorCoordinator {
         return optimal
     }
     
-    /// Executes a generation operation with automatic background suspension retry logic
+    /// Executes a generation operation with automatic background suspension retry logic.
+    ///
+    /// Respects `config.enableAppLifecycleMonitor` (skips foreground waits when `false`)
+    /// and `config.enableExportRetry` (skips retries when `false`).
     private func executeWithBackgroundRetry<T: Sendable>(
         videoTitle: String,
+        config: PreviewConfiguration,
         operation: @Sendable () async throws -> T
     ) async throws -> T {
         var attempt = 1
-        let maxAttempts = 3
-        
+        let maxAttempts = config.enableExportRetry ? 3 : 1
+
         while true {
             do {
-                await AppLifecycleMonitor.shared.waitUntilForeground()
+                if config.enableAppLifecycleMonitor {
+                    await AppLifecycleMonitor.shared.waitUntilForeground()
+                }
                 return try await operation()
             } catch {
                 let isStalled: Bool
@@ -371,12 +377,13 @@ public actor PreviewGeneratorCoordinator {
                 } else {
                     isStalled = false
                 }
-                
+
                 if isStalled && attempt < maxAttempts {
                     logger.warning("Export stalled/interrupted for \(videoTitle) (Attempt \(attempt)/\(maxAttempts)). Retrying when foregrounded...")
                     attempt += 1
-                    // Wait until foreground before retrying
-                    await AppLifecycleMonitor.shared.waitUntilForeground()
+                    if config.enableAppLifecycleMonitor {
+                        await AppLifecycleMonitor.shared.waitUntilForeground()
+                    }
                     try? await Task.sleep(nanoseconds: 1_000_000_000)
                     continue
                 }

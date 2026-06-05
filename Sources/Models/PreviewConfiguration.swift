@@ -102,6 +102,17 @@ public struct PreviewConfiguration: Codable, Sendable, Hashable {
     /// file already exists at the resolved path.
     public var overwrite: Bool = false
 
+    /// When `false`, all `AppLifecycleMonitor.shared.waitUntilForeground()` calls
+    /// are skipped. Set to `false` for daemons, XPC services, or CLI tools where
+    /// the application lifecycle never transitions — the foreground wait would
+    /// otherwise block indefinitely. Default is `true`.
+    public var enableAppLifecycleMonitor: Bool = true
+
+    /// When `false`, stall errors are propagated immediately without retrying.
+    /// When `true` (default), the coordinator retries up to 3 times, waiting for
+    /// the app to foreground between attempts.
+    public var enableExportRetry: Bool = true
+
     /// Optional token-based template controlling the output directory layout.
     ///
     /// When `nil` (default), the legacy `{root}/movieprev/` layout is used.
@@ -158,6 +169,7 @@ public struct PreviewConfiguration: Codable, Sendable, Hashable {
         case exportMaxResolution
         case overwrite, outputDirectoryTemplate, filenameTemplate
         case ffmpegBinaryPath, ffmpegTempFolder, ffmpegEncodingOptions
+        case enableAppLifecycleMonitor, enableExportRetry
     }
 
     // MARK: - Initialization
@@ -187,7 +199,9 @@ public struct PreviewConfiguration: Codable, Sendable, Hashable {
         sjSExportPresetName: SjSExportPreset? = .hevc,
         ffmpegBinaryPath: String? = nil,
         ffmpegTempFolder: URL? = nil,
-        ffmpegEncodingOptions: FFmpegEncodingOptions? = nil
+        ffmpegEncodingOptions: FFmpegEncodingOptions? = nil,
+        enableAppLifecycleMonitor: Bool = true,
+        enableExportRetry: Bool = true
     ) {
         self.targetDuration = targetDuration
         self.minimumExtractDuration = minimumExtractDuration
@@ -204,6 +218,8 @@ public struct PreviewConfiguration: Codable, Sendable, Hashable {
         self.ffmpegBinaryPath = ffmpegBinaryPath
         self.ffmpegTempFolder = ffmpegTempFolder
         self.ffmpegEncodingOptions = ffmpegEncodingOptions
+        self.enableAppLifecycleMonitor = enableAppLifecycleMonitor
+        self.enableExportRetry = enableExportRetry
         // _exportMaxResolutionRaw defaults to "1080p" via the property declaration
     }
 
@@ -238,6 +254,8 @@ public struct PreviewConfiguration: Codable, Sendable, Hashable {
         self.ffmpegBinaryPath = nil
         self.ffmpegTempFolder = nil
         self.ffmpegEncodingOptions = nil
+        self.enableAppLifecycleMonitor = true
+        self.enableExportRetry = true
     }
 
     /// Creates a `PreviewConfiguration` with an explicit maximum export resolution.
@@ -261,7 +279,9 @@ public struct PreviewConfiguration: Codable, Sendable, Hashable {
         maxResolution: ExportMaxResolution? = ._1080p,
         ffmpegBinaryPath: String? = nil,
         ffmpegTempFolder: URL? = nil,
-        ffmpegEncodingOptions: FFmpegEncodingOptions? = nil
+        ffmpegEncodingOptions: FFmpegEncodingOptions? = nil,
+        enableAppLifecycleMonitor: Bool = true,
+        enableExportRetry: Bool = true
     ) {
         self.targetDuration = targetDuration
         self.minimumExtractDuration = minimumExtractDuration
@@ -279,6 +299,8 @@ public struct PreviewConfiguration: Codable, Sendable, Hashable {
         self.ffmpegBinaryPath = ffmpegBinaryPath
         self.ffmpegTempFolder = ffmpegTempFolder
         self.ffmpegEncodingOptions = ffmpegEncodingOptions
+        self.enableAppLifecycleMonitor = enableAppLifecycleMonitor
+        self.enableExportRetry = enableExportRetry
     }
 
     
@@ -320,6 +342,8 @@ public struct PreviewConfiguration: Codable, Sendable, Hashable {
         ffmpegBinaryPath = try container.decodeIfPresent(String.self, forKey: .ffmpegBinaryPath)
         ffmpegTempFolder = try container.decodeIfPresent(URL.self, forKey: .ffmpegTempFolder)
         ffmpegEncodingOptions = try container.decodeIfPresent(FFmpegEncodingOptions.self, forKey: .ffmpegEncodingOptions)
+        enableAppLifecycleMonitor = try container.decodeIfPresent(Bool.self, forKey: .enableAppLifecycleMonitor) ?? true
+        enableExportRetry = try container.decodeIfPresent(Bool.self, forKey: .enableExportRetry) ?? true
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -343,6 +367,8 @@ public struct PreviewConfiguration: Codable, Sendable, Hashable {
         try container.encodeIfPresent(ffmpegBinaryPath, forKey: .ffmpegBinaryPath)
         try container.encodeIfPresent(ffmpegTempFolder, forKey: .ffmpegTempFolder)
         try container.encodeIfPresent(ffmpegEncodingOptions, forKey: .ffmpegEncodingOptions)
+        try container.encode(enableAppLifecycleMonitor, forKey: .enableAppLifecycleMonitor)
+        try container.encode(enableExportRetry, forKey: .enableExportRetry)
     }
 
     // MARK: - Extract Calculation
