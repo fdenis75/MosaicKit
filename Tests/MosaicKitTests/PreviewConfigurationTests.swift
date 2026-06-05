@@ -168,8 +168,6 @@ struct PreviewConfigurationTests {
             frameRate: 30,
             fileSize: 3_000_000,
             metadata: VideoMetadata(codec: "hevc", bitrate: 2_000_000, custom: [:]),
-            serviceName: "svc",
-            creatorName: "creator",
             postID: "post123"
         )
     }

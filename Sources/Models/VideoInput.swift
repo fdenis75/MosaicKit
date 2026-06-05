@@ -18,62 +18,54 @@ public struct VideoMetadata: Codable, Hashable, Sendable {
 /// A simplified video input model for mosaic generation
 public struct VideoInput: Codable, Hashable, Sendable {
     // MARK: - Properties
-    
+
     /// Unique identifier
     public let id: UUID
-    
+
     /// URL to the video file
     public let url: URL
-    
+
     /// Optional title (defaults to filename)
     public let title: String
-    
+
     /// Video duration in seconds
     public let duration: TimeInterval?
-    
+
     /// Video width in pixels
     public let width: Double?
-    
+
     /// Video height in pixels
     public let height: Double?
-    
+
     /// Video frame rate
     public let frameRate: Double?
-    
+
     /// File size in bytes
     public let fileSize: Int64?
-    
+
     /// Video metadata (codec, bitrate, etc.)
     public let metadata: VideoMetadata
-    
-    // MARK: - Organizational Metadata
-    
-    /// // a first string that can be used to organize output (by service : Youtube, instagram, etc..)
-    public let serviceName: String?
-    
-    /// Creator name for organizing output
-    public let creatorName: String?
-    
+
     /// Post ID for file naming
     public let postID: String?
-    
+
     // MARK: - Computed Properties
-    
+
     /// Video resolution as CGSize
     public var resolution: CGSize? {
         guard let width = width, let height = height else { return nil }
         return CGSize(width: width, height: height)
     }
-    
+
     /// Aspect ratio (width / height)
     public var aspectRatio: Double? {
         guard let width = width, let height = height, height > 0 else { return nil }
         return width / height
     }
-    
+
     // MARK: - Initialization
-    
-    /// Initialize with explicit values
+
+    /// Initialize with explicit values; auto-extracts metadata from the video file.
     public init(
         id: UUID = UUID(),
         url: URL,
@@ -84,11 +76,8 @@ public struct VideoInput: Codable, Hashable, Sendable {
         frameRate: Double? = nil,
         fileSize: Int64? = nil,
         metadata: VideoMetadata = VideoMetadata(),
-        serviceName: String? = nil,
-        creatorName: String? = nil,
         postID: String? = nil
-    ) async  {
-        
+    ) async {
         do {
             let extractor = VideoMetadataExtractor()
             let videodata = try await extractor.extractMetadataValues(from: url)
@@ -101,43 +90,33 @@ public struct VideoInput: Codable, Hashable, Sendable {
             self.frameRate = videodata.frameRate
             self.fileSize = videodata.fileSize
             self.metadata = VideoMetadata(codec: videodata.videoCodec, bitrate: videodata.bitrate)
-            self.serviceName = serviceName
-            self.creatorName = creatorName
             self.postID = postID
         } catch {
-           
             self.id = id
             self.url = url
-            self.title = url.deletingPathExtension().lastPathComponent
-            self.duration = 00.00
-            self.width = 00.00
-            self.height = 00.00
-            self.frameRate = 00.00
-            self.fileSize = 00
-            self.metadata = VideoMetadata(codec: "unknwon", bitrate: 00)
-            self.serviceName = serviceName
-            self.creatorName = creatorName
+            self.title = title ?? url.deletingPathExtension().lastPathComponent
+            self.duration = 0
+            self.width = 0
+            self.height = 0
+            self.frameRate = 0
+            self.fileSize = 0
+            self.metadata = VideoMetadata(codec: "unknown", bitrate: 0)
             self.postID = postID
         }
     }
-    
-    /// Initialize from URL and extract metadata
+
+    /// Initialize from URL, acquiring security-scoped access before extracting metadata.
     /// - Parameters:
     ///   - url: URL to the video file
-    ///   - serviceName: Optional service name for organization
-    ///   - creatorName: Optional creator name for organization
     ///   - postID: Optional post ID for file naming
-    /// - Throws: Error if video cannot be accessed or metadata cannot be extracted
-    public init(from url: URL, serviceName: String? = nil, creatorName: String? = nil, postID: String? = nil) async throws {
+    /// - Throws: `MosaicError.invalidVideo` if the security-scoped resource cannot be accessed.
+    public init(from url: URL, postID: String? = nil) async throws {
         guard url.startAccessingSecurityScopedResource() else {
             throw MosaicError.invalidVideo("Failed to access security-scoped resource")
         }
         let extractor = VideoMetadataExtractor()
-        
         let videodata = try await extractor.extractMetadataValues(from: url)
-        
-        
-        try await self.init(
+        await self.init(
             url: url,
             duration: videodata.duration,
             width: videodata.width,
@@ -145,10 +124,7 @@ public struct VideoInput: Codable, Hashable, Sendable {
             frameRate: videodata.frameRate,
             fileSize: videodata.fileSize,
             metadata: VideoMetadata(codec: videodata.videoCodec, bitrate: videodata.bitrate),
-            serviceName: serviceName,
-            creatorName: creatorName,
             postID: postID
         )
-        
     }
 }

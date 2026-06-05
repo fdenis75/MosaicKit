@@ -50,23 +50,65 @@ private struct PreviewComboConfig: Sendable {
     let targetDuration: TimeInterval
     let density: DensityConfig
     let includeAudio: Bool
-    let useNativeExport: Bool
+    /// Selects the export engine for this combination.
+    let exportMode: PreviewExportMode
+    /// Preset used when `exportMode == .native`. `nil` → quality-derived.
     let nativePreset: nativeExportPreset?
+    /// Preset used when `exportMode == .sjs`. `nil` → quality-derived.
     let sjsPreset: SjSExportPreset?
+    /// Encoding options forwarded to ffmpeg when `exportMode == .ffmpeg`.
+    /// `nil` → derived from `compressionQuality` via `FFmpegEncodingOptions.from(quality:format:)`.
+    let ffmpegOptions: FFmpegEncodingOptions?
     let minimumExtractDuration: TimeInterval
     let maximumPlaybackSpeed: Double
 
+    // MARK: FFmpeg binary discovery
+
+    /// Resolves the ffmpeg binary path from, in order:
+    ///  1. `FFMPEG_PATH` environment variable
+    ///  2. `/opt/homebrew/bin/ffmpeg`  (Apple Silicon Homebrew)
+    ///  3. `/usr/local/bin/ffmpeg`     (Intel Homebrew / custom installs)
+    ///  4. `/usr/bin/ffmpeg`           (system, rare)
+    ///
+    /// Returns `nil` when no executable is found; FFmpeg combos are silently
+    /// omitted from the matrix in that case.
+    static var ffmpegBinaryPath: String? {
+        let fm = FileManager.default
+        if let env = ProcessInfo.processInfo.environment["FFMPEG_PATH"],
+           fm.isExecutableFile(atPath: env) { return env }
+        for path in ["/opt/homebrew/bin/ffmpeg", "/usr/local/bin/ffmpeg", "/usr/bin/ffmpeg"] {
+            if fm.isExecutableFile(atPath: path) { return path }
+        }
+        return nil
+    }
+
+    // MARK: Short name
+
     var shortName: String {
-        let dur = "\(Int(targetDuration))s"
-        let dens = density.name.lowercased()
+        let dur   = "\(Int(targetDuration))s"
+        let dens  = density.name.lowercased()
         let audio = includeAudio ? "aud" : "noaud"
         let exportTag: String
-        if useNativeExport {
+        switch exportMode {
+        case .native:
             let preset = (nativePreset?.displayString ?? "auto").replacingOccurrences(of: " ", with: "_")
             exportTag = "nat_\(preset)"
-        } else {
+        case .sjs:
             let preset = (sjsPreset?.displayString ?? "def").replacingOccurrences(of: " ", with: "_")
             exportTag = "sjs_\(preset)"
+        case .ffmpeg:
+            let codec = ffmpegOptions?.videoCodec.tag ?? "auto"
+            let qualityTag: String
+            if let opts = ffmpegOptions {
+                if opts.videoCodec.isVideoToolbox {
+                    qualityTag = "q\(opts.speedPreset.videoToolboxQuality)"
+                } else {
+                    qualityTag = opts.crf.map { "crf\($0)" } ?? "qdef"
+                }
+            } else {
+                qualityTag = "qdef"
+            }
+            exportTag = "ffmpeg_\(codec)_\(qualityTag)"
         }
         let minD = "min\(numStr(minimumExtractDuration))s"
         let maxS = "max\(numStr(maximumPlaybackSpeed))x"
@@ -81,7 +123,9 @@ private struct PreviewComboConfig: Sendable {
         return s.replacingOccurrences(of: ".", with: "p")
     }
 
-    /// Build a PreviewConfiguration that writes output directly to `outputDirectory`
+    // MARK: Config builder
+
+    /// Build a `PreviewConfiguration` that writes output directly to `outputDirectory`
     /// (no "movieprev" subfolder) and skips files that already exist.
     func makeConfig(outputDirectory: URL) -> PreviewConfiguration {
         var config = PreviewConfiguration(
@@ -94,9 +138,12 @@ private struct PreviewComboConfig: Sendable {
             outputDirectory: outputDirectory,
             fullPathInName: false,
             compressionQuality: 0.8,
-            useNativeExport: useNativeExport,
+            exportMode: exportMode,
             exportPresetName: nativePreset,
-            sjSExportPresetName: sjsPreset
+            sjSExportPresetName: sjsPreset,
+            ffmpegBinaryPath: exportMode == .ffmpeg ? Self.ffmpegBinaryPath : nil,
+            ffmpegTempFolder: nil,   // auto-create under system temp
+            ffmpegEncodingOptions: ffmpegOptions
         )
         config.outputDirectoryTemplate = "{root}"
         config.overwrite = false
@@ -108,28 +155,78 @@ private struct PreviewComboConfig: Sendable {
 
 private extension PreviewComboConfig {
 
-    /// Builds all 540 combinations.
+    /// Builds all parameter combinations across three export engines.
     ///
-    /// Matrix:
-    /// - duration              [30s, 90s]                             ×2
-    /// - density               [XXL, L, XS]                          ×3
-    /// - includeAudio          [true, false]                          ×2
-    /// - minimumExtractDuration[1.5s, 3s, 5s]                        ×3
-    /// - maximumPlaybackSpeed  [1.0, 1.5, 2.0]                       ×3
-    /// - useNativeExport=true  nativePresets [HEVC_Hi, H264_Med, H264-Lo]  →  324
-    /// - useNativeExport=false sjsPresets    [hevc, h264_lowAutoLevel]     →  216
-    ///                                                          Total: 540
+    /// The shared axes are:
+    /// - `targetDuration`          [60 s, 120 s]              ×2
+    /// - `density`                 [S, XXS]                   ×2
+    /// - `includeAudio`            [true]                     ×1
+    /// - `minimumExtractDuration`  [1.0 s, 3.0 s]             ×2
+    /// - `maximumPlaybackSpeed`    [1.2×, 1.5×, 2.0×]         ×3
+    ///   → 24 base combinations per export variant
+    ///
+    /// Per export engine:
+    /// - **Native** (`.native`)  ×2 presets  → 48 combos
+    /// - **SJS**    (`.sjs`)     ×1 preset   → 24 combos
+    /// - **FFmpeg** (`.ffmpeg`)  ×3 variants → 72 combos
+    ///   (only added when an ffmpeg binary is available; silently omitted otherwise)
+    ///
+    ///   FFmpeg variants (fastest first):
+    ///   1. `hevc_videotoolbox` / superfast / -q:v 50 (hardware, real-time)
+    ///   2. `hevc_videotoolbox` / fast      / -q:v 65 (hardware, real-time)
+    ///   3. `libx264`           / fast      / CRF 23  (software fallback)
+    ///
+    /// Total **with** ffmpeg: **144** | without ffmpeg: **72**
+    ///
+    /// Enable with:
+    /// ```bash
+    /// PREVIEW_COMBO_RUN=1 swift test --filter PreviewCombinationTests
+    /// # Optionally override the ffmpeg path:
+    /// FFMPEG_PATH=/opt/homebrew/bin/ffmpeg PREVIEW_COMBO_RUN=1 swift test --filter PreviewCombinationTests
+    /// ```
     static func makeAll() -> [PreviewComboConfig] {
-        let durations: [TimeInterval]            = [60, 120]
-        let densities: [DensityConfig]           = [.s, .xxs]
+        let durations:   [TimeInterval]          = [60, 120]
+        let densities:   [DensityConfig]         = [.s, .xxs]
         let audioValues: [Bool]                  = [true]
+        let minDurations:[TimeInterval]          = [1.0, 3.0]
+        let maxSpeeds:   [Double]                = [1.2, 1.5, 2.0]
+
         let nativePresets: [nativeExportPreset]  = [
             .AVAssetExportPresetMediumQuality,
             .AVAssetExportPresetLowQuality
         ]
         let sjsPresets: [SjSExportPreset]        = [.h264_lowAutoLevel]
-        let minDurations: [TimeInterval]         = [1.0, 3.0]
-        let maxSpeeds: [Double]                  = [1.2, 1.5, 2.0 ]
+
+        // FFmpeg option variants — ordered from fastest to highest quality:
+        //
+        //  [0] hevc_videotoolbox / superfast / q:v 50  → hardware, real-time, low quality (fastest)
+        //  [1] hevc_videotoolbox / fast       / q:v 65 → hardware, real-time, good quality
+        //  [2] h264              / crf 23     / fast   → software H.264 fallback
+        //
+        // VideoToolbox variants are first so the fastest paths are exercised early in the run.
+        let ffmpegOptionsList: [FFmpegEncodingOptions] = [
+            // VideoToolbox — real-time, lowest acceptable quality (max speed)
+            FFmpegEncodingOptions(
+                videoCodec: .hevcVideoToolbox, crf: nil, speedPreset: .superfast,
+                maxResolution: ._1080p, audioCodec: .aac, audioBitrate: "128k"
+            ),
+            // VideoToolbox — real-time, balanced quality (preview sweet-spot)
+            FFmpegEncodingOptions(
+                videoCodec: .hevcVideoToolbox, crf: nil, speedPreset: .fast,
+                maxResolution: ._1080p, audioCodec: .aac, audioBitrate: "128k"
+            ),
+            // Software H.264 — cross-platform fallback
+            FFmpegEncodingOptions(
+                videoCodec: .h264, crf: 23, speedPreset: .fast,
+                maxResolution: ._1080p, audioCodec: .aac, audioBitrate: "128k"
+            ),
+        ]
+
+        let ffmpegPath = ffmpegBinaryPath  // nil → omit FFmpeg branch
+        if ffmpegPath == nil {
+            print("⚠️  ffmpeg not found — FFmpeg combinations will be skipped.")
+            print("    Set FFMPEG_PATH or install via Homebrew (`brew install ffmpeg`).\n")
+        }
 
         var configs: [PreviewComboConfig] = []
         var idx = 1
@@ -139,25 +236,43 @@ private extension PreviewComboConfig {
                 for audio in audioValues {
                     for minDur in minDurations {
                         for maxSpd in maxSpeeds {
-                            // Native export branch
+
+                            // --- Native export ---
                             for preset in nativePresets {
                                 configs.append(PreviewComboConfig(
                                     index: idx, targetDuration: dur, density: dens,
-                                    includeAudio: audio, useNativeExport: true,
-                                    nativePreset: preset, sjsPreset: nil,
+                                    includeAudio: audio,
+                                    exportMode: .native,
+                                    nativePreset: preset, sjsPreset: nil, ffmpegOptions: nil,
                                     minimumExtractDuration: minDur, maximumPlaybackSpeed: maxSpd
                                 ))
                                 idx += 1
                             }
-                            // SJS export branch
+
+                            // --- SJS export ---
                             for preset in sjsPresets {
                                 configs.append(PreviewComboConfig(
                                     index: idx, targetDuration: dur, density: dens,
-                                    includeAudio: audio, useNativeExport: false,
-                                    nativePreset: nil, sjsPreset: preset,
+                                    includeAudio: audio,
+                                    exportMode: .sjs,
+                                    nativePreset: nil, sjsPreset: preset, ffmpegOptions: nil,
                                     minimumExtractDuration: minDur, maximumPlaybackSpeed: maxSpd
                                 ))
                                 idx += 1
+                            }
+
+                            // --- FFmpeg export (only when binary is available) ---
+                            if ffmpegPath != nil {
+                                for options in ffmpegOptionsList {
+                                    configs.append(PreviewComboConfig(
+                                        index: idx, targetDuration: dur, density: dens,
+                                        includeAudio: audio,
+                                        exportMode: .ffmpeg,
+                                        nativePreset: nil, sjsPreset: nil, ffmpegOptions: options,
+                                        minimumExtractDuration: minDur, maximumPlaybackSpeed: maxSpd
+                                    ))
+                                    idx += 1
+                                }
                             }
                         }
                     }
@@ -172,10 +287,26 @@ private extension PreviewComboConfig {
 // MARK: - Timing / failure report
 
 private func previewTimingSummary(results: [PreviewComboResult], label: String) -> String {
-    let ok = results.filter(\.succeeded)
+    let ok  = results.filter(\.succeeded)
     let bar = String(repeating: "═", count: 72)
     var out = "Preview Combination Test — \(label)\n\(bar)\n\n"
+
+    // Per-mode breakdown
+    let byMode: [(String, [PreviewComboResult])] = [
+        ("native", results.filter { $0.comboName.contains("_nat_") }),
+        ("sjs",    results.filter { $0.comboName.contains("_sjs_") }),
+        ("ffmpeg", results.filter { $0.comboName.contains("_ffmpeg_") }),
+    ]
+    let modeSummary = byMode
+        .filter { !$0.1.isEmpty }
+        .map { name, rs in
+            let s = rs.filter(\.succeeded).count
+            return "\(name): \(s)/\(rs.count)"
+        }
+        .joined(separator: "  |  ")
+
     out += "Runs    : \(results.count) total  |  \(ok.count) succeeded  |  \(results.count - ok.count) failed\n"
+    out += "By mode : \(modeSummary)\n"
 
     guard !ok.isEmpty else { out += "\nNo successful runs.\n"; return out }
 
@@ -190,6 +321,18 @@ private func previewTimingSummary(results: [PreviewComboResult], label: String) 
         let mean = ts.reduce(0, +) / Double(ts.count)
         out += String(format: "  %-24@  n=%4d  mean=%6.1fs  min=%5.1fs  max=%6.1fs\n",
                       vid as NSString, ts.count, mean, ts.min()!, ts.max()!)
+    }
+    out += "\n"
+
+    // Per-mode timing
+    out += "PER-MODE (successful runs)\n" + String(repeating: "─", count: 52) + "\n"
+    for (name, rs) in byMode {
+        let okRs = rs.filter(\.succeeded)
+        guard !okRs.isEmpty else { continue }
+        let ts   = okRs.map(\.elapsed)
+        let mean = ts.reduce(0, +) / Double(ts.count)
+        out += String(format: "  %-8@  n=%4d  mean=%6.1fs  min=%5.1fs  max=%6.1fs\n",
+                      name as NSString, okRs.count, mean, ts.min()!, ts.max()!)
     }
     out += "\n"
 
@@ -216,32 +359,48 @@ private func previewTimingSummary(results: [PreviewComboResult], label: String) 
 
 // MARK: - Suite
 
-/// Exhaustive preview-generation parameter combination tests.
+/// Exhaustive preview-generation parameter combination tests covering all three export engines.
 ///
 /// Runs three ordered phases against real video files in `/Volumes/Ext-Photos5/TestPreviews`.
 /// All output is saved to `/Volumes/Ext-Photos5/TestPreviews/<timestamp>/` and is **not deleted**
 /// after the test completes.
 ///
-/// ## Combination matrix (540 per video)
-/// | Parameter                | Values                                          |
-/// |:-------------------------|:------------------------------------------------|
-/// | `targetDuration`         | 30 s, 90 s                                      |
-/// | `density`                | XXL, L, XS                                      |
-/// | `includeAudio`           | true, false                                     |
-/// | `minimumExtractDuration` | 1.5 s, 3 s, 5 s                                 |
-/// | `maximumPlaybackSpeed`   | 1.0, 1.5, 2.0                                   |
-/// | native presets (×3)      | HEVC_Hi, H264_Med, H264-Lo → **324 combos**     |
-/// | SJS presets (×2)         | hevc, h264_lowAutoLevel    → **216 combos**     |
+/// ## Combination matrix
+///
+/// Shared axes (24 base combinations):
+///
+/// | Parameter                | Values                      |
+/// |:-------------------------|:----------------------------|
+/// | `targetDuration`         | 60 s, 120 s                 |
+/// | `density`                | S, XXS                      |
+/// | `includeAudio`           | true                        |
+/// | `minimumExtractDuration` | 1.0 s, 3.0 s                |
+/// | `maximumPlaybackSpeed`   | 1.2×, 1.5×, 2.0×            |
+///
+/// Per export engine:
+///
+/// | Engine   | Variants                                         | Combos |
+/// |:---------|:-------------------------------------------------|-------:|
+/// | Native   | MediumQuality, LowQuality                        | 48     |
+/// | SJS      | h264_lowAutoLevel                                | 24     |
+/// | FFmpeg ¹ | hevc_vt/superfast, hevc_vt/fast, h264/CRF23/fast | 72     |
+///
+/// ¹ FFmpeg combos are included only when an `ffmpeg` binary is discoverable.
+///   Override the path via `FFMPEG_PATH=/path/to/ffmpeg`.
+///   VideoToolbox variants use `-realtime 1` and `-q:v` (no `-preset`/`-crf`).
+///
+/// Total **with** ffmpeg: **144** | without: **72**
 ///
 /// ## Phases
-/// - **Phase 1**: `DJI_0080.MP4` — all 540 combos, sequential
-/// - **Phase 2**: `TestB.mp4` → `DDSC-031.mp4` — 540 combos each, sequential
-/// - **Phase 3**: `testA.mp4` / `TestB.mp4` / `TestC.mp4` / `DDSC-031.mp4` — 4 files concurrent,
-///   each file's 540 combos run sequentially within its own task
+/// - **Phase 1**: `TestB.mp4` — all combos, sequential
+/// - **Phase 2**: `TestB.mp4` → `DDSC-031.mp4` — all combos each, sequential
+/// - **Phase 3**: `testA.mp4` / `TestB.mp4` / `TestC.mp4` / `DDSC-031.mp4` — 4 files concurrent
 ///
 /// ## Run
 /// ```bash
 /// PREVIEW_COMBO_RUN=1 swift test --filter PreviewCombinationTests
+/// # With a custom ffmpeg path:
+/// FFMPEG_PATH=/opt/homebrew/bin/ffmpeg PREVIEW_COMBO_RUN=1 swift test --filter PreviewCombinationTests
 /// ```
 ///
 /// The test is silently skipped when `PREVIEW_COMBO_RUN` is not set so it does not block CI.
@@ -267,7 +426,8 @@ struct PreviewCombinationTests {
         ProcessInfo.processInfo.environment["PREVIEW_COMBO_RUN"] == "1"
     }
 
-    /// All 540 parameter combinations — built once, shared across all phases.
+    /// All parameter combinations — built once at suite load.
+    /// FFmpeg combos are included only when an ffmpeg binary is found.
     private static let allCombos: [PreviewComboConfig] = PreviewComboConfig.makeAll()
 
     // MARK: Helpers
@@ -285,6 +445,9 @@ struct PreviewCombinationTests {
 
     private func printHeader(phase: Int, videos: [String], combosPerVideo: Int) {
         let bar = String(repeating: "─", count: 72)
+        let ffmpegNote = PreviewComboConfig.ffmpegBinaryPath != nil
+            ? "ffmpeg: \(PreviewComboConfig.ffmpegBinaryPath!)"
+            : "ffmpeg: not found (FFmpeg combos skipped)"
         print("""
 
         🎬 Phase \(phase) — \(videos.joined(separator: " → "))
@@ -292,11 +455,12 @@ struct PreviewCombinationTests {
           Combinations per video : \(combosPerVideo)
           Total runs             : \(combosPerVideo * videos.count)
           Output                 : \(Self.runOutputDirectory.path)
+          \(ffmpegNote)
         \(bar)
         """)
     }
 
-    // MARK: - Phase 1 ── DJI_0080.MP4, all 540 combos, sequential
+    // MARK: - Phase 1 ── TestB.MP4, all combos, sequential
 
     @Test("Phase 1 – TestB.MP4,  combinations sequential")
     func phase1_singleVideo() async throws {
@@ -313,10 +477,10 @@ struct PreviewCombinationTests {
 
         try ensureOutputDirectory()
 
-        let combos   = Self.allCombos
+        let combos    = Self.allCombos
         let outputDir = Self.runOutputDirectory
-        let video    = await VideoInput(url: url(for: "TestB.mp4"))
-        let reporter = PreviewProgressReporter(total: combos.count)
+        let video     = await VideoInput(url: url(for: "TestB.mp4"))
+        let reporter  = PreviewProgressReporter(total: combos.count)
 
         printHeader(phase: 1, videos: ["TestB.mp4"], combosPerVideo: combos.count)
         print(String(format: "  Video info: %@  %.0fs  %dx%d\n",
@@ -450,7 +614,7 @@ struct PreviewCombinationTests {
         }
         print("")
 
-        // Four tasks run concurrently; each task processes its video's 540 combos sequentially
+        // Four tasks run concurrently; each task processes its video's combos sequentially
         let allResults: [PreviewComboResult] = await withTaskGroup(of: [PreviewComboResult].self) { group in
 
             for (filename, video) in videos {
@@ -487,9 +651,7 @@ struct PreviewCombinationTests {
             }
 
             var collected: [PreviewComboResult] = []
-            for await batch in group {
-                collected.append(contentsOf: batch)
-            }
+            for await batch in group { collected.append(contentsOf: batch) }
             return collected
         }
 

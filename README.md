@@ -576,7 +576,10 @@ public struct PreviewConfiguration {
     public var outputDirectory: URL?                 // Root output folder (nil = video's parent)
     public var fullPathInName: Bool                  // Embed full source path in filename
     public var compressionQuality: Double            // 0.0–1.0
-    public var useNativeExport: Bool                 // AVAssetExportSession vs SJSAssetExportSession
+    public var exportMode: PreviewExportMode         // .native | .sjs | .ffmpeg
+    public var ffmpegBinaryPath: String?             // Required when exportMode == .ffmpeg
+    public var ffmpegTempFolder: URL?                // Temp dir for passthrough file (auto if nil)
+    public var ffmpegEncodingOptions: FFmpegEncodingOptions? // nil → derived from compressionQuality
     public var overwrite: Bool                       // Overwrite existing files (default: false)
     public var outputDirectoryTemplate: String?      // Token-based directory path (nil = default)
     public var filenameTemplate: String?             // Token-based filename (nil = default)
