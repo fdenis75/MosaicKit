@@ -97,9 +97,18 @@ private struct PreviewComboConfig: Sendable {
             let preset = (sjsPreset?.displayString ?? "def").replacingOccurrences(of: " ", with: "_")
             exportTag = "sjs_\(preset)"
         case .ffmpeg:
-            let codec = ffmpegOptions?.videoCodec.rawValue ?? "auto"
-            let crf   = ffmpegOptions?.crf.map { "crf\($0)" } ?? "qdef"
-            exportTag = "ffmpeg_\(codec)_\(crf)"
+            let codec = ffmpegOptions?.videoCodec.tag ?? "auto"
+            let qualityTag: String
+            if let opts = ffmpegOptions {
+                if opts.videoCodec.isVideoToolbox {
+                    qualityTag = "q\(opts.speedPreset.videoToolboxQuality)"
+                } else {
+                    qualityTag = opts.crf.map { "crf\($0)" } ?? "qdef"
+                }
+            } else {
+                qualityTag = "qdef"
+            }
+            exportTag = "ffmpeg_\(codec)_\(qualityTag)"
         }
         let minD = "min\(numStr(minimumExtractDuration))s"
         let maxS = "max\(numStr(maximumPlaybackSpeed))x"
@@ -157,12 +166,17 @@ private extension PreviewComboConfig {
     ///   → 24 base combinations per export variant
     ///
     /// Per export engine:
-    /// - **Native** (`.native`)  ×2 presets → 48 combos
-    /// - **SJS**    (`.sjs`)     ×1 preset  → 24 combos
-    /// - **FFmpeg** (`.ffmpeg`)  ×2 options → 48 combos
+    /// - **Native** (`.native`)  ×2 presets  → 48 combos
+    /// - **SJS**    (`.sjs`)     ×1 preset   → 24 combos
+    /// - **FFmpeg** (`.ffmpeg`)  ×3 variants → 72 combos
     ///   (only added when an ffmpeg binary is available; silently omitted otherwise)
     ///
-    /// Total **with** ffmpeg: **120** | without ffmpeg: **72**
+    ///   FFmpeg variants (fastest first):
+    ///   1. `hevc_videotoolbox` / superfast / -q:v 50 (hardware, real-time)
+    ///   2. `hevc_videotoolbox` / fast      / -q:v 65 (hardware, real-time)
+    ///   3. `libx264`           / fast      / CRF 23  (software fallback)
+    ///
+    /// Total **with** ffmpeg: **144** | without ffmpeg: **72**
     ///
     /// Enable with:
     /// ```bash
@@ -183,15 +197,28 @@ private extension PreviewComboConfig {
         ]
         let sjsPresets: [SjSExportPreset]        = [.h264_lowAutoLevel]
 
-        // Two representative ffmpeg presets: H.264 fast (lighter) and HEVC medium (higher quality)
+        // FFmpeg option variants — ordered from fastest to highest quality:
+        //
+        //  [0] hevc_videotoolbox / superfast / q:v 50  → hardware, real-time, low quality (fastest)
+        //  [1] hevc_videotoolbox / fast       / q:v 65 → hardware, real-time, good quality
+        //  [2] h264              / crf 23     / fast   → software H.264 fallback
+        //
+        // VideoToolbox variants are first so the fastest paths are exercised early in the run.
         let ffmpegOptionsList: [FFmpegEncodingOptions] = [
+            // VideoToolbox — real-time, lowest acceptable quality (max speed)
             FFmpegEncodingOptions(
-                videoCodec: .h264, crf: 23, speedPreset: .fast,   maxResolution: ._1080p,
-                audioCodec: .aac, audioBitrate: "128k"
+                videoCodec: .hevcVideoToolbox, crf: nil, speedPreset: .superfast,
+                maxResolution: ._1080p, audioCodec: .aac, audioBitrate: "128k"
             ),
+            // VideoToolbox — real-time, balanced quality (preview sweet-spot)
             FFmpegEncodingOptions(
-                videoCodec: .hevc, crf: 22, speedPreset: .medium, maxResolution: ._1080p,
-                audioCodec: .aac, audioBitrate: "128k"
+                videoCodec: .hevcVideoToolbox, crf: nil, speedPreset: .fast,
+                maxResolution: ._1080p, audioCodec: .aac, audioBitrate: "128k"
+            ),
+            // Software H.264 — cross-platform fallback
+            FFmpegEncodingOptions(
+                videoCodec: .h264, crf: 23, speedPreset: .fast,
+                maxResolution: ._1080p, audioCodec: .aac, audioBitrate: "128k"
             ),
         ]
 
@@ -352,16 +379,17 @@ private func previewTimingSummary(results: [PreviewComboResult], label: String) 
 ///
 /// Per export engine:
 ///
-/// | Engine   | Variants                                 | Combos |
-/// |:---------|:-----------------------------------------|-------:|
-/// | Native   | MediumQuality, LowQuality                | 48     |
-/// | SJS      | h264_lowAutoLevel                        | 24     |
-/// | FFmpeg ¹ | H.264/CRF23/fast, HEVC/CRF22/medium      | 48     |
+/// | Engine   | Variants                                         | Combos |
+/// |:---------|:-------------------------------------------------|-------:|
+/// | Native   | MediumQuality, LowQuality                        | 48     |
+/// | SJS      | h264_lowAutoLevel                                | 24     |
+/// | FFmpeg ¹ | hevc_vt/superfast, hevc_vt/fast, h264/CRF23/fast | 72     |
 ///
 /// ¹ FFmpeg combos are included only when an `ffmpeg` binary is discoverable.
 ///   Override the path via `FFMPEG_PATH=/path/to/ffmpeg`.
+///   VideoToolbox variants use `-realtime 1` and `-q:v` (no `-preset`/`-crf`).
 ///
-/// Total **with** ffmpeg: **120** | without: **72**
+/// Total **with** ffmpeg: **144** | without: **72**
 ///
 /// ## Phases
 /// - **Phase 1**: `TestB.mp4` — all combos, sequential
