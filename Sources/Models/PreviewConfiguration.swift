@@ -3,6 +3,17 @@ import AVFoundation
 import OSLog
 import SJSAssetExportSession
 
+/// Selects which encoding engine to use when generating a preview video.
+public enum PreviewExportMode: String, Codable, Sendable, Hashable {
+    /// Apple's `AVAssetExportSession` with a preset-based quality selector.
+    case native
+    /// `SJSAssetExportSession` with fine-grained codec and bitrate control.
+    case sjs
+    /// Passthrough export to a temp file followed by FFmpeg transcoding.
+    /// Requires `PreviewConfiguration.ffmpegBinaryPath` to be set.
+    case ffmpeg
+}
+
 /// Configuration for video preview generation
 // @available(macOS 26, iOS 26, *)
 public struct PreviewConfiguration: Codable, Sendable, Hashable {
@@ -44,18 +55,46 @@ public struct PreviewConfiguration: Codable, Sendable, Hashable {
     /// and by the native export path for quality-based preset selection via ``VideoFormat/exportPreset(quality:)``.
     public var compressionQuality: Double
 
-    /// When true, uses AVAssetExportSession (Apple's native exporter) instead of SJSAssetExportSession.
-    /// The native exporter uses preset-based quality control via ``exportPresetName``.
-    public var useNativeExport: Bool
+    /// Selects the encoding engine. Replaces the deprecated ``useNativeExport`` flag.
+    ///
+    /// - `.native` — `AVAssetExportSession` with preset-based quality control.
+    /// - `.sjs` — `SJSAssetExportSession` with fine-grained codec / bitrate control.
+    /// - `.ffmpeg` — passthrough export to a temp file, then FFmpeg transcode to the
+    ///   final destination. Requires ``ffmpegBinaryPath`` and is macOS-only.
+    public var exportMode: PreviewExportMode
 
-    /// The AVAssetExportSession preset to use when ``useNativeExport`` is true.
+    /// Absolute path to the `ffmpeg` binary.
+    /// Required (and validated before composition starts) when ``exportMode`` is `.ffmpeg`.
+    public var ffmpegBinaryPath: String?
+
+    /// Directory used for the intermediate passthrough file during the FFmpeg pipeline.
+    /// When `nil`, a unique subdirectory under `FileManager.default.temporaryDirectory` is
+    /// created automatically and deleted after encoding completes.
+    public var ffmpegTempFolder: URL?
+
+    /// Encoding options forwarded to the FFmpeg process.
+    /// When `nil`, options are derived from ``compressionQuality`` via
+    /// ``FFmpegEncodingOptions/from(quality:format:)``.
+    public var ffmpegEncodingOptions: FFmpegEncodingOptions?
+
+    /// Deprecated. Use ``exportMode`` instead.
+    ///
+    /// Reading returns `true` when `exportMode == .native`.
+    /// Writing maps `true → .native` and `false → .sjs`.
+    @available(*, deprecated, renamed: "exportMode")
+    public var useNativeExport: Bool {
+        get { exportMode == .native }
+        set { exportMode = newValue ? .native : .sjs }
+    }
+
+    /// The AVAssetExportSession preset to use when ``exportMode`` is `.native`.
     /// If nil, a preset is automatically selected based on ``compressionQuality`` via ``VideoFormat/exportPreset(quality:)``.
     /// Common presets: AVAssetExportPresetHighestQuality, AVAssetExportPresetHEVC1920x1080,
     /// AVAssetExportPreset1920x1080, AVAssetExportPresetMediumQuality, etc.
     public var exportPresetName: nativeExportPreset?
-    
-    
-    /// The SJSAssetExportSession preset to use when ``useNativeExport`` is false.
+
+
+    /// The SJSAssetExportSession preset to use when ``exportMode`` is `.sjs`.
     public var sJSExportPresetName: SjSExportPreset?
 
     /// Whether to overwrite existing output files. When `false` (default),
@@ -110,12 +149,15 @@ public struct PreviewConfiguration: Codable, Sendable, Hashable {
     private enum CodingKeys: String, CodingKey {
         case targetDuration, minimumExtractDuration, maximumPlaybackSpeed
         case density, format, includeAudio, outputDirectory
-        case fullPathInName, compressionQuality, useNativeExport
+        case fullPathInName, compressionQuality
+        // exportMode supersedes useNativeExport; both keys are kept for backward compatibility
+        case exportMode, useNativeExport
         case exportPresetName, sJSExportPresetName
         /// Encodes/decodes as `"exportMaxResolution"` for backward compatibility
         /// even though the backing stored property is `_exportMaxResolutionRaw`.
         case exportMaxResolution
         case overwrite, outputDirectoryTemplate, filenameTemplate
+        case ffmpegBinaryPath, ffmpegTempFolder, ffmpegEncodingOptions
     }
 
     // MARK: - Initialization
@@ -140,7 +182,44 @@ public struct PreviewConfiguration: Codable, Sendable, Hashable {
         outputDirectory: URL? = nil,
         fullPathInName: Bool = false,
         compressionQuality: Double = 0.8,
-        useNativeExport: Bool = true,
+        exportMode: PreviewExportMode = .native,
+        exportPresetName: nativeExportPreset? = .AVAssetExportPresetHEVC1920x1080,
+        sjSExportPresetName: SjSExportPreset? = .hevc,
+        ffmpegBinaryPath: String? = nil,
+        ffmpegTempFolder: URL? = nil,
+        ffmpegEncodingOptions: FFmpegEncodingOptions? = nil
+    ) {
+        self.targetDuration = targetDuration
+        self.minimumExtractDuration = minimumExtractDuration
+        self.maximumPlaybackSpeed = maximumPlaybackSpeed
+        self.density = density
+        self.format = format
+        self.includeAudio = includeAudio
+        self.outputDirectory = outputDirectory
+        self.fullPathInName = fullPathInName
+        self.compressionQuality = min(max(compressionQuality, 0.0), 1.0)
+        self.exportMode = exportMode
+        self.exportPresetName = exportPresetName
+        self.sJSExportPresetName = sjSExportPresetName ?? .hevc
+        self.ffmpegBinaryPath = ffmpegBinaryPath
+        self.ffmpegTempFolder = ffmpegTempFolder
+        self.ffmpegEncodingOptions = ffmpegEncodingOptions
+        // _exportMaxResolutionRaw defaults to "1080p" via the property declaration
+    }
+
+    /// Deprecated. Use ``init(exportMode:)`` instead.
+    @available(*, deprecated, renamed: "init(exportMode:)")
+    public init(
+        targetDuration: TimeInterval = 60,
+        minimumExtractDuration: TimeInterval? = nil,
+        maximumPlaybackSpeed: Double? = nil,
+        density: DensityConfig = .m,
+        format: VideoFormat = .mp4,
+        includeAudio: Bool = true,
+        outputDirectory: URL? = nil,
+        fullPathInName: Bool = false,
+        compressionQuality: Double = 0.8,
+        useNativeExport: Bool,
         exportPresetName: nativeExportPreset? = .AVAssetExportPresetHEVC1920x1080,
         sjSExportPresetName: SjSExportPreset? = .hevc
     ) {
@@ -153,10 +232,12 @@ public struct PreviewConfiguration: Codable, Sendable, Hashable {
         self.outputDirectory = outputDirectory
         self.fullPathInName = fullPathInName
         self.compressionQuality = min(max(compressionQuality, 0.0), 1.0)
-        self.useNativeExport = useNativeExport
+        self.exportMode = useNativeExport ? .native : .sjs
         self.exportPresetName = exportPresetName
         self.sJSExportPresetName = sjSExportPresetName ?? .hevc
-        // _exportMaxResolutionRaw defaults to "1080p" via the property declaration
+        self.ffmpegBinaryPath = nil
+        self.ffmpegTempFolder = nil
+        self.ffmpegEncodingOptions = nil
     }
 
     /// Creates a `PreviewConfiguration` with an explicit maximum export resolution.
@@ -174,10 +255,13 @@ public struct PreviewConfiguration: Codable, Sendable, Hashable {
         outputDirectory: URL? = nil,
         fullPathInName: Bool = false,
         compressionQuality: Double = 0.8,
-        useNativeExport: Bool = true,
+        exportMode: PreviewExportMode = .native,
         exportPresetName: nativeExportPreset? = .AVAssetExportPresetHEVC1920x1080,
         sjSExportPresetName: SjSExportPreset? = .hevc,
-        maxResolution: ExportMaxResolution? = ._1080p
+        maxResolution: ExportMaxResolution? = ._1080p,
+        ffmpegBinaryPath: String? = nil,
+        ffmpegTempFolder: URL? = nil,
+        ffmpegEncodingOptions: FFmpegEncodingOptions? = nil
     ) {
         self.targetDuration = targetDuration
         self.minimumExtractDuration = minimumExtractDuration
@@ -188,10 +272,13 @@ public struct PreviewConfiguration: Codable, Sendable, Hashable {
         self.outputDirectory = outputDirectory
         self.fullPathInName = fullPathInName
         self.compressionQuality = min(max(compressionQuality, 0.0), 1.0)
-        self.useNativeExport = useNativeExport
+        self.exportMode = exportMode
         self.exportPresetName = exportPresetName
         self.sJSExportPresetName = sjSExportPresetName ?? .hevc
         self._exportMaxResolutionRaw = (maxResolution ?? ._1080p).rawValue
+        self.ffmpegBinaryPath = ffmpegBinaryPath
+        self.ffmpegTempFolder = ffmpegTempFolder
+        self.ffmpegEncodingOptions = ffmpegEncodingOptions
     }
 
     
@@ -214,7 +301,13 @@ public struct PreviewConfiguration: Codable, Sendable, Hashable {
         outputDirectory = try container.decodeIfPresent(URL.self, forKey: .outputDirectory)
         fullPathInName = try container.decode(Bool.self, forKey: .fullPathInName)
         compressionQuality = min(max(try container.decode(Double.self, forKey: .compressionQuality), 0.0), 1.0)
-        useNativeExport = try container.decodeIfPresent(Bool.self, forKey: .useNativeExport) ?? true
+        // Backward compat: prefer `exportMode`; fall back to mapping the old `useNativeExport` bool
+        if let mode = try container.decodeIfPresent(PreviewExportMode.self, forKey: .exportMode) {
+            exportMode = mode
+        } else {
+            let legacy = try container.decodeIfPresent(Bool.self, forKey: .useNativeExport) ?? true
+            exportMode = legacy ? .native : .sjs
+        }
         exportPresetName = try container.decodeIfPresent(nativeExportPreset.self, forKey: .exportPresetName)
         sJSExportPresetName = try container.decodeIfPresent(SjSExportPreset.self, forKey: .sJSExportPresetName) ?? .hevc
         // Decoded as String? so this round-trips correctly on all OS versions.
@@ -224,6 +317,9 @@ public struct PreviewConfiguration: Codable, Sendable, Hashable {
         overwrite = try container.decodeIfPresent(Bool.self, forKey: .overwrite) ?? false
         outputDirectoryTemplate = try container.decodeIfPresent(String.self, forKey: .outputDirectoryTemplate)
         filenameTemplate = try container.decodeIfPresent(String.self, forKey: .filenameTemplate)
+        ffmpegBinaryPath = try container.decodeIfPresent(String.self, forKey: .ffmpegBinaryPath)
+        ffmpegTempFolder = try container.decodeIfPresent(URL.self, forKey: .ffmpegTempFolder)
+        ffmpegEncodingOptions = try container.decodeIfPresent(FFmpegEncodingOptions.self, forKey: .ffmpegEncodingOptions)
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -237,13 +333,16 @@ public struct PreviewConfiguration: Codable, Sendable, Hashable {
         try container.encodeIfPresent(outputDirectory, forKey: .outputDirectory)
         try container.encode(fullPathInName, forKey: .fullPathInName)
         try container.encode(compressionQuality, forKey: .compressionQuality)
-        try container.encode(useNativeExport, forKey: .useNativeExport)
+        try container.encode(exportMode, forKey: .exportMode)
         try container.encodeIfPresent(exportPresetName, forKey: .exportPresetName)
         try container.encodeIfPresent(sJSExportPresetName, forKey: .sJSExportPresetName)
         try container.encodeIfPresent(_exportMaxResolutionRaw, forKey: .exportMaxResolution)
         try container.encode(overwrite, forKey: .overwrite)
         try container.encodeIfPresent(outputDirectoryTemplate, forKey: .outputDirectoryTemplate)
         try container.encodeIfPresent(filenameTemplate, forKey: .filenameTemplate)
+        try container.encodeIfPresent(ffmpegBinaryPath, forKey: .ffmpegBinaryPath)
+        try container.encodeIfPresent(ffmpegTempFolder, forKey: .ffmpegTempFolder)
+        try container.encodeIfPresent(ffmpegEncodingOptions, forKey: .ffmpegEncodingOptions)
     }
 
     // MARK: - Extract Calculation
@@ -362,12 +461,17 @@ public struct PreviewConfiguration: Codable, Sendable, Hashable {
         let audioLabel = includeAudio ? "audio" : "noaudio"
         let exportLabel: String
         let resolution = _exportMaxResolutionRaw ?? "auto"
-        if useNativeExport {
+        switch exportMode {
+        case .native:
             let preset = (exportPresetName?.displayString ?? effectiveExportPreset)
             exportLabel = "\(preset)_nat"
-        } else {
+        case .sjs:
             let codec = sJSExportPresetName?.displayString ?? "default"
             exportLabel = "\(codec)_sjs"
+        case .ffmpeg:
+            let codec = ffmpegEncodingOptions?.videoCodec.rawValue
+                ?? FFmpegEncodingOptions.from(quality: compressionQuality, format: format).videoCodec.rawValue
+            exportLabel = "\(codec)_ffmpeg"
         }
         let timingLabel = extractTimingFilenameComponent.map { "_\($0)" } ?? ""
         let configHash = "\(durationLabel)_\(density.name)_\(format.rawValue)_\(audioLabel)_\(exportLabel)_\(resolution)\(timingLabel)"
@@ -542,7 +646,7 @@ public struct PreviewConfiguration: Codable, Sendable, Hashable {
         hasher.combine(format)
         hasher.combine(includeAudio)
         hasher.combine(compressionQuality)
-        hasher.combine(useNativeExport)
+        hasher.combine(exportMode)
         hasher.combine(exportPresetName)
     }
 
@@ -602,12 +706,17 @@ extension PreviewConfiguration: CustomDebugStringConvertible {
         let durationLabel = Self.durationLabel(for: targetDuration)
         let audioLabel = includeAudio ? "audio" : "no audio"
         let exportDetail: String
-        if useNativeExport {
+        switch exportMode {
+        case .native:
             exportDetail = "native(preset: \(exportPresetName?.displayString ?? effectiveExportPreset))"
-        } else {
+        case .sjs:
             let codec = sJSExportPresetName?.displayString ?? "default"
             let res = _exportMaxResolutionRaw ?? "auto"
             exportDetail = "SJS(codec: \(codec), maxRes: \(res))"
+        case .ffmpeg:
+            let codec = ffmpegEncodingOptions?.videoCodec.rawValue ?? "derived"
+            let binary = ffmpegBinaryPath ?? "unset"
+            exportDetail = "FFmpeg(codec: \(codec), binary: \(binary))"
         }
         return "PreviewConfiguration(duration: \(durationLabel), density: \(density.name), format: \(format.rawValue), \(audioLabel), export: \(exportDetail))"
     }

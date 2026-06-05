@@ -369,15 +369,30 @@ struct PreviewGenerationLogic {
         )
         
         if cancellationCheck() { throw PreviewError.cancelled }
-        
+
+        // FFmpeg preflight: validate binary before starting the expensive composition step
+        if config.exportMode == .ffmpeg {
+            guard let binaryPath = config.ffmpegBinaryPath else {
+                throw PreviewError.invalidConfiguration("ffmpegBinaryPath must be set when exportMode is .ffmpeg")
+            }
+            try FFmpegEncoder.validate(binaryPath: binaryPath)
+        }
+
         // Compose
         progressHandler(0.2, .composing, nil, "Composing \(timestamps.count) segments...")
-        
-        // Resolve custom target size if using native export with a fixed preset
+
+        // Resolve custom target size based on export mode
         var customTargetSize: CGSize? = nil
-        if config.useNativeExport {
-            let preset = config.effectiveExportPreset
-            customTargetSize = resolutionLimit(for: preset)
+        switch config.exportMode {
+        case .native:
+            customTargetSize = resolutionLimit(for: config.effectiveExportPreset)
+        case .ffmpeg:
+            if let res = config.ffmpegEncodingOptions?.maxResolution
+                ?? FFmpegEncodingOptions.from(quality: config.compressionQuality, format: config.format).maxResolution {
+                customTargetSize = res.cgSize
+            }
+        case .sjs:
+            break
         }
         
         let videoComposition = try await composeVideoSegments(
@@ -398,7 +413,8 @@ struct PreviewGenerationLogic {
         // Export — route based on configuration
         progressHandler(0.3, .encoding, nil, "Encoding preview video...")
         let returnURL: URL
-        if config.useNativeExport {
+        switch config.exportMode {
+        case .native:
             returnURL = try await exportWithNativeSession(
                 composition: videoComposition.composition,
                 audioMix: videoComposition.audioMix,
@@ -408,8 +424,18 @@ struct PreviewGenerationLogic {
                 progressHandler: progressHandler,
                 cancellationCheck: cancellationCheck
             )
-        } else {
+        case .sjs:
             returnURL = try await exportWithSJSSession(
+                composition: videoComposition.composition,
+                audioMix: videoComposition.audioMix,
+                videoComposition: videoComposition.videoComposition,
+                config: config,
+                video: video,
+                progressHandler: progressHandler,
+                cancellationCheck: cancellationCheck
+            )
+        case .ffmpeg:
+            returnURL = try await exportWithFFmpeg(
                 composition: videoComposition.composition,
                 audioMix: videoComposition.audioMix,
                 videoComposition: videoComposition.videoComposition,
@@ -1144,6 +1170,29 @@ struct PreviewGenerationLogic {
     }
     #endif
     
+    /// Export using the FFmpeg pipeline: passthrough export to temp file, then FFmpeg transcode.
+    @MainActor
+    private static func exportWithFFmpeg(
+        composition: AVMutableComposition,
+        audioMix: AVMutableAudioMix?,
+        videoComposition: AVVideoComposition?,
+        config: PreviewConfiguration,
+        video: VideoInput,
+        progressHandler: @escaping @Sendable (Double, PreviewGenerationStatus, URL?, String?) -> Void,
+        cancellationCheck: @escaping @Sendable () -> Bool
+    ) async throws -> URL {
+        logger.info("Starting FFmpeg pipeline for \(video.title)")
+        return try await FFmpegEncoder.encode(
+            composition: composition,
+            audioMix: audioMix,
+            videoComposition: videoComposition,
+            config: config,
+            video: video,
+            progressHandler: progressHandler,
+            cancellationCheck: cancellationCheck
+        )
+    }
+
     /// Export using SJSAssetExportSession (custom exporter with fine-grained codec/bitrate control)
     private static func exportWithSJSSession(
         composition: AVMutableComposition,
@@ -1331,7 +1380,7 @@ struct PreviewGenerationLogic {
     
         
         /// Prepare the output URL: create the output directory and return the full file URL
-        private static func prepareOutputURL(config: PreviewConfiguration, video: VideoInput) throws -> URL {
+        static func prepareOutputURL(config: PreviewConfiguration, video: VideoInput) throws -> URL {
             let outputDirectory = config.generateOutputDirectory(for: video)
             
             let didStartAccessingDir = outputDirectory.startAccessingSecurityScopedResource()

@@ -15,6 +15,8 @@ public enum PreviewError: LocalizedError, Sendable {
     case noVideoTracks
     case outputDirectoryCreationFailed(URL, Error)
     case exportStalled(elapsedSeconds: Int)
+    case ffmpegNotFound(path: String)
+    case ffmpegEncodingFailed(exitCode: Int32, output: String)
 
     public var errorDescription: String? {
         switch self {
@@ -54,6 +56,10 @@ public enum PreviewError: LocalizedError, Sendable {
             return "Failed to create output directory at \(url.path): \(error.localizedDescription)"
         case .exportStalled(let elapsed):
             return "Export stalled: no progress for \(elapsed) seconds"
+        case .ffmpegNotFound(let path):
+            return "FFmpeg binary not found or not executable at: \(path)"
+        case .ffmpegEncodingFailed(let code, let output):
+            return "FFmpeg exited with code \(code): \(output)"
         }
     }
 
@@ -83,6 +89,10 @@ public enum PreviewError: LocalizedError, Sendable {
             return "Could not create the output directory"
         case .exportStalled:
             return "The export encoder stopped making progress"
+        case .ffmpegNotFound:
+            return "The specified FFmpeg binary was not found"
+        case .ffmpegEncodingFailed:
+            return "FFmpeg failed to encode the video"
         }
     }
 
@@ -110,6 +120,10 @@ public enum PreviewError: LocalizedError, Sendable {
             return "Check disk space and permissions"
         case .exportStalled:
             return "Try a different export preset, lower quality, or a different format"
+        case .ffmpegNotFound:
+            return "Check that the ffmpeg binary path is correct and the binary is executable"
+        case .ffmpegEncodingFailed:
+            return "Check the ffmpeg encoding options or try a different codec/quality setting"
         }
     }
 }
