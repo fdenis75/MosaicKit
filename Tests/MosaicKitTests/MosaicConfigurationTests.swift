@@ -97,8 +97,6 @@ struct MosaicConfigurationTests {
     func pathAndFilenameCombinations() async {
         let video = await makeVideoInput(
             filePath: "/Volumes/volname/test/test.mp4",
-            serviceName: "Test1",
-            creatorName: "Test2",
             postID: "POST:123"
         )
 
@@ -118,8 +116,6 @@ struct MosaicConfigurationTests {
         )
 
         let outputDirectory = config.generateOutputDirectory(rootDirectory: root, videoInput: video)
-        #expect(outputDirectory.path.contains("Test1"))
-        #expect(outputDirectory.path.contains("Test2"))
         #expect(outputDirectory.path.contains(config.configurationHash))
 
         let defaultFilename = config.generateFilename(originalFilename: "test", videoInput: video)
@@ -190,14 +186,10 @@ struct MosaicConfigurationTests {
 
     private func makeVideoInput(
         filePath: String,
-        serviceName: String?,
-        creatorName: String?,
-        postID: String?
+        postID: String? = nil
     ) async -> VideoInput {
         await VideoInput(
             url: URL(fileURLWithPath: filePath),
-            serviceName: serviceName,
-            creatorName: creatorName,
             postID: postID
         )
     }

@@ -284,30 +284,19 @@ public struct MosaicConfiguration: Codable, Sendable {
         return components.joined(separator: "_").replacingOccurrences(of: " ", with: "_")
     }
 
-    /// Generate the structured output path
-    /// Format: {rootDir}/{service}/{creator}/{configHash}/
+    /// Generate the structured output path.
+    /// Format: `{rootDir}/{configHash}/`
     /// - Parameters:
     ///   - rootDirectory: The root directory for output
-    ///   - videoInput: The video input containing organizational metadata
+    ///   - videoInput: The video input (used for template token resolution)
     /// - Returns: The full output directory URL
     public func generateOutputDirectory(rootDirectory: URL, videoInput: VideoInput) -> URL {
-        // When a custom template is provided, resolve it instead of using the
-        // legacy {service}/{creator}/{configHash} layout.
+        // When a custom template is provided, resolve it instead of the legacy layout.
         if let template = outputDirectoryTemplate {
             return resolveDirectoryTemplate(template, rootURL: rootDirectory, videoInput: videoInput)
         }
 
         var path = rootDirectory
-
-        // Add service name if available
-        if let service = videoInput.serviceName {
-            path = path.appendingPathComponent(Self.sanitizeForFilePath(service))
-        }
-
-        // Add creator name if available
-        if let creator = videoInput.creatorName {
-            path = path.appendingPathComponent(Self.sanitizeForFilePath(creator))
-        }
 
         // Add configuration hash
         path = path.appendingPathComponent(configurationHash)
@@ -331,8 +320,6 @@ public struct MosaicConfiguration: Codable, Sendable {
         let today = Self.todayString()
         let values: [String: String?] = [
             "root": rootURL.path,
-            "service": videoInput.serviceName.map { Self.sanitizeForFilePath($0) },
-            "creator": videoInput.creatorName.map { Self.sanitizeForFilePath($0) },
             "hash": configurationHash,
             "width": String(width),
             "density": density.name,
@@ -451,8 +438,6 @@ public struct MosaicConfiguration: Codable, Sendable {
             "aspectRatio": layout.aspectRatio.rawValue,
             "layout": layout.layoutType.rawValue,
             "hash": configurationHash,
-            "service": videoInput.serviceName.map { Self.sanitizeForFilePath($0) },
-            "creator": videoInput.creatorName.map { Self.sanitizeForFilePath($0) },
             "postID": videoInput.postID.map { Self.sanitizeForFilePath($0) },
             "date": today
         ]
