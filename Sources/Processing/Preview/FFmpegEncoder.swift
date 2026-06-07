@@ -24,10 +24,12 @@ enum FFmpegEncoder {
     static func validate(binaryPath: String) throws {
         #if os(macOS)
         let fm = FileManager.default
-        guard fm.fileExists(atPath: binaryPath) else {
+        // Resolve symlinks so /opt/homebrew/bin/ffmpeg → real Cellar path before checking.
+        let resolvedPath = URL(fileURLWithPath: binaryPath).resolvingSymlinksInPath().path
+        guard fm.fileExists(atPath: resolvedPath) else {
             throw PreviewError.ffmpegNotFound(path: binaryPath)
         }
-        guard fm.isExecutableFile(atPath: binaryPath) else {
+        guard fm.isExecutableFile(atPath: resolvedPath) else {
             throw PreviewError.ffmpegNotFound(path: binaryPath)
         }
         #else
@@ -103,15 +105,15 @@ enum FFmpegEncoder {
 
         // MARK: Phase 1 – Passthrough export to temp file
 
-        progressHandler(0.30, .encoding, nil, "Passthrough export…")
+        progressHandler(0.10, .encoding, nil, "Passthrough export…")
 
         try await exportPassthrough(
             composition: composition,
             audioMix: audioMix,
             outputURL: tempURL,
             progressHandler: { fraction, message in
-                // Map passthrough progress to 0.30 → 0.55
-                progressHandler(0.30 + fraction * 0.25, .encoding, nil, message)
+                // Map passthrough progress to 0.10 → 0.30
+                progressHandler(0.10 + fraction * 0.20, .encoding, nil, message)
             },
             cancellationCheck: cancellationCheck
         )
@@ -123,7 +125,7 @@ enum FFmpegEncoder {
 
         // MARK: Phase 2 – FFmpeg transcode
 
-        progressHandler(0.55, .encoding, nil, "FFmpeg encoding…")
+        progressHandler(0.30, .encoding, nil, "FFmpeg encoding…")
 
         let options = config.ffmpegEncodingOptions
             ?? FFmpegEncodingOptions.from(quality: config.compressionQuality, format: config.format)
@@ -145,8 +147,8 @@ enum FFmpegEncoder {
                 arguments: args,
                 totalDuration: composition.duration.seconds,
                 progressHandler: { fraction, message in
-                    // Map ffmpeg progress to 0.55 → 1.00
-                    progressHandler(0.55 + fraction * 0.45, .encoding, nil, message)
+                    // Map ffmpeg progress to 0.30 → 1.00
+                    progressHandler(0.30 + fraction * 0.70, .encoding, nil, message)
                 },
                 cancellationCheck: cancellationCheck
             )
