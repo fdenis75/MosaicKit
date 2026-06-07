@@ -360,14 +360,14 @@ struct PreviewGenerationLogic {
         let (extractDuration, playbackSpeed) = config.calculateExtractParameters(forVideoDuration: videoDuration)
         let extractCount = config.extractCount(forVideoDuration: videoDuration)
         
-        progressHandler(0.1, .analyzing, nil, "Calculating timestamps...")
+        progressHandler(0.05, .analyzing, nil, "Calculating timestamps...")
         let timestamps = try await calculateExtractTimestamps(
             asset: asset,
             video: video,
             extractCount: extractCount,
             extractDuration: extractDuration
         )
-        
+
         if cancellationCheck() { throw PreviewError.cancelled }
 
         // FFmpeg preflight: validate binary before starting the expensive composition step
@@ -379,7 +379,7 @@ struct PreviewGenerationLogic {
         }
 
         // Compose
-        progressHandler(0.2, .composing, nil, "Composing \(timestamps.count) segments...")
+        progressHandler(0.05, .composing, nil, "Composing \(timestamps.count) segments...")
 
         // Resolve custom target size based on export mode
         var customTargetSize: CGSize? = nil
@@ -411,7 +411,7 @@ struct PreviewGenerationLogic {
         if cancellationCheck() { throw PreviewError.cancelled }
         
         // Export — route based on configuration
-        progressHandler(0.3, .encoding, nil, "Encoding preview video...")
+        progressHandler(0.10, .encoding, nil, "Encoding preview video...")
         let returnURL: URL
         switch config.exportMode {
         case .native:
@@ -479,20 +479,20 @@ struct PreviewGenerationLogic {
         let (extractDuration, playbackSpeed) = config.calculateExtractParameters(forVideoDuration: videoDuration)
         let extractCount = config.extractCount(forVideoDuration: videoDuration)
         
-        progressHandler(0.1, .analyzing, nil, "Calculating timestamps...")
+        progressHandler(0.05, .analyzing, nil, "Calculating timestamps...")
         let timestamps = try await calculateExtractTimestamps(
             asset: asset,
             video: video,
             extractCount: extractCount,
             extractDuration: extractDuration
         )
-        
+
         if cancellationCheck() { throw PreviewError.cancelled }
-        
+
         // Compose
         // AVVideoCompositionCoreAnimationTool (used for timestamp pills) is not supported
         // during live AVPlayerItem playback — omit overlay cues in this path.
-        progressHandler(0.2, .composing, nil, "Composing \(timestamps.count) segments...")
+        progressHandler(0.05, .composing, nil, "Composing \(timestamps.count) segments...")
         let compositionResult = try await composeVideoSegments(
             asset: asset,
             timestamps: timestamps,
@@ -509,7 +509,7 @@ struct PreviewGenerationLogic {
         if cancellationCheck() { throw PreviewError.cancelled }
 
         // Create player item from composition
-        progressHandler(0.8, .composing, nil, "Creating player item...")
+        progressHandler(0.20, .composing, nil, "Creating player item...")
 
         let playerItem = AVPlayerItem(asset: compositionResult.composition)
         
@@ -706,7 +706,7 @@ struct PreviewGenerationLogic {
         
         // Insert segments
         var insertTime = CMTime.zero
-        let progressStep = 0.5 / Double(timestamps.count)
+        let progressStep = 0.05 / Double(timestamps.count)
         var skippedSegments = 0
         var overlayCues: [PreviewOverlayCue] = []
         
@@ -763,7 +763,7 @@ struct PreviewGenerationLogic {
                     )
                 )
                 
-                let progress = 0.2 + (progressStep * Double(index + 1))
+                let progress = 0.05 + (progressStep * Double(index + 1))
                 progressHandler(progress, .composing, nil, "Composing segment \(index + 1)/\(timestamps.count)")
                 
             } catch let error as NSError {
@@ -1288,7 +1288,7 @@ struct PreviewGenerationLogic {
                     if cancellationCheck() { break }
                     let progressValue = Double(progress)
                     progressTracker.recordProgress(progressValue)
-                    let exportProgress = 0.3 + (progressValue * 0.7)
+                    let exportProgress = 0.10 + (progressValue * 0.90)
                     progressHandler(exportProgress, .encoding, nil, "Encoding: \(Int(progressValue * 100))%")
                     if progressValue >= 1.0 { return }
                 }
@@ -1598,7 +1598,7 @@ struct PreviewGenerationLogic {
                 case let .exporting(progress):
                     let progressValue = progress.fractionCompleted
                     progressTracker.recordProgress(progressValue)
-                    progressHandler(0.3 + (progressValue * 0.7), .encoding, nil, "Encoding: \(Int(progressValue * 100))%")
+                    progressHandler(0.10 + (progressValue * 0.90), .encoding, nil, "Encoding: \(Int(progressValue * 100))%")
                     if progressValue >= 0.999 { return }
                 @unknown default:
                     break
