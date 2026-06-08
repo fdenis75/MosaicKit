@@ -9,7 +9,7 @@ public enum nativeExportPreset: String, Codable, Sendable, CaseIterable, Identif
            return self
        }
     case AVAssetExportPresetPassthrough = "AVAssetExportPresetPassthrough"
-   
+    case AVAssetExportPresetHEVCHighestQuality = "AVAssetExportPresetHEVCHighestQuality"
     case AVAssetExportPresetHEVC1920x1080 = "AVAssetExportPresetHEVC1920x1080"
     case AVAssetExportPresetHighestQuality = "AVAssetExportPresetHighestQuality"
     
@@ -24,7 +24,7 @@ public enum nativeExportPreset: String, Codable, Sendable, CaseIterable, Identif
             return "passthrough"
         case .AVAssetExportPresetHighestQuality, .AVAssetExportPresetMediumQuality, .AVAssetExportPresetLowQuality, .AVAssetExportPreset960x540:
             return "h264"
-        case .AVAssetExportPresetHEVC1920x1080:
+        case .AVAssetExportPresetHEVC1920x1080, .AVAssetExportPresetHEVCHighestQuality:
             return "hevc"
         }
     }
@@ -33,6 +33,8 @@ public enum nativeExportPreset: String, Codable, Sendable, CaseIterable, Identif
         switch self {
         case .AVAssetExportPresetPassthrough:
             return "Passthrough"
+        case .AVAssetExportPresetHEVCHighestQuality:
+            return "HEVC_hi+"
         case .AVAssetExportPresetHEVC1920x1080:
             return "HEVC_Hi"
         case .AVAssetExportPresetHighestQuality:
@@ -48,7 +50,7 @@ public enum nativeExportPreset: String, Codable, Sendable, CaseIterable, Identif
  
     public var MaxResolution: String {
         switch self {
-            case .AVAssetExportPresetPassthrough, .AVAssetExportPresetHighestQuality, .AVAssetExportPresetMediumQuality, .AVAssetExportPresetLowQuality:
+        case .AVAssetExportPresetPassthrough, .AVAssetExportPresetHighestQuality, .AVAssetExportPresetMediumQuality, .AVAssetExportPresetLowQuality, .AVAssetExportPresetHEVCHighestQuality:
             return "same as Source"
             case .AVAssetExportPreset960x540:
             return "540p"
@@ -57,7 +59,7 @@ public enum nativeExportPreset: String, Codable, Sendable, CaseIterable, Identif
         }
     }
     
-    public static let allCases: [nativeExportPreset] = [.AVAssetExportPresetPassthrough, .AVAssetExportPresetHighestQuality, .AVAssetExportPresetMediumQuality, .AVAssetExportPresetLowQuality, .AVAssetExportPreset960x540, .AVAssetExportPresetHEVC1920x1080]
+    public static let allCases: [nativeExportPreset] = [.AVAssetExportPresetPassthrough, .AVAssetExportPresetHighestQuality, .AVAssetExportPresetMediumQuality, .AVAssetExportPresetLowQuality, .AVAssetExportPreset960x540, .AVAssetExportPresetHEVC1920x1080, .AVAssetExportPresetHEVCHighestQuality]
 }
     
 

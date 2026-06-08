@@ -473,7 +473,7 @@ public struct PreviewConfiguration: Codable, Sendable, Hashable {
     ///   - videoInput: The source video
     /// - Returns: Filename string
     public func generateFilename(for videoInput: VideoInput) -> String {
-        let originalFilename = videoInput.url.deletingPathExtension().lastPathComponent
+        let originalFilename = videoInput.url.deletingPathExtension().lastPathComponent.replacingNonAlphanumerics(with: "_")
 
         if let template = filenameTemplate {
             return resolveFilenameTemplate(
@@ -504,9 +504,7 @@ public struct PreviewConfiguration: Codable, Sendable, Hashable {
 
         if fullPathInName {
             // Use full path in filename
-            let sanitizedPath = videoInput.url.deletingLastPathComponent().path
-                .replacingOccurrences(of: "/", with: "_")
-                .replacingOccurrences(of: " ", with: "_")
+            let sanitizedPath = videoInput.url.deletingLastPathComponent().path.replacingNonAlphanumerics(with: "_")
             return "\(sanitizedPath)_\(originalFilename)_preview_\(configHash).\(format.fileExtension)"
         } else {
             return "\(originalFilename)_preview_\(configHash).\(format.fileExtension)"
@@ -608,12 +606,10 @@ public struct PreviewConfiguration: Codable, Sendable, Hashable {
         }
         return output
     }
-
+    
     /// Sanitize a string for use in file paths.
     fileprivate static func sanitizeForFilePath(_ string: String) -> String {
-        let invalidCharacters = CharacterSet(charactersIn: "/:@#$%^&*(){}[]|\\<>?\"'+,=!`~;")
-        let components = string.components(separatedBy: invalidCharacters)
-        return components.joined(separator: "_").replacingOccurrences(of: " ", with: "_")
+        return string.replacingNonAlphanumerics(with: "_")
     }
 
     /// Current date formatted as `yyyy-MM-dd`.
@@ -745,5 +741,12 @@ extension PreviewConfiguration: CustomDebugStringConvertible {
             exportDetail = "FFmpeg(codec: \(codec), binary: \(binary))"
         }
         return "PreviewConfiguration(duration: \(durationLabel), density: \(density.name), format: \(format.rawValue), \(audioLabel), export: \(exportDetail))"
+    }
+}
+
+extension String {
+    func replacingNonAlphanumerics(with replacement: String = "_") -> String {
+        let allowed = CharacterSet.alphanumerics
+        return self.unicodeScalars.map { allowed.contains($0) ? String($0) : replacement }.joined()
     }
 }

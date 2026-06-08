@@ -313,6 +313,9 @@ public struct FFmpegEncodingOptions: Codable, Sendable, Hashable {
             args += ["-preset", speedPreset.rawValue]
         }
 
+        if videoCodec == .hevcVideoToolbox || videoCodec == .hevc {
+            args += ["-tag:v", "hvc1"]
+        }
         // Resolution filter — applied for all codecs except copy.
         // VideoToolbox needs this too: passthrough mode skips the AVVideoComposition,
         // so the intermediate .mov retains the source resolution; ffmpeg must scale.

@@ -260,7 +260,7 @@ enum FFmpegEncoder {
             throw PreviewError.encodingFailed("Passthrough export produced no output file", nil)
         }
         progressHandler(1.0, "Passthrough complete")
-        logger.info("Passthrough export finished: \(outputURL.lastPathComponent)")
+        logger.debug("Passthrough export finished: \(outputURL.lastPathComponent)")
     }
 
     // MARK: - FFmpeg process
@@ -272,7 +272,7 @@ enum FFmpegEncoder {
         progressHandler: @escaping @Sendable (Double, String) -> Void,
         cancellationCheck: @escaping @Sendable () -> Bool
     ) async throws {
-        logger.info("Running ffmpeg: \(([binaryPath] + arguments).joined(separator: " "))")
+        logger.debug("Running ffmpeg: \(([binaryPath] + arguments).joined(separator: " "))")
 
         let process = Process()
         process.executableURL = URL(fileURLWithPath: binaryPath)

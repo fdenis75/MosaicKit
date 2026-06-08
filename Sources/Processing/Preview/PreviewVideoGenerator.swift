@@ -493,7 +493,8 @@ struct PreviewGenerationLogic {
         // AVVideoCompositionCoreAnimationTool (used for timestamp pills) is not supported
         // during live AVPlayerItem playback — omit overlay cues in this path.
         progressHandler(0.05, .composing, nil, "Composing \(timestamps.count) segments...")
-        let compositionResult = try await composeVideoSegments(
+        let compositionResult = try await
+        composeVideoSegments(
             asset: asset,
             timestamps: timestamps,
             extractDuration: extractDuration,
@@ -659,7 +660,7 @@ struct PreviewGenerationLogic {
         includeAudio: Bool,
         maxResolutionRaw: String?,
         customTargetSize: CGSize? = nil,
-        includeOverlayCues: Bool = true,
+        includeOverlayCues: Bool = false,
         video: VideoInput,
         progressHandler: @escaping @Sendable (Double, PreviewGenerationStatus, URL?, String?) -> Void,
         cancellationCheck: @escaping @Sendable () -> Bool
@@ -880,17 +881,13 @@ struct PreviewGenerationLogic {
             logger.info("Scaling composition from \(Int(sourceWidth))x\(Int(sourceHeight)) to \(Int(renderSize.width))x\(Int(renderSize.height))")
         }
 
-        if #available(macOS 26, iOS 26, *) {
-            return try await buildConfiguredVideoComposition(
-                composition: composition,
-                compositionVideoTrack: compositionVideoTrack,
-                overlayCues: overlayCues,
-                finalTransform: finalTransform,
-                renderSize: renderSize,
-                nominalFrameRate: nominalFrameRate
-            )
-        }
-
+        // Intentionally always uses the legacy (deprecated) construction path:
+        // AVVideoComposition.Configuration(for:prototypeInstruction:) auto-derives
+        // per-segment layer instructions from the composition's own track geometry,
+        // discarding the scale transform set on the prototype instruction. That
+        // resizes the render canvas without scaling the rendered frame content.
+        // AVMutableVideoCompositionLayerInstruction.setTransform is the only path
+        // that actually honours `finalTransform`.
         return buildLegacyVideoComposition(
             composition: composition,
             compositionVideoTrack: compositionVideoTrack,
@@ -901,47 +898,6 @@ struct PreviewGenerationLogic {
         )
     }
 
-    @available(macOS 26, iOS 26, *)
-    private static func buildConfiguredVideoComposition(
-        composition: AVMutableComposition,
-        compositionVideoTrack: AVMutableCompositionTrack,
-        overlayCues: [PreviewOverlayCue],
-        finalTransform: CGAffineTransform,
-        renderSize: CGSize,
-        nominalFrameRate: Float
-    ) async throws -> AVVideoComposition {
-        var layerConfiguration = AVVideoCompositionLayerInstruction.Configuration(assetTrack: compositionVideoTrack)
-        layerConfiguration.setTransform(finalTransform, at: .zero)
-        let layerInstruction = AVVideoCompositionLayerInstruction(configuration: layerConfiguration)
-
-        let instructionConfiguration = AVVideoCompositionInstruction.Configuration(
-            layerInstructions: [layerInstruction],
-            timeRange: CMTimeRange(start: .zero, duration: composition.duration)
-        )
-        let instruction = AVVideoCompositionInstruction(configuration: instructionConfiguration)
-
-        var configuration = try await AVVideoComposition.Configuration(
-            for: composition,
-            prototypeInstruction: instruction
-        )
-        configuration.renderSize = renderSize
-        configuration.frameDuration = CMTime(
-            value: 1,
-            timescale: CMTimeScale(nominalFrameRate > 0 ? nominalFrameRate : 30)
-        )
-
-        if !overlayCues.isEmpty {
-            configuration.animationTool = makeOverlayAnimationTool(
-                renderSize: renderSize,
-                cues: overlayCues
-            )
-        }
-
-        return AVVideoComposition(configuration: configuration)
-    }
-
-    @available(macOS, deprecated: 26.0, message: "Use buildConfiguredVideoComposition instead")
-    @available(iOS, deprecated: 26.0, message: "Use buildConfiguredVideoComposition instead")
     private static func buildLegacyVideoComposition(
         composition: AVMutableComposition,
         compositionVideoTrack: AVMutableCompositionTrack,
