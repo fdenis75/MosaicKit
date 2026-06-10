@@ -17,6 +17,23 @@ A high-performance Swift package for generating video mosaics with Metal-acceler
 - 📊 **Overlay Annotations** - Per-frame labels (timestamp, index), customisable metadata headers, watermarks, and Color DNA strips
 - 🎬 **Video Preview Generation** - Create short highlight reels from any video, either exported to file or as a live `AVPlayerItem` composition
 
+## New in 1.4.0
+
+- **`gifFps`** — `MosaicConfiguration` now has a `gifFps: Double` property (default `10`) that controls the target frame rate for animated GIF/WebP/HEICS export. It's converted to the `frameDelay` passed to `AnimatedGifGenerator.save(...)` (`frameDelay = 1 / gifFps`).
+
+## New in 1.3.0
+
+- **FFmpeg encoding pipeline for previews** — New `PreviewExportMode.ffmpeg` mode exports via passthrough (no re-encode) to a temp `.mov`, then transcodes with an external `ffmpeg` binary. Configure with `PreviewConfiguration.ffmpegBinaryPath`, `ffmpegTempFolder`, and `ffmpegEncodingOptions` (a new `FFmpegEncodingOptions` model with `VideoCodec`, `AudioCodec`, `SpeedPreset`, and `MaxResolution`). `PreviewExportMode` (`.native` / `.sjs` / `.ffmpeg`) replaces the deprecated `useNativeExport: Bool` flag (a backward-compatible getter/setter is kept).
+- **Hardware HEVC/H.264 via VideoToolbox** — `VideoCodec` adds `.hevcVideoToolbox` and `.h264VideoToolbox` for fast hardware-accelerated ffmpeg encoding, with a `SpeedPreset` → `-realtime`/`-q:v` argument mapping and a new `forPreview(quality:)` factory.
+- **`PreviewConfiguration.enableAppLifecycleMonitor`** (default `true`) — set to `false` for daemons/XPC services/CLI tools so preview generation never blocks waiting for the app to come to the foreground.
+- **`PreviewConfiguration.enableExportRetry`** (default `true`) — set to `false` to propagate export-stall errors immediately instead of retrying up to 3 times.
+- **HEVC tagging & export presets** — ffmpeg HEVC output is now tagged `hvc1` for QuickTime/Apple compatibility, and a new `AVAssetExportPresetHEVCHighestQuality` native export preset was added.
+- **More robust filename sanitization** — preview filenames now use an alphanumeric-only sanitizer instead of character-set replacement.
+- **Rebalanced preview progress** — progress now reflects actual phase durations (Analyzing 0–5%, Composing 5–10%, Encoding 10–100%), fixing a regression where progress jumped backwards at the start of encoding.
+- **`scanVideos(in:recursive:)`** — new top-level function that scans a directory for video files and returns a `VideoInput` per file (with metadata pre-extracted), sorted by filename.
+- **Breaking: removed `serviceName`/`creatorName`** — these `VideoInput` properties (and the `{service}`/`{creator}` template tokens) have been removed. The default output directory layout is now `{rootDir}/{configHash}/`.
+- **Breaking: removed the `MosaicGenerator` wrapper** — `MosaicKit.swift` and `MosaicGeneratorFactory` were unused and have been deleted. Use `MetalMosaicGenerator` directly (see Quick Start below).
+
 ## New in 1.2.0
 
 - **Metal on iOS and macCatalyst** — Metal GPU acceleration is now used on all supported platforms. `CoreGraphicsMosaicGenerator` and `CoreGraphicsImageProcessor` have been removed; Metal has been available on iOS since iOS 8 and is fully supported on iOS 26+.
@@ -88,17 +105,19 @@ targets: [
 ```swift
 import MosaicKit
 
-// Simple one-step generation
+// Create a video input from a file URL
 let videoURL = URL(fileURLWithPath: "/path/to/video.mp4")
-let outputDir = URL(fileURLWithPath: "/path/to/output")
+let video = try await VideoInput(from: videoURL)
 
-let generator = try MosaicGenerator()
-let config = MosaicConfiguration.default
+// Configure mosaic settings
+var config = MosaicConfiguration.default
+config.outputdirectory = URL(fileURLWithPath: "/path/to/output")
 
+// Generate the mosaic
+let generator = try MetalMosaicGenerator()
 let mosaicURL = try await generator.generate(
-    from: videoURL,
-    config: config,
-    outputDirectory: outputDir
+    for: video,
+    config: config
 )
 
 print("Mosaic saved to: \(mosaicURL.path)")
@@ -106,7 +125,7 @@ print("Mosaic saved to: \(mosaicURL.path)")
 
 ### Advanced Usage (Direct Access)
 
-For more control, use `MetalMosaicGenerator` directly:
+`MetalMosaicGenerator` is also the entry point for finer-grained control:
 
 ```swift
 import MosaicKit
@@ -359,8 +378,8 @@ The same flag applies to `PreviewConfiguration` for preview videos.
 Set `outputDirectoryTemplate` to a token string. Tokens are resolved at generation time; unknown tokens are left as-is.
 
 ```swift
-// Group output by service and creator, then density
-config.outputDirectoryTemplate = "{root}/{service}/{creator}/{density}"
+// Group output by density under the root
+config.outputDirectoryTemplate = "{root}/{density}"
 
 // Flat structure with a date-based subfolder
 config.outputDirectoryTemplate = "{root}/{date}"
@@ -371,8 +390,6 @@ config.outputDirectoryTemplate = "{root}/{date}"
 | Token | Value |
 |---|---|
 | `{root}` | `outputdirectory` when set, otherwise the video's parent directory |
-| `{service}` | `videoInput.serviceName` (omitted if nil) |
-| `{creator}` | `videoInput.creatorName` (omitted if nil) |
 | `{hash}` | Full configuration hash (`{width}_{density}_{aspectRatio}_{layout}`) |
 | `{width}` | Output width in pixels |
 | `{density}` | Density name (e.g. `XL`, `M`) |
@@ -413,8 +430,6 @@ previewConfig.filenameTemplate = "{name}_prev_{duration}_{audio}.{ext}"
 | `{aspectRatio}` | Aspect ratio raw value |
 | `{layout}` | Layout type raw value |
 | `{hash}` | Full configuration hash |
-| `{service}` | `videoInput.serviceName` |
-| `{creator}` | `videoInput.creatorName` |
 | `{postID}` | `videoInput.postID` |
 | `{date}` | `yyyy-MM-dd` |
 
