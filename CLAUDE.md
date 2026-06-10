@@ -7,7 +7,7 @@ This file helps AI assistants understand the MosaicKit codebase, development wor
 ## Project Overview
 
 **MosaicKit** is a Swift package that generates video mosaics (contact-sheet style image grids) and
-preview videos from video files on Apple platforms (macOS 15+, iOS 15+, macCatalyst 15+).
+preview videos from video files on Apple platforms (macOS 26+, iOS 26+, macCatalyst 26+).
 
 - **Language**: Swift 6.2
 - **Build system**: Swift Package Manager (SPM)
@@ -48,23 +48,28 @@ MosaicKit uses a single Metal GPU backend on all platforms (macOS, iOS, macCatal
 |---|---|---|
 | `MetalMosaicGenerator` | macOS, iOS, macCatalyst | Metal GPU (actor-isolated) |
 
-`MosaicGeneratorFactory` creates a `MetalMosaicGenerator` on all platforms. The public wrapper
-`MosaicKit.swift` / `MosaicGenerator` exposes `.auto` and `.preferMetal` preferences.
+`MetalMosaicGenerator` is the sole public entry point and conforms to `MosaicGeneratorProtocol`.
+There is no factory or platform-selection wrapper — construct it directly.
 
 ### Key types
 
 | Type | File | Role |
 |---|---|---|
-| `MosaicGenerator` | `Sources/MosaicKit.swift` | Public entry point |
+| `MetalMosaicGenerator` | `Processing/MetalMosaicGenerator.swift` | Metal engine (actor, all platforms) — main entry point |
 | `MosaicGeneratorProtocol` | `Processing/MosaicGeneratorProtocol.swift` | Shared interface |
-| `MetalMosaicGenerator` | `Processing/MetalMosaicGenerator.swift` | Metal engine (actor, all platforms) |
 | `MosaicGeneratorCoordinator` | `Processing/MosaicGeneratorCoordinator.swift` | Concurrent batch manager |
 | `LayoutProcessor` | `Processing/LayoutProcessor.swift` | Layout calculation + caching |
 | `ThumbnailProcessor` | `Processing/ThumbnailProcessor.swift` | Frame extraction |
 | `MetalImageProcessor` | `Processing/MetalImageProcessor.swift` | Metal shader dispatch |
+| `AnimatedGifGenerator` | `Processing/AnimatedGifGenerator.swift` | Animated GIF/HEICS/WebP export |
 | `VideoMetadataExtractor` | `Processing/VideoMetadataExtractor.swift` | AVFoundation metadata |
+| `scanVideos(in:recursive:)` | `VideoInputScanner.swift` | Directory scan → `[VideoInput]` |
 | `PreviewVideoGenerator` | `Processing/Preview/PreviewVideoGenerator.swift` | Highlight reel generation |
+| `PreviewGeneratorCoordinator` | `Processing/Preview/PreviewGeneratorCoordinator.swift` | Concurrent preview batch manager |
+| `FFmpegEncoder` | `Processing/Preview/FFmpegEncoder.swift` | Passthrough export + ffmpeg transcode (macOS only) |
+| `AppLifecycleMonitor` | `Processing/Preview/AppLifecycleMonitor.swift` | Foreground-wait gating for background-safe export |
 | `MosaicConfiguration` | `Models/MosaicConfiguration.swift` | Main config struct |
+| `FFmpegEncodingOptions` | `Models/FFmpegEncodingOptions.swift` | Codec/CRF/preset options for `PreviewExportMode.ffmpeg` |
 | `DensityConfig` | `Models/DensityConfig.swift` | Frame density levels |
 | `LayoutConfiguration` | `Models/LayoutConfiguration.swift` | Layout settings |
 | `AspectRatio` | `Models/AspectRatio.swift` | Predefined ratios |
@@ -91,6 +96,9 @@ The primary configuration object. Key fields:
 - `layout: LayoutConfiguration` – layout algorithm and target size
 - `format: VideoFormat` – output file format (`.heic`, `.jpg`, `.png`)
 - `compression` – quality settings per format
+- `gifMode: GifCreationMode` – `.disabled` / `.withMosaic` / `.gifOnly` animated export
+- `gifSize: GifSize`, `animatedFormat: AnimatedFormat` (`.gif`/`.heic`/`.webp`), `gifFps: Double`
+  (default `10`) – control the animated export produced by `AnimatedGifGenerator`
 
 ### `DensityConfig` (7 levels)
 `XXL` (0.25×) → `XL` (0.5×) → `L` (0.75×) → **`M` (1.0× default)** → `S` (2.0×) → `XS` (3.0×) → `XXS` (4.0×)
@@ -104,6 +112,28 @@ The primary configuration object. Key fields:
 
 ### `AspectRatio` (5 presets)
 `16:9`, `4:3`, `1:1`, `21:9`, `9:16`
+
+---
+
+## Preview Export Modes
+
+`PreviewConfiguration.exportMode: PreviewExportMode` selects how previews are encoded:
+
+| Mode | Behavior |
+|---|---|
+| `.native` | AVAssetExportSession (default) |
+| `.sjs` | `SJSAssetExportSession` for resolution downscaling |
+| `.ffmpeg` | Passthrough export to a temp `.mov`, then transcode via an external `ffmpeg` binary |
+
+`.ffmpeg` is **macOS-only** and requires `PreviewConfiguration.ffmpegBinaryPath` to point at a valid,
+executable `ffmpeg` (validated fail-fast before composition starts). `ffmpegEncodingOptions`
+(`FFmpegEncodingOptions`) controls codec/CRF/preset/resolution; when `nil` it's derived from
+`compressionQuality`. `ffmpegTempFolder` defaults to an auto-cleaned UUID dir under
+`/tmp/MosaicKitFFmpeg/`.
+
+`PreviewConfiguration.enableAppLifecycleMonitor` (default `true`) and `enableExportRetry` (default
+`true`) control foreground-wait gating and stall-retry behavior — set both `false` for
+daemons/XPC/CLI tools where the app never becomes foreground.
 
 ---
 
@@ -173,8 +203,12 @@ Never use AppKit APIs in code that may run on iOS and vice versa. Always wrap.
 | `apple/swift-log` | ≥ 1.6.0 | Structured logging |
 | `DominantColors` | ≥ 1.2.0 | Background color extraction from frames |
 | `SJSAssetExportSession` | ≥ 0.4.0 | Enhanced AVAsset export (resolution downscaling) |
+| `webp.swift` / `libwebp-ios` | ≥ 1.1.x | WebP encoding for `AnimatedGifGenerator` |
 
 Do not add new dependencies without a clear justification. Prefer built-in Apple frameworks.
+
+`PreviewExportMode.ffmpeg` additionally shells out to an external `ffmpeg` binary (path supplied via
+`PreviewConfiguration.ffmpegBinaryPath`); this is a runtime dependency, not an SPM package.
 
 ---
 
@@ -235,11 +269,12 @@ Follow Swift 6 best practices as documented in `CONTRIBUTING.md`.
 ## Documentation
 
 DocC catalog is at `Sources/MosaicKit.docc/`. Articles:
-- `GettingStarted.md` – quick onboarding
+- `GettingStarted.md` / `QuickStart.md` – quick onboarding
 - `LayoutAlgorithms.md` – layout algorithm details
 - `Architecture.md` – system architecture overview
-- `PlatformStrategy.md` – Metal vs Core Graphics strategy
+- `PlatformStrategy.md` – Metal vs Core Graphics strategy (historical context)
 - `PerformanceGuide.md` – optimization guidance
+- `PreviewExporting.md` – preview export modes (native/SJS/ffmpeg)
 
 Update or add DocC articles when introducing new public API.
 
@@ -269,7 +304,8 @@ CI runs `swift build` then `swift test --parallel` on push/PR to `main`.
 
 ### Add a new output format
 1. Add case to `VideoFormat` in `Models/VideoFormat.swift`
-2. Handle encoding in both `MetalMosaicGenerator` and `CoreGraphicsMosaicGenerator`
+2. Handle encoding in `MetalMosaicGenerator` (mosaic still images) and/or
+   `AnimatedGifGenerator` (animated formats)
 3. Update `README.md` format table
 
 ### Add a new configuration option
