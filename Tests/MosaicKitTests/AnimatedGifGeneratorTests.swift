@@ -300,19 +300,23 @@ struct AnimatedGifGeneratorTests {
         for density in [DensityConfig.xxl, .m, .xs] {
             for gifsize in [GifSize.large, GifSize.small, GifSize.nochange] {
                 for animatedFormat in [AnimatedFormat.gif, .heic, .webp] {
-                    config.gifSize = gifsize
-                    config.animatedFormat = animatedFormat
-                    config.density = density
-                    let result = try await coordinator.generateMosaic(for: video, config: config) { _ in }
-                    
-                    #expect(result.isSuccess)
-                    guard let returnedURL = result.outputURL else {
-                        Issue.record("Expected an output URL"); return
+                    for fps in [2.0, 5.0, 10.0, 25.0] {
+                        config.gifSize = gifsize
+                        config.animatedFormat = animatedFormat
+                        config.density = density
+                        config.gifFps = fps
+                        let result = try await coordinator.generateMosaic(for: video, config: config) { _ in }
+                        
+                        #expect(result.isSuccess)
+                        guard let returnedURL = result.outputURL else {
+                            Issue.record("Expected an output URL"); return
+                        }
+                        #expect(returnedURL.pathExtension.lowercased() == animatedFormat.fileExtension)
+                        #expect(FileManager.default.fileExists(atPath: returnedURL.path))
+                        let attrs = try FileManager.default.attributesOfItem(atPath: returnedURL.path)
+                        #expect((attrs[.size] as? Int ?? 0) > 0)
+                        
                     }
-                    #expect(returnedURL.pathExtension.lowercased() == animatedFormat.fileExtension)
-                    #expect(FileManager.default.fileExists(atPath: returnedURL.path))
-                    let attrs = try FileManager.default.attributesOfItem(atPath: returnedURL.path)
-                    #expect((attrs[.size] as? Int ?? 0) > 0)
                 }
             }
         }

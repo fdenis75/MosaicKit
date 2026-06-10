@@ -55,6 +55,10 @@
         "value" : "folder"
       },
       {
+        "key" : "PREVIEW_FOLDER",
+        "value" : "\/Volumes\/Ext-Photos5\/PB\/test"
+      },
+      {
         "key" : "MOSAIC_TARGET_FOLDER",
         "value" : "\/Users\/francois\/Downloads\/testvidsnodelete\/output"
       },

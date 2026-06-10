@@ -150,6 +150,12 @@ public struct MosaicConfiguration {
     var overwrite: Bool                      // Overwrite existing files (default: false)
     var outputDirectoryTemplate: String?     // Token-based directory path (nil = default)
     var filenameTemplate: String?            // Token-based filename (nil = default)
+
+    // Animated image (GIF/WebP/HEICS) export
+    var gifMode: GifCreationMode             // .disabled (default), .withMosaic, or .gifOnly
+    var gifSize: GifSize                     // .nochange (default), .large, or .small
+    var animatedFormat: AnimatedFormat       // .webp (default), .gif, or .heic
+    var gifFps: Double                       // Target frame rate for animated export (default: 10)
 }
 ```
 

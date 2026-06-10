@@ -79,6 +79,10 @@ public struct MosaicConfiguration: Codable, Sendable {
     /// Container format for the animated image export.
     public var animatedFormat: AnimatedFormat
 
+    /// Target frame rate (frames per second) for the animated image export.
+    /// Controls the frame delay passed to `AnimatedGifGenerator.save(...)`.
+    public var gifFps: Double
+
     /// Whether to overwrite existing output files. When `false` (default),
     /// generation short-circuits and returns the existing URL if the output
     /// file already exists at the resolved path.
@@ -121,7 +125,8 @@ public struct MosaicConfiguration: Codable, Sendable {
         overlay: OverlayConfiguration = .default,
         gifMode: GifCreationMode = .disabled,
         gifSize: GifSize = .nochange,
-        animatedFormat: AnimatedFormat = .webp
+        animatedFormat: AnimatedFormat = .webp,
+        gifFps: Double = 10
     ) {
         self.width = width
         self.density = density
@@ -138,15 +143,17 @@ public struct MosaicConfiguration: Codable, Sendable {
         self.gifMode = gifMode
         self.gifSize = gifSize
         self.animatedFormat = animatedFormat
+        self.gifFps = gifFps
     }
-    
+
     public init(
         density: DensityConfig = .default,
         outputdirectory: URL? = nil,
         fullPathInName: Bool = false,
         gifMode: GifCreationMode = .disabled,
         gifSize: GifSize = .nochange,
-        animatedFormat: AnimatedFormat = .webp
+        animatedFormat: AnimatedFormat = .webp,
+        gifFps: Double = 10
     ) {
         self.width = 2500
         self.density = density
@@ -163,8 +170,9 @@ public struct MosaicConfiguration: Codable, Sendable {
         self.gifMode = gifMode
         self.gifSize = gifSize
         self.animatedFormat = animatedFormat
+        self.gifFps = gifFps
     }
-    
+
     public init(
         width: Int = 5120,
         density: DensityConfig = .default,
@@ -178,7 +186,7 @@ public struct MosaicConfiguration: Codable, Sendable {
         useMovieColorsForBg: Bool = true,
         backgroundColor: MosaicColor = .defaultGray,
         overlay: OverlayConfiguration = .default,
-        
+        gifFps: Double = 10
     ) {
         self.width = width
         self.density = density
@@ -195,6 +203,7 @@ public struct MosaicConfiguration: Codable, Sendable {
         self.gifMode = .disabled
         self.gifSize = .small
         self.animatedFormat = .webp
+        self.gifFps = gifFps
     }
     
     /// Creates a MosaicConfiguration instance.
@@ -230,6 +239,7 @@ public struct MosaicConfiguration: Codable, Sendable {
         self.gifMode = .disabled
         self.gifSize = .nochange
         self.animatedFormat = .gif
+        self.gifFps = 10
     }
 
     /// Default configuration for mosaic generation

@@ -185,17 +185,18 @@ private extension PreviewComboConfig {
     /// FFMPEG_PATH=/opt/homebrew/bin/ffmpeg PREVIEW_COMBO_RUN=1 swift test --filter PreviewCombinationTests
     /// ```
     static func makeAll() -> [PreviewComboConfig] {
-        let durations:   [TimeInterval]          = [60, 120]
-        let densities:   [DensityConfig]         = [.s, .xxs]
+        let durations:   [TimeInterval]          = [60]
+        let densities:   [DensityConfig]         = [.s]
         let audioValues: [Bool]                  = [true]
-        let minDurations:[TimeInterval]          = [1.0, 3.0]
-        let maxSpeeds:   [Double]                = [1.2, 1.5, 2.0]
+        let minDurations:[TimeInterval]          = [2.0]
+        let maxSpeeds:   [Double]                = [1.0]
 
         let nativePresets: [nativeExportPreset]  = [
-            .AVAssetExportPresetMediumQuality,
-            .AVAssetExportPresetLowQuality
+            
+            .AVAssetExportPresetHEVCHighestQuality,
+            .AVAssetExportPresetHEVC1920x1080
         ]
-        let sjsPresets: [SjSExportPreset]        = [.h264_lowAutoLevel]
+        let sjsPresets: [SjSExportPreset]        = [.hevc]
 
         // FFmpeg option variants — ordered from fastest to highest quality:
         //
@@ -207,10 +208,14 @@ private extension PreviewComboConfig {
         let ffmpegOptionsList: [FFmpegEncodingOptions] = [
             // VideoToolbox — real-time, lowest acceptable quality (max speed)
             FFmpegEncodingOptions(
-                videoCodec: .hevcVideoToolbox, crf: nil, speedPreset: .superfast,
-                maxResolution: ._1080p, audioCodec: .aac, audioBitrate: "128k"
+                videoCodec: .hevcVideoToolbox, crf: nil, speedPreset: .medium,
+                maxResolution: ._1080p , audioCodec: .aac, audioBitrate: "128k"
             ),
-            // VideoToolbox — real-time, balanced quality (preview sweet-spot)
+            FFmpegEncodingOptions(
+                videoCodec: .hevc, crf: nil, speedPreset: .medium,
+                maxResolution: ._1080p , audioCodec: .aac, audioBitrate: "128k"
+            ),
+           /* // VideoToolbox — real-time, balanced quality (preview sweet-spot)
             FFmpegEncodingOptions(
                 videoCodec: .hevcVideoToolbox, crf: nil, speedPreset: .fast,
                 maxResolution: ._1080p, audioCodec: .aac, audioBitrate: "128k"
@@ -219,7 +224,7 @@ private extension PreviewComboConfig {
             FFmpegEncodingOptions(
                 videoCodec: .h264, crf: 23, speedPreset: .fast,
                 maxResolution: ._1080p, audioCodec: .aac, audioBitrate: "128k"
-            ),
+            ),*/
         ]
 
         let ffmpegPath = ffmpegBinaryPath  // nil → omit FFmpeg branch
@@ -250,7 +255,7 @@ private extension PreviewComboConfig {
                             }
 
                             // --- SJS export ---
-                            for preset in sjsPresets {
+                                /*       for preset in sjsPresets {
                                 configs.append(PreviewComboConfig(
                                     index: idx, targetDuration: dur, density: dens,
                                     includeAudio: audio,
@@ -260,9 +265,9 @@ private extension PreviewComboConfig {
                                 ))
                                 idx += 1
                             }
-
+*/
                             // --- FFmpeg export (only when binary is available) ---
-                            if ffmpegPath != nil {
+                         if ffmpegPath != nil {
                                 for options in ffmpegOptionsList {
                                     configs.append(PreviewComboConfig(
                                         index: idx, targetDuration: dur, density: dens,
@@ -392,9 +397,9 @@ private func previewTimingSummary(results: [PreviewComboResult], label: String) 
 /// Total **with** ffmpeg: **144** | without: **72**
 ///
 /// ## Phases
-/// - **Phase 1**: `TestB.mp4` — all combos, sequential
-/// - **Phase 2**: `TestB.mp4` → `DDSC-031.mp4` — all combos each, sequential
-/// - **Phase 3**: `testA.mp4` / `TestB.mp4` / `TestC.mp4` / `DDSC-031.mp4` — 4 files concurrent
+/// - **Phase 1**: `DJI_0635.MP4` — all combos, sequential
+/// - **Phase 2**: `DJI_0635.MP4` → `DDSC-031.mp4` — all combos each, sequential
+/// - **Phase 3**: `testA.mp4` / `DJI_0635.MP4` / `TestC.mp4` / `DDSC-031.mp4` — 4 files concurrent
 ///
 /// ## Run
 /// ```bash
@@ -460,9 +465,9 @@ struct PreviewCombinationTests {
         """)
     }
 
-    // MARK: - Phase 1 ── TestB.MP4, all combos, sequential
+    // MARK: - Phase 1 ── DJI_0635.MP4, all combos, sequential
 
-    @Test("Phase 1 – TestB.MP4,  combinations sequential")
+    @Test("Phase 1 – DJI_0635.MP4,  combinations sequential")
     func phase1_singleVideo() async throws {
         guard Self.isEnabled else {
             print("""
@@ -479,10 +484,10 @@ struct PreviewCombinationTests {
 
         let combos    = Self.allCombos
         let outputDir = Self.runOutputDirectory
-        let video     = await VideoInput(url: url(for: "TestB.mp4"))
+        let video     = await VideoInput(url: url(for: "DJI_0635.MP4"))
         let reporter  = PreviewProgressReporter(total: combos.count)
 
-        printHeader(phase: 1, videos: ["TestB.mp4"], combosPerVideo: combos.count)
+        printHeader(phase: 1, videos: ["DJI_0635.MP4"], combosPerVideo: combos.count)
         print(String(format: "  Video info: %@  %.0fs  %dx%d\n",
                      video.title, video.duration ?? 0,
                      Int(video.width ?? 0), Int(video.height ?? 0)))
@@ -498,7 +503,7 @@ struct PreviewCombinationTests {
                 let outputURL = try await generator.generate(for: video, config: config)
                 let r = PreviewComboResult(
                     comboIndex: combo.index, comboName: combo.shortName,
-                    videoFilename: "TestB.mp4", phase: 1,
+                    videoFilename: "DJI_0635.MP4", phase: 1,
                     elapsed: Date().timeIntervalSince(start),
                     outputURL: outputURL, errorDescription: nil)
                 results.append(r)
@@ -506,7 +511,7 @@ struct PreviewCombinationTests {
             } catch {
                 let r = PreviewComboResult(
                     comboIndex: combo.index, comboName: combo.shortName,
-                    videoFilename: "TestB.mp4", phase: 1,
+                    videoFilename: "DJI_0635.MP4", phase: 1,
                     elapsed: Date().timeIntervalSince(start),
                     outputURL: nil, errorDescription: error.localizedDescription)
                 results.append(r)
@@ -517,7 +522,7 @@ struct PreviewCombinationTests {
         let succeeded = results.filter(\.succeeded).count
         print("\n── Phase 1 complete: \(succeeded)/\(results.count) succeeded ──\n")
 
-        let summary = previewTimingSummary(results: results, label: "Phase 1 — TestB.mp4")
+        let summary = previewTimingSummary(results: results, label: "Phase 1 — DJI_0635.MP4")
         let reportURL = outputDir.appendingPathComponent("phase1_report.txt")
         try summary.write(to: reportURL, atomically: true, encoding: .utf8)
         print(summary)
@@ -526,9 +531,9 @@ struct PreviewCombinationTests {
         #expect(succeeded > 0, "Phase 1: expected at least one successful preview generation")
     }
 
-    // MARK: - Phase 2 ── TestB.mp4 → DDSC-031.mp4, sequential
+    // MARK: - Phase 2 ── DJI_0635.MP4 → DDSC-031.mp4, sequential
 
-    @Test("Phase 2 – TestB.mp4 then DDSC-031.mp4, sequential")
+    @Test("Phase 2 – DJI_0635.MP4 then DDSC-031.mp4, sequential")
     func phase2_sequentialVideos() async throws {
         guard Self.isEnabled else { return }
 
@@ -536,7 +541,7 @@ struct PreviewCombinationTests {
 
         let combos    = Self.allCombos
         let outputDir = Self.runOutputDirectory
-        let filenames = ["TestB.mp4", "DDSC-031.mp4"]
+        let filenames = ["DJI_0635.MP4", "DDSC-031.mp4"]
         let reporter  = PreviewProgressReporter(total: combos.count * filenames.count)
 
         printHeader(phase: 2, videos: filenames, combosPerVideo: combos.count)
@@ -579,7 +584,7 @@ struct PreviewCombinationTests {
         let succeeded = allResults.filter(\.succeeded).count
         print("\n── Phase 2 complete: \(succeeded)/\(allResults.count) succeeded ──\n")
 
-        let summary = previewTimingSummary(results: allResults, label: "Phase 2 — TestB.mp4 + DDSC-031.mp4")
+        let summary = previewTimingSummary(results: allResults, label: "Phase 2 — DJI_0635.MP4 + DDSC-031.mp4")
         let reportURL = outputDir.appendingPathComponent("phase2_report.txt")
         try summary.write(to: reportURL, atomically: true, encoding: .utf8)
         print(summary)
@@ -590,7 +595,7 @@ struct PreviewCombinationTests {
 
     // MARK: - Phase 3 ── testA / TestB / TestC / DDSC-031, concurrent
 
-    @Test("Phase 3 – testA.mp4 / TestB.mp4 / TestC.mp4 / DDSC-031.mp4 concurrent")
+    @Test("Phase 3 – testA.mp4 / DJI_0635.MP4 / TestC.mp4 / DDSC-031.mp4 concurrent")
     func phase3_concurrentVideos() async throws {
         guard Self.isEnabled else { return }
 
@@ -598,7 +603,7 @@ struct PreviewCombinationTests {
 
         let combos    = Self.allCombos
         let outputDir = Self.runOutputDirectory
-        let filenames = ["testA.mp4", "TestB.mp4", "TestC.mp4", "DDSC-031.mp4"]
+        let filenames = ["testA.mp4", "DJI_0635.MP4", "TestC.mp4", "DDSC-031.mp4"]
         let reporter  = PreviewProgressReporter(total: combos.count * filenames.count)
 
         printHeader(phase: 3, videos: filenames, combosPerVideo: combos.count)

@@ -181,7 +181,7 @@ public actor MetalMosaicGenerator: MosaicGeneratorProtocol {
                         gifSize: mutableConfig.gifSize,
                         accurate: mutableConfig.useAccurateTimestamps
                     )
-                    try AnimatedGifGenerator.save(frames: gifFrames, to: animURL, format: mutableConfig.animatedFormat)
+                    try AnimatedGifGenerator.save(frames: gifFrames, to: animURL, format: mutableConfig.animatedFormat, frameDelay: 1.0 / mutableConfig.gifFps)
                     logger.debug("💾 Animation-only saved to: \(animURL.path)")
                     return animURL
                 }
@@ -336,7 +336,7 @@ public actor MetalMosaicGenerator: MosaicGeneratorProtocol {
                             gifSize: mutableConfig.gifSize,
                             accurate: mutableConfig.useAccurateTimestamps
                         )
-                        try AnimatedGifGenerator.save(frames: gifFrames, to: animURL, format: mutableConfig.animatedFormat)
+                        try AnimatedGifGenerator.save(frames: gifFrames, to: animURL, format: mutableConfig.animatedFormat, frameDelay: 1.0 / mutableConfig.gifFps)
                         logger.debug("💾 Animation saved to: \(animURL.path)")
                     }
                 }
