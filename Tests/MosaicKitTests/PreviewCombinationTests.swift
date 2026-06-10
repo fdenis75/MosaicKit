@@ -196,7 +196,7 @@ private extension PreviewComboConfig {
             .AVAssetExportPresetHEVCHighestQuality,
             .AVAssetExportPresetHEVC1920x1080
         ]
-        let sjsPresets: [SjSExportPreset]        = [.hevc]
+        // let sjsPresets: [SjSExportPreset]        = [.hevc]
 
         // FFmpeg option variants — ordered from fastest to highest quality:
         //
@@ -208,13 +208,22 @@ private extension PreviewComboConfig {
         let ffmpegOptionsList: [FFmpegEncodingOptions] = [
             // VideoToolbox — real-time, lowest acceptable quality (max speed)
             FFmpegEncodingOptions(
-                videoCodec: .hevcVideoToolbox, crf: nil, speedPreset: .medium,
+                videoCodec: .hevcVideoToolbox, crf: nil, speedPreset: .ultrafast,
+                maxResolution: ._4K , audioCodec: .aac, audioBitrate: "128k"
+            ),
+            FFmpegEncodingOptions(
+                videoCodec: .hevcVideoToolbox, crf: nil, speedPreset: .ultrafast,
                 maxResolution: ._1080p , audioCodec: .aac, audioBitrate: "128k"
             ),
             FFmpegEncodingOptions(
-                videoCodec: .hevc, crf: nil, speedPreset: .medium,
-                maxResolution: ._1080p , audioCodec: .aac, audioBitrate: "128k"
+                videoCodec: .hevcVideoToolbox, crf: nil, speedPreset: .ultrafast,
+                maxResolution: ._720p , audioCodec: .aac, audioBitrate: "128k"
             ),
+            FFmpegEncodingOptions(
+                videoCodec: .hevcVideoToolbox, crf: nil, speedPreset: .ultrafast,
+                maxResolution: .sd , audioCodec: .aac, audioBitrate: "128k"
+            ),
+            
            /* // VideoToolbox — real-time, balanced quality (preview sweet-spot)
             FFmpegEncodingOptions(
                 videoCodec: .hevcVideoToolbox, crf: nil, speedPreset: .fast,
@@ -243,7 +252,7 @@ private extension PreviewComboConfig {
                         for maxSpd in maxSpeeds {
 
                             // --- Native export ---
-                            for preset in nativePresets {
+                       /*     for preset in nativePresets {
                                 configs.append(PreviewComboConfig(
                                     index: idx, targetDuration: dur, density: dens,
                                     includeAudio: audio,
@@ -255,7 +264,7 @@ private extension PreviewComboConfig {
                             }
 
                             // --- SJS export ---
-                                /*       for preset in sjsPresets {
+                                       for preset in sjsPresets {
                                 configs.append(PreviewComboConfig(
                                     index: idx, targetDuration: dur, density: dens,
                                     includeAudio: audio,

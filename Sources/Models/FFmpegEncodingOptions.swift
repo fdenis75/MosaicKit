@@ -134,7 +134,7 @@ public struct FFmpegEncodingOptions: Codable, Sendable, Hashable {
         /// Suitable for direct use as the value of the ffmpeg `-vf` option (no shell quoting needed
         /// since arguments are passed as an array, not via a shell).
         public var scaleFilter: String {
-            "scale=\(width):\(height):force_original_aspect_ratio=decrease"
+            "scale='min(\(width),iw)':'min(ih,\(height))'"
         }
 
         public var width: Int {
@@ -287,16 +287,14 @@ public struct FFmpegEncodingOptions: Codable, Sendable, Hashable {
 
         // Video codec
         args += ["-c:v", videoCodec.rawValue]
-
+       
         if videoCodec.isVideoToolbox {
             // ── VideoToolbox hardware path ──────────────────────────────────────
             // `-preset` and `-crf` are not supported by hardware encoders.
             // SpeedPreset is translated to:
             //   -realtime 1/0   real-time encoding hint (1 = prioritise speed)
             //   -q:v N          VideoToolbox quality level (1–100; higher = better)
-            if speedPreset.videoToolboxRealtime {
-                args += ["-realtime", "1"]
-            }
+           
             if let videoBitrate {
                 // Explicit bitrate takes priority over quality-based control
                 args += ["-b:v", videoBitrate]
@@ -314,7 +312,10 @@ public struct FFmpegEncodingOptions: Codable, Sendable, Hashable {
         }
 
         if videoCodec == .hevcVideoToolbox || videoCodec == .hevc {
+            args += ["-pix_fmt", "p010le"]
             args += ["-tag:v", "hvc1"]
+            args += ["-r", "30"]
+            args += ["-movflags", "+faststart"]
         }
         // Resolution filter — applied for all codecs except copy.
         // VideoToolbox needs this too: passthrough mode skips the AVVideoComposition,

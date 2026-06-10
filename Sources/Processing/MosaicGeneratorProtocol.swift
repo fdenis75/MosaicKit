@@ -1,46 +1,55 @@
 import Foundation
 import CoreImage
 
-/// Protocol defining the interface for mosaic generators
+/// A protocol that defines the interface for video mosaic generators.
 // @available(macOS 26, iOS 26, *)
 public protocol MosaicGeneratorProtocol: Actor {
-    /// Generate a mosaic for a video
+    /// Generates a mosaic for the specified video input and saves it to a file.
+    ///
     /// - Parameters:
-    ///   - video: The video to generate a mosaic for
-    ///   - config: The configuration for mosaic generation
-    ///   - forIphone: Whether to use iPhone-optimized layout
-    /// - Returns: The URL of the generated mosaic image
+    ///   - video: The video input to process.
+    ///   - config: The configuration settings for the mosaic generation.
+    ///   - forIphone: A boolean value indicating whether to optimize the layout for iPhone screens.
+    /// - Returns: The file `URL` where the generated mosaic image is saved.
+    /// - Throws: An error if the mosaic generation or file writing fails.
     func generate(for video: VideoInput, config: MosaicConfiguration, forIphone: Bool) async throws -> URL
 
-    /// Generate a mosaic image for a video without saving to disk
+    /// Generates a mosaic image directly in memory without saving to disk.
+    ///
     /// - Parameters:
-    ///   - video: The video to generate a mosaic for
-    ///   - config: The configuration for mosaic generation
-    ///   - forIphone: Whether to use iPhone-optimized layout
-    /// - Returns: The generated mosaic as a CGImage
+    ///   - video: The video input to process.
+    ///   - config: The configuration settings for the mosaic generation.
+    ///   - forIphone: A boolean value indicating whether to optimize the layout for iPhone screens.
+    /// - Returns: The generated mosaic as a `CGImage`.
+    /// - Throws: An error if the mosaic generation fails.
     func generateMosaicImage(for video: VideoInput, config: MosaicConfiguration, forIphone: Bool) async throws -> CGImage
 
-    /// Generate mosaics for all combinations of sizes and densities
+    /// Generates mosaics for all predefined combinations of width sizes and density configurations.
+    ///
     /// - Parameters:
-    ///   - video: The video to generate mosaics for
-    ///   - config: Base configuration for mosaic generation
-    /// - Returns: Array of URLs for generated mosaics
+    ///   - video: The video input to process.
+    ///   - config: The base configuration settings for the mosaic generation.
+    /// - Returns: An array of file `URL`s representing the generated mosaics.
+    /// - Throws: An error if the mosaic generation fails for any combination.
     func generateallcombinations(for video: VideoInput, config: MosaicConfiguration) async throws -> [URL]
 
-    /// Cancel mosaic generation for a specific video
-    /// - Parameter video: The video to cancel mosaic generation for
+    /// Cancels ongoing mosaic generation for the specified video.
+    ///
+    /// - Parameter video: The video to cancel mosaic generation for.
     func cancel(for video: VideoInput)
 
-    /// Cancel all ongoing mosaic generation operations
+    /// Cancels all active and queued mosaic generation operations.
     func cancelAll()
 
-    /// Set a progress handler for a specific video
+    /// Sets a progress closure to monitor the mosaic generation progress of a specific video.
+    ///
     /// - Parameters:
-    ///   - video: The video to set the progress handler for
-    ///   - handler: The progress handler
+    ///   - video: The video input to monitor.
+    ///   - handler: The progress closure called during different stages of generation.
     func setProgressHandler(for video: VideoInput, handler: @escaping @Sendable (MosaicGenerationProgress) -> Void)
 
-    /// Get performance metrics for the mosaic generator
-    /// - Returns: A dictionary of performance metrics
+    /// Returns performance metrics tracking generation times and task execution statistics.
+    ///
+    /// - Returns: A dictionary of performance metrics containing keys like `lastGenerationTime` and `totalGenerationTime`.
     func getPerformanceMetrics() -> [String: Any]
 }

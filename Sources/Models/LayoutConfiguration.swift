@@ -1,7 +1,7 @@
 import Foundation
 import CoreGraphics
 
-/// Configuration for mosaic layout settings.
+/// A structure that defines the configuration for video mosaic layout settings.
 public struct LayoutConfiguration: Codable, Sendable {
     /// The aspect ratio of the mosaic (e.g., 16:9, 4:3).
     public var aspectRatio: AspectRatio
@@ -12,10 +12,16 @@ public struct LayoutConfiguration: Codable, Sendable {
     /// The type of layout to use.
     public var layoutType: LayoutType
 
-    /// Visual settings for the layout.
+    /// The visual settings for the layout.
     public var visual: VisualSettings
 
-    /// Creates a new LayoutConfiguration instance.
+    /// Creates a new layout configuration with the specified settings.
+    ///
+    /// - Parameters:
+    ///   - aspectRatio: The target aspect ratio of the mosaic.
+    ///   - spacing: The spacing in pixels between thumbnails.
+    ///   - layoutType: The layout algorithm to apply.
+    ///   - visual: Visual enhancements like borders and shadows.
     public init(
         aspectRatio: AspectRatio = .widescreen,
         spacing: CGFloat = 4,
@@ -33,36 +39,37 @@ public struct LayoutConfiguration: Codable, Sendable {
     public static let `default` = LayoutConfiguration()
 }
 
-/// Available layout types for mosaic generation.
+/// An enumeration representing the available layout types for video mosaic generation.
 public enum LayoutType: String, Codable, Sendable {
-    /// Auto layout based on screen size and content.
+    /// An automatic layout based on screen size and content.
     case auto
-    /// Custom layout with specific density and arrangement.
+    /// A custom layout with specific zone-based arrangements.
     case custom
-    /// Dynamic layout with center emphasis.
+    /// A dynamic layout emphasizing center frames.
     case dynamic
-    /// Classic grid layout.
+    /// A classic uniform grid layout.
     case classic
-    /// Layout optimized for iPhone screens.
+    /// A layout optimized for portrait iPhone screens.
     case iphone
     
+    /// An array of all available layout types.
     public static let allCases: [LayoutType] = [.auto, .custom, .dynamic, .classic, .iphone]
 }
 
-/// Predefined aspect ratios for mosaic layout.
+/// An enumeration representing the predefined aspect ratios for a mosaic layout.
 public enum AspectRatio: String, Codable, Sendable {
-    /// 16:9 aspect ratio (widescreen)
+    /// A 16:9 widescreen aspect ratio.
     case widescreen = "16:9"
-    /// 4:3 aspect ratio (standard)
+    /// A 4:3 standard television/monitor aspect ratio.
     case standard = "4:3"
-    /// 1:1 aspect ratio (square)
+    /// A 1:1 square aspect ratio.
     case square = "1:1"
-    /// 21:9 aspect ratio (ultrawide)
+    /// A 21:9 ultrawide cinematic aspect ratio.
     case ultrawide = "21:9"
-    /// 9:16 aspect ratio (vertical/portrait)
+    /// A 9:16 vertical/portrait aspect ratio.
     case vertical = "9:16"
 
-    /// Get the actual ratio value
+    /// The numerical value of the aspect ratio (width divided by height).
     public var ratio: CGFloat {
         switch self {
         case .widescreen: return 16.0 / 9.0
@@ -73,6 +80,10 @@ public enum AspectRatio: String, Codable, Sendable {
         }
     }
     
+    /// Finds the nearest predefined aspect ratio for a given size.
+    ///
+    /// - Parameter to: The target dimensions.
+    /// - Returns: The closest predefined aspect ratio.
     public static func findNearest(to: CGSize) -> AspectRatio {
         let targetRatio = to.width / to.height
         return Self.allCases.min(by: {
@@ -82,28 +93,35 @@ public enum AspectRatio: String, Codable, Sendable {
         })!
     }
 
-    /// All available aspect ratios
+    /// An array of all available aspect ratios.
     public static let allCases: [AspectRatio] = [.widescreen, .standard, .square, .ultrawide, .vertical]
 }
 
-/// Visual settings for mosaic layout.
+/// A structure that defines the visual settings for a mosaic layout.
 public struct VisualSettings: Codable, Sendable {
-    /// Whether to add borders around frames.
+    /// A boolean value indicating whether to add borders around thumbnails.
     public var addBorder: Bool
 
-    /// The border color.
+    /// The border color configuration.
     public var borderColor: BorderColor
 
     /// The border width in pixels.
     public var borderWidth: CGFloat
 
-    /// Whether to add shadow to frames.
+    /// A boolean value indicating whether to apply shadows to thumbnails.
     public var addShadow: Bool
 
-    /// Shadow settings if enabled.
+    /// The shadow settings used if shadow drawing is enabled.
     public var shadowSettings: ShadowSettings?
 
-    /// Creates a new VisualSettings instance.
+    /// Creates a new visual settings configuration with the specified properties.
+    ///
+    /// - Parameters:
+    ///   - addBorder: Whether to draw borders.
+    ///   - borderColor: The color of the borders.
+    ///   - borderWidth: The width of the borders in pixels.
+    ///   - addShadow: Whether to draw shadows.
+    ///   - shadowSettings: The configuration for the shadows, or `nil` to use default shadow settings.
     public init(
         addBorder: Bool = false,
         borderColor: BorderColor = .white,
@@ -122,13 +140,19 @@ public struct VisualSettings: Codable, Sendable {
     public static let `default` = VisualSettings()
 }
 
-/// Border color options.
+/// An enumeration representing the available border color options.
 public enum BorderColor: String, Codable, Sendable {
+    /// A white border.
     case white
+    /// A black border.
     case black
+    /// A gray border.
     case gray
 
-    /// Returns the grayscale intensity (0.0–1.0) for this color. The `opacity` parameter is ignored.
+    /// Returns the grayscale intensity (0.0 to 1.0) for this color.
+    ///
+    /// - Parameter opacity: The target opacity (ignored in the current implementation).
+    /// - Returns: A `CGFloat` representing the grayscale value.
     public func withOpacity(_ opacity: CGFloat) -> CGFloat {
         switch self {
         case .white: return 1.0
@@ -138,18 +162,23 @@ public enum BorderColor: String, Codable, Sendable {
     }
 }
 
-/// Shadow settings for frames.
+/// A structure that defines the shadow settings for mosaic frames.
 public struct ShadowSettings: Codable, Sendable {
-    /// The shadow opacity (0.0 to 1.0).
+    /// The shadow opacity (ranging from 0.0 to 1.0).
     public let opacity: CGFloat
 
-    /// The shadow radius in pixels.
+    /// The shadow blur radius in pixels.
     public let radius: CGFloat
 
-    /// The shadow offset.
+    /// The offset of the shadow relative to the thumbnail frame.
     public let offset: CGSize
 
-    /// Creates a new ShadowSettings instance.
+    /// Creates a new shadow configuration with the specified parameters.
+    ///
+    /// - Parameters:
+    ///   - opacity: The opacity of the shadow.
+    ///   - radius: The blur radius in pixels.
+    ///   - offset: The directional offset of the shadow.
     public init(
         opacity: CGFloat = 0.5,
         radius: CGFloat = 4,

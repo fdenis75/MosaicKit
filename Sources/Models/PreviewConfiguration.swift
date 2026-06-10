@@ -12,6 +12,18 @@ public enum PreviewExportMode: String, Codable, Sendable, Hashable {
     /// Passthrough export to a temp file followed by FFmpeg transcoding.
     /// Requires `PreviewConfiguration.ffmpegBinaryPath` to be set.
     case ffmpeg
+    
+    
+    public var displayString: String {
+        switch self {
+        case .native:
+            return "Apple Native"
+        case .sjs:
+            return "Custom AvFoundation Export"
+        case .ffmpeg:
+            return "FFmpeg"
+        }
+    }
 }
 
 /// Configuration for video preview generation
@@ -115,7 +127,7 @@ public struct PreviewConfiguration: Codable, Sendable, Hashable {
 
     /// Optional token-based template controlling the output directory layout.
     ///
-    /// When `nil` (default), the legacy `{root}/movieprev/` layout is used.
+    /// When `nil` (default), the legacy `{root}` layout is used.
     /// When set, the template is resolved against the following tokens:
     /// `{root}`, `{duration}`, `{density}`, `{format}`, `{date}`. Empty tokens
     /// are skipped; unknown tokens are left as-is.
@@ -465,7 +477,7 @@ public struct PreviewConfiguration: Codable, Sendable, Hashable {
         }
 
         return baseDirectory
-            .appendingPathComponent("movieprev", isDirectory: true)
+          //  .appendingPathComponent("movieprev", isDirectory: true)
     }
 
     /// Generate filename for the preview video
@@ -489,7 +501,7 @@ public struct PreviewConfiguration: Codable, Sendable, Hashable {
         let resolution = _exportMaxResolutionRaw ?? "auto"
         switch exportMode {
         case .native:
-            let preset = (exportPresetName?.displayString ?? effectiveExportPreset)
+            let preset = (exportPresetName?.fileString ?? effectiveExportPreset)
             exportLabel = "\(preset)_nat"
         case .sjs:
             let codec = sJSExportPresetName?.displayString ?? "default"
@@ -507,7 +519,7 @@ public struct PreviewConfiguration: Codable, Sendable, Hashable {
             let sanitizedPath = videoInput.url.deletingLastPathComponent().path.replacingNonAlphanumerics(with: "_")
             return "\(sanitizedPath)_\(originalFilename)_preview_\(configHash).\(format.fileExtension)"
         } else {
-            return "\(originalFilename)_preview_\(configHash).\(format.fileExtension)"
+            return "_preview_\(originalFilename)_\(configHash).\(format.fileExtension)"
         }
     }
 
@@ -522,6 +534,7 @@ public struct PreviewConfiguration: Codable, Sendable, Hashable {
         let today = Self.todayString()
         let values: [String: String?] = [
             "root": rootURL.path,
+            "exportMode": exportMode.displayString,
             "duration": formatDuration(targetDuration),
             "density": density.name,
             "format": format.rawValue,
@@ -579,6 +592,7 @@ public struct PreviewConfiguration: Codable, Sendable, Hashable {
             "duration": formatDuration(targetDuration),
             "density": density.name,
             "format": format.rawValue,
+            "exportMode": exportMode.displayString,
             "audio": includeAudio ? "audio" : "noaudio",
             "date": today
         ]

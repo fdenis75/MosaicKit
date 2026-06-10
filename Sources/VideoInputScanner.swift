@@ -5,7 +5,7 @@ private let videoFileExtensions: Set<String> = [
     "3gp", "ts", "m2ts", "mts", "mxf", "f4v", "asf"
 ]
 
-/// Scan a directory for video files and return a ``VideoInput`` for each one found.
+/// Scans a directory for video files and returns a ``VideoInput`` for each one found.
 ///
 /// Metadata (duration, resolution, frame rate, codec) is extracted automatically
 /// from each file. Files whose metadata cannot be read are included with zeroed

@@ -2,13 +2,24 @@ import Foundation
 import CoreGraphics
 import ImageIO
 
-/// A platform-independent, Codable color representation for mosaic backgrounds.
+/// A platform-independent, codable color representation used for mosaic backgrounds.
 public struct MosaicColor: Codable, Sendable, Equatable {
+    /// The red component value of the color (ranging from 0.0 to 1.0).
     public var red: Double
+    /// The green component value of the color (ranging from 0.0 to 1.0).
     public var green: Double
+    /// The blue component value of the color (ranging from 0.0 to 1.0).
     public var blue: Double
+    /// The alpha (opacity) component value of the color (ranging from 0.0 to 1.0).
     public var alpha: Double
 
+    /// Initializes a new color with the specified red, green, blue, and alpha components.
+    ///
+    /// - Parameters:
+    ///   - red: The red component value.
+    ///   - green: The green component value.
+    ///   - blue: The blue component value.
+    ///   - alpha: The alpha opacity value.
     public init(red: Double, green: Double, blue: Double, alpha: Double = 1.0) {
         self.red = red
         self.green = green
@@ -16,16 +27,16 @@ public struct MosaicColor: Codable, Sendable, Equatable {
         self.alpha = alpha
     }
 
-    /// Mid-gray — the default solid background color.
+    /// The default solid mid-gray background color.
     public static let defaultGray = MosaicColor(red: 0.5, green: 0.5, blue: 0.5)
 
-    /// Converts to a CGColor for use in Core Graphics rendering.
+    /// The `CGColor` representation of this color for Core Graphics rendering.
     public var cgColor: CGColor {
         CGColor(red: red, green: green, blue: blue, alpha: alpha)
     }
 }
 
-/// Configuration for mosaic generation.
+/// A structure containing the configuration settings for video mosaic generation.
 public struct MosaicConfiguration: Codable, Sendable {
     // MARK: - Properties
 
@@ -488,16 +499,16 @@ public struct MosaicConfiguration: Codable, Sendable {
     }
 }
 
-/// Output container format for the animated image export.
+/// An enumeration representing the output container formats for animated image export.
 public enum AnimatedFormat: String, Codable, Sendable {
-    /// Animated GIF (`com.compuserve.gif`). Universal compatibility.
+    /// Animated GIF format (`com.compuserve.gif`) for universal compatibility.
     case gif
-    /// Animated HEIC sequence (`public.heics`). Better quality and compression; Apple platforms only.
+    /// Animated HEIC sequence format (`public.heics`) for high-quality Apple platform export.
     case heic
-    /// Animated WebP (`org.webmproject.webp`). Good compression; wide web compatibility.
+    /// Animated WebP format (`org.webmproject.webp`) for web-compatible compression.
     case webp
 
-    /// File extension for the format.
+    /// The file extension associated with the format.
     public var fileExtension: String {
         switch self {
         case .gif:  return "gif"
@@ -506,7 +517,7 @@ public enum AnimatedFormat: String, Codable, Sendable {
         }
     }
 
-    /// UTI identifier used by `CGImageDestination`.
+    /// The Uniform Type Identifier (UTI) used by `CGImageDestination`.
     public var uti: String {
         switch self {
         case .gif:  return "com.compuserve.gif"
@@ -515,8 +526,9 @@ public enum AnimatedFormat: String, Codable, Sendable {
         }
     }
 
-    /// Whether this format can be written on the current platform.
-    /// GIF and HEIC use `CGImageDestination`; WebP uses the bundled `webp.swift` encoder (always available).
+    /// A boolean value indicating whether this format can be written on the current platform.
+    ///
+    /// GIF and HEIC rely on `CGImageDestination`, whereas WebP uses the bundled `webp.swift` encoder.
     public var isWritable: Bool {
         if self == .webp { return true }
         let supported = CGImageDestinationCopyTypeIdentifiers() as? [String] ?? []
@@ -524,47 +536,45 @@ public enum AnimatedFormat: String, Codable, Sendable {
     }
 }
 
-/// Controls whether and how an animated GIF is created alongside the mosaic.
+/// An enumeration controlling how an animated image is created alongside the mosaic.
 public enum GifCreationMode: String, Codable, Sendable {
-    /// No GIF is created (default).
+    /// Do not create any animated images.
     case disabled
-    /// Create both the mosaic and an animated GIF.
+    /// Create both the static mosaic and an animated image sequence.
     case withMosaic
-    /// Create only the animated GIF, skipping mosaic generation.
+    /// Create only the animated image sequence, skipping static mosaic generation.
     case gifOnly
-    
-    
 }
 
-/// Output size preset for the animated GIF frames.
+/// An enumeration representing the size presets for animated image frames.
 public enum GifSize: String, Codable, Sendable {
-    /// Same dimensions as the source video (no downscaling).
+    /// Preserves the original source video dimensions without downscaling.
     case nochange
-    /// Scale frames down so height ≤ 720 px (720p).
+    /// Scales frames down to a maximum height of 720 pixels (720p).
     case large
-    /// Scale frames down so height ≤ 540 px (540p).
+    /// Scales frames down to a maximum height of 540 pixels (540p).
     case small
     
+    /// The string identifier for the size preset.
     public var name: String {
         switch self {
         case .nochange: return "nochange"
         case .large: return "large"
         case .small: return "small"
-            
         }
     }
 }
 
-/// The output format for mosaic images.
+/// An enumeration representing the output formats for video mosaic images.
 public enum OutputFormat: String, Codable, Sendable {
-    /// JPEG format.
+    /// Joint Photographic Experts Group format (.jpg).
     case jpeg
-    /// PNG format.
+    /// Portable Network Graphics format (.png).
     case png
-    /// HEIF format (High Efficiency Image Format).
+    /// High Efficiency Image Format (.heic).
     case heif
 
-    /// File extension for the format
+    /// The file extension associated with the output format.
     public var fileExtension: String {
         switch self {
         case .jpeg: return "jpg"

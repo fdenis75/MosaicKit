@@ -1,6 +1,6 @@
 import Foundation
 
-/// Errors related to video processing and metadata extraction.
+/// An enumeration representing errors related to video processing and metadata extraction.
 // @available(macOS 26, iOS 26, *)
 public enum VideoError: Error, LocalizedError, Equatable {
     /// The video track could not be found in the asset.
@@ -27,6 +27,7 @@ public enum VideoError: Error, LocalizedError, Equatable {
     /// The video frame extraction failed.
     case frameExtractionFailed(URL, Error)
     
+    /// The video processing operation was cancelled.
     case cancelled
     
     /// Provides a user-friendly description for the error.

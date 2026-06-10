@@ -1,21 +1,21 @@
 import Foundation
 
-/// Density configuration for frame extraction in mosaic generation.
+/// A density configuration for frame extraction in video mosaic generation.
 ///
 /// Density determines how many frames are extracted from the video:
 /// - Lower factor = fewer frames (e.g., XXL = 0.25)
 /// - Higher factor = more frames (e.g., XXS = 4.0)
 public struct DensityConfig: Equatable, Hashable, Codable, Sendable {
-    /// The display name of the density level
+    /// The display name of the density level.
     public let name: String
 
-    /// The factor used to calculate thumbnail count
+    /// The factor used to calculate the thumbnail count.
     public let factor: Double
 
-    /// Multiplier for frame extraction (affects how many frames are extracted vs shown)
+    /// A multiplier for frame extraction, affecting how many frames are extracted versus shown.
     public let extractsMultiplier: Double
 
-    /// Human-readable description of the thumbnail count
+    /// A human-readable description of the thumbnail count.
     public let thumbnailCountDescription: String
 
     // MARK: - Codable
@@ -50,30 +50,30 @@ public struct DensityConfig: Equatable, Hashable, Codable, Sendable {
 
     // MARK: - Predefined Densities
 
-    /// Minimal density - fewest frames
+    /// A minimal density configuration that extracts the fewest frames.
     public static let xxl = DensityConfig(name: "XXL", factor: 0.25, extractsMultiplier: 0.125, thumbnailCountDescription: "minimal")
 
-    /// Low density
+    /// A low density configuration.
     public static let xl = DensityConfig(name: "XL", factor: 0.5, extractsMultiplier: 0.25, thumbnailCountDescription: "low")
 
-    /// Medium density
+    /// A medium density configuration.
     public static let l = DensityConfig(name: "L", factor: 0.75, extractsMultiplier: 0.5, thumbnailCountDescription: "medium")
 
-    /// High density (default)
+    /// A high density configuration, which is the default setting.
     public static let m = DensityConfig(name: "M", factor: 1.0, extractsMultiplier: 1.0, thumbnailCountDescription: "high")
 
-    /// Very high density
+    /// A very high density configuration.
     public static let s = DensityConfig(name: "S", factor: 2.0, extractsMultiplier: 2.0, thumbnailCountDescription: "very high")
 
-    /// Super high density
+    /// A super high density configuration.
     public static let xs = DensityConfig(name: "XS", factor: 3.0, extractsMultiplier: 4.0, thumbnailCountDescription: "super high")
 
-    /// Maximal density - most frames
+    /// A maximal density configuration that extracts the most frames.
     public static let xxs = DensityConfig(name: "XXS", factor: 4.0, extractsMultiplier: 8.0, thumbnailCountDescription: "maximal")
 
-    /// All available density configurations
+    /// An array of all available density configurations.
     public static let allCases = [xxl, xl, l, m, s, xs, xxs]
 
-    /// Default density configuration (high)
+    /// The default density configuration.
     public static let `default` = m
 }

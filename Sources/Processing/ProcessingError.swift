@@ -2,26 +2,31 @@ import Foundation
 import AVFoundation
 import CoreGraphics
 
-/// Errors that can occur during mosaic generation.
+/// An enumeration representing errors that can occur during video mosaic generation.
 public enum MosaicError: LocalizedError {
-    /// Failed to create the mosaic layout.
+    /// The layout creation failed.
     case layoutCreationFailed(Error)
-    /// Failed to generate the mosaic image.
+    /// The mosaic image rendering failed.
     case imageGenerationFailed(Error)
-    /// Failed to save the mosaic image.
+    /// Saving the generated mosaic file failed.
     case saveFailed(URL, Error)
-    /// The mosaic dimensions are invalid.
+    /// The mosaic target dimensions are invalid.
     case invalidDimensions(CGSize)
-    /// The mosaic configuration is invalid.
+    /// The configuration parameters are invalid.
     case invalidConfiguration(String)
     /// A general error occurred during mosaic generation.
     case generationFailed(Error)
-    /// The file already exists at the specified location.
+    /// A file already exists at the output destination URL.
     case fileExists(URL)
+    /// Creating the Core Graphics or Core Image context failed.
     case contextCreationFailed
+    /// Creating the final image destination failed.
     case imageCreationFailed
+    /// The video file is invalid or cannot be read.
     case invalidVideo(String)
+    /// Metal hardware acceleration is not supported on this device.
     case metalNotSupported
+    /// Core image processing operation failed.
     case processingFailed(String)
 
     public var errorDescription: String? {

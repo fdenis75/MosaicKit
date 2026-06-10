@@ -1,7 +1,7 @@
 import Foundation
 import CoreGraphics
 
-/// A model representing the layout of a mosaic.
+/// A structure representing the layout details of a generated video mosaic.
 public struct MosaicLayout: Codable, Sendable {
     /// The number of rows in the mosaic.
     public let rows: Int
@@ -9,30 +9,31 @@ public struct MosaicLayout: Codable, Sendable {
     /// The number of columns in the mosaic.
     public let cols: Int
 
-    /// The size of each thumbnail.
+    /// The base size of each thumbnail in the layout.
     public let thumbnailSize: CGSize
 
-    /// The positions of each thumbnail in the mosaic.
+    /// The positions of each thumbnail within the mosaic grid.
     public let positions: [Position]
 
-    /// The total number of thumbnails.
+    /// The total number of thumbnails in the layout.
     public let thumbCount: Int
 
-    /// The sizes of each thumbnail (may vary for custom layouts).
+    /// The individual sizes of each thumbnail, which can vary in dynamic layouts.
     public let thumbnailSizes: [CGSize]
 
-    /// The total size of the mosaic.
+    /// The total width and height of the completed mosaic.
     public let mosaicSize: CGSize
 
-    /// Creates a new MosaicLayout instance.
+    /// Creates a new mosaic layout configuration with the specified properties.
+    ///
     /// - Parameters:
-    ///   - rows: The number of rows.
-    ///   - cols: The number of columns.
-    ///   - thumbnailSize: The size of each thumbnail.
-    ///   - positions: The positions of each thumbnail.
+    ///   - rows: The total number of rows.
+    ///   - cols: The total number of columns.
+    ///   - thumbnailSize: The base size of each thumbnail.
+    ///   - positions: A collection of grid coordinates for each thumbnail.
     ///   - thumbCount: The total number of thumbnails.
-    ///   - thumbnailSizes: The sizes of each thumbnail.
-    ///   - mosaicSize: The total size of the mosaic.
+    ///   - thumbnailSizes: An array specifying the dimensions of each thumbnail.
+    ///   - mosaicSize: The total dimensions of the generated mosaic.
     public init(
         rows: Int,
         cols: Int,
@@ -51,6 +52,9 @@ public struct MosaicLayout: Codable, Sendable {
         self.mosaicSize = mosaicSize
     }
 
+    /// Creates a single-thumbnail mosaic layout with the specified size.
+    ///
+    /// - Parameter thumbnailSize: The size of the single thumbnail.
     public init(thumbnailSize: CGSize) {
         self.rows = 1
         self.cols = 1
@@ -64,10 +68,19 @@ public struct MosaicLayout: Codable, Sendable {
 
 // MARK: - Position Type
 
+/// A structure representing a coordinate position in the mosaic layout grid.
 public struct Position: Codable, Sendable {
+    /// The column index (horizontal coordinate).
     public let x: Int
+
+    /// The row index (vertical coordinate).
     public let y: Int
 
+    /// Creates a new grid position with the specified coordinates.
+    ///
+    /// - Parameters:
+    ///   - x: The column index.
+    ///   - y: The row index.
     public init(x: Int, y: Int) {
         self.x = x
         self.y = y

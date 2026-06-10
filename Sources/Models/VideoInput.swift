@@ -2,7 +2,7 @@ import Foundation
 import AVFoundation
 import CoreGraphics
 
-/// Metadata about a video file for mosaic generation
+/// A structure containing metadata about a video file used for mosaic generation.
 public struct VideoMetadata: Codable, Hashable, Sendable {
     public var codec: String?
     public var bitrate: Int64?
@@ -15,49 +15,49 @@ public struct VideoMetadata: Codable, Hashable, Sendable {
     }
 }
 
-/// A simplified video input model for mosaic generation
+/// A model representing a video input file and its extracted metadata.
 public struct VideoInput: Codable, Hashable, Sendable {
     // MARK: - Properties
 
-    /// Unique identifier
+    /// A unique identifier for the video input.
     public let id: UUID
 
-    /// URL to the video file
+    /// The file URL to the source video file.
     public let url: URL
 
-    /// Optional title (defaults to filename)
+    /// An optional title for the video, defaulting to the filename.
     public let title: String
 
-    /// Video duration in seconds
+    /// The duration of the video in seconds, if available.
     public let duration: TimeInterval?
 
-    /// Video width in pixels
+    /// The width of the video in pixels, if available.
     public let width: Double?
 
-    /// Video height in pixels
+    /// The height of the video in pixels, if available.
     public let height: Double?
 
-    /// Video frame rate
+    /// The frame rate of the video, if available.
     public let frameRate: Double?
 
-    /// File size in bytes
+    /// The file size of the video in bytes, if available.
     public let fileSize: Int64?
 
-    /// Video metadata (codec, bitrate, etc.)
+    /// Additional metadata details like codec and bitrate.
     public let metadata: VideoMetadata
 
-    /// Post ID for file naming
+    /// An optional post ID associated with the video, used in naming outputs.
     public let postID: String?
 
     // MARK: - Computed Properties
 
-    /// Video resolution as CGSize
+    /// The resolution of the video as a `CGSize`, if available.
     public var resolution: CGSize? {
         guard let width = width, let height = height else { return nil }
         return CGSize(width: width, height: height)
     }
 
-    /// Aspect ratio (width / height)
+    /// The aspect ratio of the video (width divided by height), if available.
     public var aspectRatio: Double? {
         guard let width = width, let height = height, height > 0 else { return nil }
         return width / height
@@ -65,7 +65,19 @@ public struct VideoInput: Codable, Hashable, Sendable {
 
     // MARK: - Initialization
 
-    /// Initialize with explicit values; auto-extracts metadata from the video file.
+    /// Initializes a new video input with explicit values and automatically extracts metadata from the file.
+    ///
+    /// - Parameters:
+    ///   - id: A unique identifier.
+    ///   - url: The file URL of the video.
+    ///   - title: An optional custom title.
+    ///   - duration: The duration in seconds.
+    ///   - width: The width in pixels.
+    ///   - height: The height in pixels.
+    ///   - frameRate: The frame rate.
+    ///   - fileSize: The file size in bytes.
+    ///   - metadata: Additional video metadata.
+    ///   - postID: An optional post ID.
     public init(
         id: UUID = UUID(),
         url: URL,
@@ -105,11 +117,12 @@ public struct VideoInput: Codable, Hashable, Sendable {
         }
     }
 
-    /// Initialize from URL, acquiring security-scoped access before extracting metadata.
+    /// Initializes a new video input from a URL, acquiring security-scoped access before extracting metadata.
+    ///
     /// - Parameters:
-    ///   - url: URL to the video file
-    ///   - postID: Optional post ID for file naming
-    /// - Throws: `MosaicError.invalidVideo` if the security-scoped resource cannot be accessed.
+    ///   - url: The file URL of the video.
+    ///   - postID: An optional post ID.
+    /// - Throws: A `MosaicError.invalidVideo` if the security-scoped resource cannot be accessed.
     public init(from url: URL, postID: String? = nil) async throws {
         guard url.startAccessingSecurityScopedResource() else {
             throw MosaicError.invalidVideo("Failed to access security-scoped resource")

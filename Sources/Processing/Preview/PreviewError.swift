@@ -1,21 +1,35 @@
 import Foundation
 
-/// Errors that can occur during preview video generation
+/// An enumeration representing errors that can occur during preview video generation.
 // @available(macOS 26, iOS 26, *)
 public enum PreviewError: LocalizedError, Sendable {
+    /// The preview configuration parameters are invalid.
     case invalidConfiguration(String)
+    /// Loading the video asset failed.
     case videoLoadFailed(URL, Error)
+    /// Extracting video clips or frames failed.
     case extractionFailed(String, Error?)
+    /// Composing the video segments failed.
     case compositionFailed(String, Error?)
+    /// Encoding the composed preview video failed.
     case encodingFailed(String, Error?)
+    /// Saving the generated preview file failed.
     case saveFailed(URL, Error)
+    /// Processing the audio track failed.
     case audioProcessingFailed(Error)
+    /// The preview generation was cancelled.
     case cancelled
+    /// The source video's duration is too short to generate a preview.
     case insufficientVideoDuration(required: TimeInterval, actual: TimeInterval)
+    /// The video asset has no video tracks.
     case noVideoTracks
+    /// Creating the target output directory failed.
     case outputDirectoryCreationFailed(URL, Error)
+    /// The export operation stalled without forward progress.
     case exportStalled(elapsedSeconds: Int)
+    /// The FFmpeg binary could not be found.
     case ffmpegNotFound(path: String)
+    /// The FFmpeg encoding process failed.
     case ffmpegEncodingFailed(exitCode: Int32, output: String)
 
     public var errorDescription: String? {
