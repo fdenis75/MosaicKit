@@ -17,6 +17,15 @@ A high-performance Swift package for generating video mosaics with Metal-acceler
 - 📊 **Overlay Annotations** - Per-frame labels (timestamp, index), customisable metadata headers, watermarks, and Color DNA strips
 - 🎬 **Video Preview Generation** - Create short highlight reels from any video, either exported to file or as a live `AVPlayerItem` composition
 
+## New in 1.4.2
+
+- **`PreviewConfiguration.exportDescription`** — new mode-agnostic `PreviewExportDescription` describing the encoding settings that `.native`, `.sjs`, and `.ffmpeg` export modes will actually produce (codec, profile, level, resolution, audio), so UI code can present "what will this export produce?" without branching on `exportMode`.
+- **`PreviewConfiguration.showTimestampOverlay`** (default `false`) — burns in a small timestamp pill over each extract showing its source timecode. Honoured by `.native` and `.sjs` (both apply the generated `AVVideoComposition`); has no effect when `exportMode == .ffmpeg`.
+- **FFmpeg filenames now include encoding details** — `generateFilename` for `.ffmpeg` exports now encodes codec, CRF/bitrate, and speed preset (e.g. `hevc_crf18_slow_ffmpeg`) instead of just the raw codec name.
+- **Breaking: removed `FFmpegEncodingOptions.VideoCodec.av1`** — the `libaom-av1` option was unused/unsupported; encode with `.hevc`, `.h264`, or the VideoToolbox hardware variants instead.
+- **Native export resize fix** — no resize occurs beyond what a preset itself forces when the target resolution already matches the preset's output resolution.
+- **Unified resolution caps** — `FFmpegEncodingOptions.maxResolution` now uses the shared `ExportMaxResolution` type (previously a separate `MaxResolution` enum).
+
 ## New in 1.4.0
 
 - **`gifFps`** — `MosaicConfiguration` now has a `gifFps: Double` property (default `10`) that controls the target frame rate for animated GIF/WebP/HEICS export. It's converted to the `frameDelay` passed to `AnimatedGifGenerator.save(...)` (`frameDelay = 1 / gifFps`).

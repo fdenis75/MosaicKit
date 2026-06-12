@@ -114,7 +114,7 @@ struct PreviewCoordinatorTests {
                 videoCodec: .hevcVideoToolbox,
                 crf: nil,
                 speedPreset: .ultrafast,
-                maxResolution: .sd,
+                maxResolution: ._720p,
                 audioCodec: .aac,
                 audioBitrate: "64k"
             )

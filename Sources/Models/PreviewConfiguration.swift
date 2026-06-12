@@ -125,6 +125,16 @@ public struct PreviewConfiguration: Codable, Sendable, Hashable {
     /// the app to foreground between attempts.
     public var enableExportRetry: Bool = true
 
+    /// Whether to burn in a small timestamp pill over each extract showing its source
+    /// timecode (e.g. `"12:34"`).
+    ///
+    /// Default is `false`. Implemented via `AVVideoCompositionCoreAnimationTool`, which is
+    /// only honoured by ``PreviewExportMode/native`` and ``PreviewExportMode/sjs`` — both
+    /// apply the generated `AVVideoComposition` during export. ``PreviewExportMode/ffmpeg``
+    /// uses a passthrough export that does not apply the video composition, so this setting
+    /// has no effect when `exportMode == .ffmpeg`.
+    public var showTimestampOverlay: Bool = false
+
     /// Optional token-based template controlling the output directory layout.
     ///
     /// When `nil` (default), the legacy `{root}` layout is used.
@@ -182,6 +192,7 @@ public struct PreviewConfiguration: Codable, Sendable, Hashable {
         case overwrite, outputDirectoryTemplate, filenameTemplate
         case ffmpegBinaryPath, ffmpegTempFolder, ffmpegEncodingOptions
         case enableAppLifecycleMonitor, enableExportRetry
+        case showTimestampOverlay
     }
 
     // MARK: - Initialization
@@ -322,6 +333,19 @@ public struct PreviewConfiguration: Codable, Sendable, Hashable {
         exportPresetName?.rawValue ?? format.exportPreset(quality: compressionQuality)
     }
 
+    /// A mode-agnostic description of the encoding settings this configuration will produce.
+    ///
+    /// Normalises the settings of ``exportMode`` (`.native`, `.sjs`, `.ffmpeg`) into a single
+    /// shared shape — codec, profile/level, resolution, audio — so UI code can present "what
+    /// will this export actually produce?" without branching on `exportMode`.
+    public var exportDescription: PreviewExportDescription {
+        switch exportMode {
+        case .native: return .native(config: self)
+        case .sjs:     return .sjs(config: self)
+        case .ffmpeg:  return .ffmpeg(config: self)
+        }
+    }
+
     // MARK: - Codable
 
     public init(from decoder: Decoder) throws {
@@ -356,6 +380,7 @@ public struct PreviewConfiguration: Codable, Sendable, Hashable {
         ffmpegEncodingOptions = try container.decodeIfPresent(FFmpegEncodingOptions.self, forKey: .ffmpegEncodingOptions)
         enableAppLifecycleMonitor = try container.decodeIfPresent(Bool.self, forKey: .enableAppLifecycleMonitor) ?? true
         enableExportRetry = try container.decodeIfPresent(Bool.self, forKey: .enableExportRetry) ?? true
+        showTimestampOverlay = try container.decodeIfPresent(Bool.self, forKey: .showTimestampOverlay) ?? false
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -381,6 +406,7 @@ public struct PreviewConfiguration: Codable, Sendable, Hashable {
         try container.encodeIfPresent(ffmpegEncodingOptions, forKey: .ffmpegEncodingOptions)
         try container.encode(enableAppLifecycleMonitor, forKey: .enableAppLifecycleMonitor)
         try container.encode(enableExportRetry, forKey: .enableExportRetry)
+        try container.encode(showTimestampOverlay, forKey: .showTimestampOverlay)
     }
 
     // MARK: - Extract Calculation
@@ -507,22 +533,34 @@ public struct PreviewConfiguration: Codable, Sendable, Hashable {
             let codec = sJSExportPresetName?.displayString ?? "default"
             exportLabel = "\(codec)_sjs"
         case .ffmpeg:
-            let codec = ffmpegEncodingOptions?.videoCodec.rawValue
-                ?? FFmpegEncodingOptions.from(quality: compressionQuality, format: format).videoCodec.rawValue
-            exportLabel = "\(codec)_ffmpeg"
+            let options = ffmpegEncodingOptions ?? FFmpegEncodingOptions.from(quality: compressionQuality, format: format)
+            var ffmpegParts = [options.videoCodec.tag]
+            if let crf = options.crf {
+                ffmpegParts.append("crf\(crf)")
+            } else if let videoBitrate = options.videoBitrate {
+                ffmpegParts.append("br\(videoBitrate)")
+            }
+            ffmpegParts.append(options.speedPreset.rawValue)
+            exportLabel = "\(ffmpegParts.joined(separator: "_"))_ffmpeg"
         }
         let timingLabel = extractTimingFilenameComponent.map { "_\($0)" } ?? ""
         let configHash = "\(durationLabel)_\(density.name)_\(format.rawValue)_\(audioLabel)_\(exportLabel)_\(resolution)\(timingLabel)"
-
+        let runTimestamp: String = {
+            let f = DateFormatter()
+            f.locale = Locale(identifier: "en_US_POSIX")
+            f.dateFormat = "yyyy-MM-dd_HH-mm-ss"
+            return f.string(from: Date())
+        }()
         if fullPathInName {
             // Use full path in filename
             let sanitizedPath = videoInput.url.deletingLastPathComponent().path.replacingNonAlphanumerics(with: "_")
             return "\(sanitizedPath)_\(originalFilename)_preview_\(configHash).\(format.fileExtension)"
         } else {
-            return "_preview_\(originalFilename)_\(configHash).\(format.fileExtension)"
+            return "_preview_\(originalFilename)_\(configHash)_\(runTimestamp)_.\(format.fileExtension)"
         }
+      
     }
-
+    
     // MARK: - Template Resolution
 
     /// Resolve `outputDirectoryTemplate` against the available token set.

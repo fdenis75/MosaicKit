@@ -56,6 +56,56 @@ struct PreviewConfigurationTests {
         #expect(PreviewConfiguration(density: .xxs).baseExtractCount == 48)
     }
 
+    @Test("PreviewConfiguration exportDescription is mode-agnostic across native/sjs/ffmpeg")
+    func exportDescriptionAcrossModes() {
+        // Native: preset's own resolution is authoritative.
+        var native = PreviewConfiguration(exportMode: .native, exportPresetName: .AVAssetExportPresetHEVC1920x1080)
+        var description = native.exportDescription
+        #expect(description.exportMode == .native)
+        #expect(description.videoCodec == .hevc)
+        #expect(description.videoProfile == "Main")
+        #expect(description.videoLevel == "4.0")
+        #expect(description.maxResolution == CGSize(width: 1920, height: 1080))
+
+        // Native passthrough: no codec; falls back to the configured `exportMaxResolution` cap
+        // (default 1080p) since the preset itself preserves source resolution.
+        native = PreviewConfiguration(exportMode: .native, exportPresetName: .AVAssetExportPresetPassthrough)
+        description = native.exportDescription
+        #expect(description.videoCodec == nil)
+        #expect(description.maxResolution == CGSize(width: 1920, height: 1080))
+
+        // SJS: codec/profile/level derived from the SJS preset's H264Profile.
+        let sjs = PreviewConfiguration(exportMode: .sjs, sjSExportPresetName: .h264_HighAutoLevel)
+        description = sjs.exportDescription
+        #expect(description.exportMode == .sjs)
+        #expect(description.videoCodec == .h264)
+        #expect(description.videoProfile == "High")
+        #expect(description.videoLevel == "Auto")
+
+        // FFmpeg: derived from FFmpegEncodingOptions, including resolution cap.
+        let ffmpeg = PreviewConfiguration(
+            exportMode: .ffmpeg,
+            ffmpegEncodingOptions: FFmpegEncodingOptions(videoCodec: .hevc, crf: 20, maxResolution: ._1080p)
+        )
+        description = ffmpeg.exportDescription
+        #expect(description.exportMode == .ffmpeg)
+        #expect(description.videoCodec == .hevc)
+        #expect(description.maxResolution == CGSize(width: 1920, height: 1080))
+        #expect(description.additionalDetail?.contains("CRF 20") == true)
+    }
+
+    @Test("PreviewConfiguration showTimestampOverlay defaults to false and round-trips")
+    func showTimestampOverlayDefaultsAndRoundTrips() throws {
+        let config = PreviewConfiguration()
+        #expect(config.showTimestampOverlay == false)
+
+        var enabled = config
+        enabled.showTimestampOverlay = true
+        let data = try JSONEncoder().encode(enabled)
+        let decoded = try JSONDecoder().decode(PreviewConfiguration.self, from: data)
+        #expect(decoded.showTimestampOverlay == true)
+    }
+
     @Test("PreviewConfiguration combinations are codable and produce valid filenames")
     func codableAndFilenameCombinations() async throws {
         let encoder = JSONEncoder()

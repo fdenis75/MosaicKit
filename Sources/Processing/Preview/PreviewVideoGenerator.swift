@@ -403,6 +403,7 @@ struct PreviewGenerationLogic {
             includeAudio: config.includeAudio,
             maxResolutionRaw: config.exportMaxResolutionRaw,
             customTargetSize: customTargetSize,
+            includeOverlayCues: config.showTimestampOverlay,
             video: video,
             progressHandler: progressHandler,
             cancellationCheck: cancellationCheck
@@ -852,17 +853,23 @@ struct PreviewGenerationLogic {
         var targetMaxHeight = sourceHeight
         var needsScaling = false
 
-        if #available(macOS 26, iOS 26, *),
-           let rawRes = maxResolutionRaw,
-           let maxRes = ExportMaxResolution(rawValue: rawRes) {
+        if let customSize = customTargetSize {
+            // The export preset already defines its own output resolution (e.g. an
+            // AVAssetExportSession preset like "HEVC1920x1080"). That resolution is
+            // authoritative: it's the resize "forced by the preset", and the exporter
+            // will apply it regardless. Intersecting it with `exportMaxResolution` here
+            // would either be a no-op (when the two agree) or fight the preset (when
+            // they don't) — in both cases producing a redundant second resize pass.
+            targetMaxWidth = customSize.width
+            targetMaxHeight = customSize.height
+            needsScaling = true
+        } else if #available(macOS 26, iOS 26, *),
+                  let rawRes = maxResolutionRaw,
+                  let maxRes = ExportMaxResolution(rawValue: rawRes) {
+            // No preset-forced resolution (e.g. "same as source" presets) — fall back
+            // to the configured `exportMaxResolution` cap.
             targetMaxWidth = CGFloat(maxRes.maxWidth)
             targetMaxHeight = CGFloat(maxRes.maxHeight)
-            needsScaling = true
-        }
-
-        if let customSize = customTargetSize {
-            targetMaxWidth = min(targetMaxWidth, customSize.width)
-            targetMaxHeight = min(targetMaxHeight, customSize.height)
             needsScaling = true
         }
 
@@ -1451,16 +1458,7 @@ struct PreviewGenerationLogic {
         }
     
     private static func resolutionLimit(for presetName: String) -> CGSize? {
-        if presetName.contains("3840x2160") {
-            return CGSize(width: 3840, height: 2160)
-        } else if presetName.contains("1920x1080") {
-            return CGSize(width: 1920, height: 1080)
-        } else if presetName.contains("960x540") {
-            return CGSize(width: 960, height: 540)
-        } else if presetName.contains("1280x720") {
-            return CGSize(width: 1280, height: 720)
-        }
-        return nil
+        nativeExportPreset.maxResolution(forPresetName: presetName)
     }
     
 
@@ -1503,8 +1501,7 @@ struct PreviewGenerationLogic {
         if FileManager.default.fileExists(atPath: outputURL.path) {
             try? FileManager.default.removeItem(at: outputURL)
         }
-
-        // Use the effective preset (explicit or derived from quality)
+       // Use the effective preset (explicit or derived from quality)
         let preset = config.effectiveExportPreset
         logger.info("Native export: preset=\(preset), format=\(config.format.rawValue), quality=\(config.compressionQuality)")
 
@@ -1514,7 +1511,7 @@ struct PreviewGenerationLogic {
         ) else {
             throw PreviewError.encodingFailed("Failed to create export session with preset '\(preset)'", nil)
         }
-
+        
         exportSession.outputURL = outputURL
         exportSession.outputFileType = config.format.avFileType
         

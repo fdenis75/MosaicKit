@@ -1,5 +1,4 @@
 import Foundation
-import CoreGraphics
 
 /// Encoding options forwarded to the FFmpeg process when `PreviewExportMode.ffmpeg` is active.
 ///
@@ -11,10 +10,9 @@ public struct FFmpegEncodingOptions: Codable, Sendable, Hashable {
     // MARK: - Nested types
 
     /// Video codec passed to ffmpeg via `-c:v`.
-    public enum VideoCodec: String, Codable, Sendable {
+    public enum VideoCodec: String, Codable, Sendable, CaseIterable {
         case h264             = "libx264"
         case hevc             = "libx265"
-        case av1              = "libaom-av1"
         case copy             = "copy"
         /// Apple VideoToolbox hardware HEVC encoder.
         /// Fastest option on Apple Silicon / Intel Macs; ignores `-preset` and `-crf`.
@@ -28,7 +26,6 @@ public struct FFmpegEncodingOptions: Codable, Sendable, Hashable {
             switch self {
             case .h264:             return "H.264 (libx264)"
             case .hevc:             return "HEVC (libx265)"
-            case .av1:              return "AV1"
             case .copy:             return "Copy (passthrough)"
             case .hevcVideoToolbox: return "HEVC (VideoToolbox)"
             case .h264VideoToolbox: return "H.264 (VideoToolbox)"
@@ -40,7 +37,6 @@ public struct FFmpegEncodingOptions: Codable, Sendable, Hashable {
             switch self {
             case .h264:             return "h264"
             case .hevc:             return "hevc"
-            case .av1:              return "av1"
             case .copy:             return "copy"
             case .hevcVideoToolbox: return "hevc_vt"
             case .h264VideoToolbox: return "h264_vt"
@@ -54,7 +50,7 @@ public struct FFmpegEncodingOptions: Codable, Sendable, Hashable {
     }
 
     /// Audio codec passed to ffmpeg via `-c:a`.
-    public enum AudioCodec: String, Codable, Sendable {
+    public enum AudioCodec: String, Codable, Sendable, CaseIterable {
         case aac
         case mp3  = "libmp3lame"
         case opus = "libopus"
@@ -72,7 +68,7 @@ public struct FFmpegEncodingOptions: Codable, Sendable, Hashable {
 
     /// Encoder speed/quality trade-off selector.
     ///
-    /// - For **software codecs** (`h264`, `hevc`, `av1`): passed verbatim as `-preset`.
+    /// - For **software codecs** (`h264`, `hevc`): passed verbatim as `-preset`.
     /// - For **VideoToolbox codecs** (`hevcVideoToolbox`, `h264VideoToolbox`): translated
     ///   to `-realtime 1/0` (real-time encoding hint) plus a `-q:v` quality level
     ///   (VideoToolbox scale 1–100; higher = better quality / larger file).
@@ -90,7 +86,7 @@ public struct FFmpegEncodingOptions: Codable, Sendable, Hashable {
     /// | medium     | 0         | 72   | Balanced                    |
     /// | slow       | 0         | 80   | Higher quality              |
     /// | veryslow   | 0         | 90   | Best quality                |
-    public enum SpeedPreset: String, Codable, Sendable {
+    public enum SpeedPreset: String, Codable, Sendable, CaseIterable {
         case ultrafast, superfast, veryfast, faster, fast, medium, slow, veryslow
 
         // MARK: VideoToolbox translation
@@ -123,40 +119,11 @@ public struct FFmpegEncodingOptions: Codable, Sendable, Hashable {
 
     /// Maximum output resolution. The ffmpeg `scale` filter is applied only when
     /// the source is larger than the specified size (never upscales).
-    public enum MaxResolution: String, Codable, Sendable {
-        case _4K   = "3840:2160"
-        case _1080p = "1920:1080"
-        case _720p  = "1280:720"
-        case sd     = "640:480"
-
-        /// `scale` filter argument string that downscales to fit within this resolution while
-        /// preserving aspect ratio. Never upscales; has no effect when the source is already smaller.
-        /// Suitable for direct use as the value of the ffmpeg `-vf` option (no shell quoting needed
-        /// since arguments are passed as an array, not via a shell).
-        public var scaleFilter: String {
-            "scale='min(\(width),iw)':'min(ih,\(height))'"
-        }
-
-        public var width: Int {
-            switch self {
-            case ._4K:    return 3840
-            case ._1080p: return 1920
-            case ._720p:  return 1280
-            case .sd:     return 640
-            }
-        }
-
-        public var height: Int {
-            switch self {
-            case ._4K:    return 2160
-            case ._1080p: return 1080
-            case ._720p:  return 720
-            case .sd:     return 480
-            }
-        }
-
-        public var cgSize: CGSize { CGSize(width: width, height: height) }
-    }
+    ///
+    /// Unified with ``ExportMaxResolution`` so the native, SJS, and FFmpeg export paths
+    /// all share the same resolution cap type.
+    @available(*, deprecated, renamed: "ExportMaxResolution")
+    public typealias MaxResolution = ExportMaxResolution
 
     // MARK: - Properties
 
@@ -174,7 +141,7 @@ public struct FFmpegEncodingOptions: Codable, Sendable, Hashable {
     public var speedPreset: SpeedPreset
 
     /// Maximum output resolution. `nil` preserves source resolution.
-    public var maxResolution: MaxResolution?
+    public var maxResolution: ExportMaxResolution?
 
     /// Audio codec. Default is `.aac`.
     public var audioCodec: AudioCodec
@@ -193,7 +160,7 @@ public struct FFmpegEncodingOptions: Codable, Sendable, Hashable {
         crf: Int? = 22,
         videoBitrate: String? = nil,
         speedPreset: SpeedPreset = .medium,
-        maxResolution: MaxResolution? = ._1080p,
+        maxResolution: ExportMaxResolution? = ._1080p,
         audioCodec: AudioCodec = .aac,
         audioBitrate: String = "128k",
         extraArgs: [String] = []
@@ -302,7 +269,7 @@ public struct FFmpegEncodingOptions: Codable, Sendable, Hashable {
                 args += ["-q:v", "\(speedPreset.videoToolboxQuality)"]
             }
         } else if videoCodec != .copy {
-            // ── Software codec path (libx264 / libx265 / libaom-av1) ────────────
+            // ── Software codec path (libx264 / libx265) ─────────────────────────
             if let crf {
                 args += ["-crf", "\(crf)"]
             } else if let videoBitrate {
@@ -310,12 +277,12 @@ public struct FFmpegEncodingOptions: Codable, Sendable, Hashable {
             }
             args += ["-preset", speedPreset.rawValue]
         }
-
+        args += ["-movflags", "+faststart"]
         if videoCodec == .hevcVideoToolbox || videoCodec == .hevc {
             args += ["-pix_fmt", "p010le"]
             args += ["-tag:v", "hvc1"]
             args += ["-r", "30"]
-            args += ["-movflags", "+faststart"]
+            
         }
         // Resolution filter — applied for all codecs except copy.
         // VideoToolbox needs this too: passthrough mode skips the AVVideoComposition,
