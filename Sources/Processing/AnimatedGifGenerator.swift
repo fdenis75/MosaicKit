@@ -63,6 +63,9 @@ public struct AnimatedGifGenerator: Sendable {
 
         let frameProps = frameProperties(for: format, delay: frameDelay)
         for frame in frames {
+            // Respects cancellation of the surrounding task when called from an
+            // async context; a no-op when there is no task.
+            try Task.checkCancellation()
             CGImageDestinationAddImage(destination, frame, frameProps as CFDictionary)
         }
 
@@ -86,6 +89,7 @@ public struct AnimatedGifGenerator: Sendable {
         try encoder.create(config: config, width: first.width, height: first.height)
         let durationMs = Int(frameDelay * 1000)
         for frame in frames {
+            try Task.checkCancellation()
             try encoder.addImage(image: makePlatformImage(from: frame), duration: durationMs)
         }
         let data = try encoder.encode(loopCount: 0)

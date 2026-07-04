@@ -548,6 +548,21 @@ await generator.cancelAll()
 await coordinator.cancelAllGenerations()
 ```
 
+Cancellation semantics (mosaic and preview coordinators alike):
+
+- `cancelGeneration(for:)` cancels a single video. During a batch, that video
+  completes as a `.failure` result (reported to progress handlers with the
+  `.cancelled` status) and the rest of the batch continues.
+- `cancelAllGenerations()` cancels every in-flight generation **and stops the
+  batch**: videos still queued are never started, and the awaited batch call
+  (`generateMosaicsforbatch` / `generateMosaicsForFiles` /
+  `generatePreviewsForBatch` / `generatePreviewCompositionsForBatch`) throws
+  `CancellationError`.
+- Cancelling the Swift `Task` that awaits a generator or coordinator call also
+  stops the underlying work — frame extraction, Metal composition, export
+  sessions (native, SJS, and ffmpeg) and animated-image encoding all observe
+  cancellation.
+
 ## Video Preview Generation
 
 MosaicKit can generate short highlight-reel previews from any video. A preview stitches together evenly-distributed clips from across the video into a single condensed output.
@@ -667,6 +682,10 @@ if let first = succeeded.first, let playerItem = first.playerItem {
     AVPlayer(playerItem: playerItem).play()
 }
 ```
+
+To stop a running batch, call `cancelAllGenerations()` from another task:
+in-flight exports are cancelled, queued videos never start, and the awaited
+batch call throws `CancellationError`.
 
 ## Layout Algorithm Details
 

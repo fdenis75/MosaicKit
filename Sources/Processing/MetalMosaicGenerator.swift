@@ -35,6 +35,7 @@ public actor MetalMosaicGenerator: MosaicGeneratorProtocol {
     private let signposter = OSSignposter(subsystem: "com.mosaicKit", category: "metal-mosaic-generator")
 
     private var generationTasks: [UUID: Task<URL, Error>] = [:]
+    private var imageGenerationTasks: [UUID: Task<CGImage, Error>] = [:]
     private var frameCache: [UUID: [CMTime: CGImage]] = [:]
     private var progressHandlers: [UUID: @Sendable (MosaicGenerationProgress) -> Void] = [:]
     
@@ -66,6 +67,7 @@ public actor MetalMosaicGenerator: MosaicGeneratorProtocol {
         
         for size in sizes {
             for density in densities {
+                try Task.checkCancellation()
                 let config = MosaicConfiguration(width: size, density: density, format: .heif, layout: .default, includeMetadata: true, useAccurateTimestamps: true, compressionQuality: 0.4)
                 let mosaic = try await generate(for: video, config: config)
                 mosaics.append(mosaic)
@@ -115,7 +117,9 @@ public actor MetalMosaicGenerator: MosaicGeneratorProtocol {
         let task = Task<URL, Error> {
             let startTime = CFAbsoluteTimeGetCurrent()
             defer { trackPerformance(startTime: startTime) }
-            
+
+            try Task.checkCancellation()
+
             do {
                 let videoURL = video.url
 
@@ -354,7 +358,14 @@ public actor MetalMosaicGenerator: MosaicGeneratorProtocol {
             frameCache[videoID] = nil
         }
 
-        return try await task.value
+        // Bridge caller cancellation into the internal task: without this,
+        // cancelling the awaiting task (e.g. a coordinator wrapper) would leave
+        // the generation running to completion in the background.
+        return try await withTaskCancellationHandler {
+            try await task.value
+        } onCancel: {
+            task.cancel()
+        }
     }
 
     /// Generate a mosaic image for a video without saving to disk
@@ -367,11 +378,32 @@ public actor MetalMosaicGenerator: MosaicGeneratorProtocol {
         let videoID = video.id
         layoutProcessor.mosaicAspectRatio = config.layout.aspectRatio.ratio
 
-        let startTime = CFAbsoluteTimeGetCurrent()
+        // Run the generation in a tracked task so cancel(for:) / cancelAll() reach
+        // in-memory image generation the same way they reach file generation.
+        let task = Task<CGImage, Error> {
+            let startTime = CFAbsoluteTimeGetCurrent()
+            defer { trackPerformance(startTime: startTime) }
+            try Task.checkCancellation()
+            return try await performMosaicImageGeneration(for: video, config: config, forIphone: forIphone)
+        }
+
+        imageGenerationTasks[videoID] = task
         defer {
-            trackPerformance(startTime: startTime)
+            imageGenerationTasks[videoID] = nil
             progressHandlers[videoID] = nil
         }
+
+        // Bridge caller cancellation into the tracked task (see generate(for:config:forIphone:)).
+        return try await withTaskCancellationHandler {
+            try await task.value
+        } onCancel: {
+            task.cancel()
+        }
+    }
+
+    /// Body of `generateMosaicImage(for:config:forIphone:)` — runs inside the tracked task.
+    private func performMosaicImageGeneration(for video: VideoInput, config: MosaicConfiguration, forIphone: Bool) async throws -> CGImage {
+        let videoID = video.id
 
         do {
             let videoURL = video.url
@@ -532,15 +564,18 @@ public actor MetalMosaicGenerator: MosaicGeneratorProtocol {
     /// - Parameter video: The video to cancel mosaic generation for
     public func cancel(for video: VideoInput) {
         generationTasks[video.id]?.cancel()
-            generationTasks[video.id] = nil
-            frameCache[video.id] = nil
-        
+        generationTasks[video.id] = nil
+        imageGenerationTasks[video.id]?.cancel()
+        imageGenerationTasks[video.id] = nil
+        frameCache[video.id] = nil
     }
-    
+
     /// Cancel all ongoing mosaic generation operations
     public func cancelAll() {
         generationTasks.values.forEach { $0.cancel() }
         generationTasks.removeAll()
+        imageGenerationTasks.values.forEach { $0.cancel() }
+        imageGenerationTasks.removeAll()
         frameCache.removeAll()
     }
     

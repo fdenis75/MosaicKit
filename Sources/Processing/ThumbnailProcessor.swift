@@ -212,6 +212,7 @@ public final class ThumbnailProcessor: Sendable {
         var currentIndex = 0
 
         for await result in generator.images(for: times) {
+            try Task.checkCancellation()
             let index = currentIndex
             currentIndex += 1
             switch result {
