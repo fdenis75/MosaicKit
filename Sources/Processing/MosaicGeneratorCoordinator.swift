@@ -428,11 +428,12 @@ public actor MosaicGeneratorCoordinator<Generator: MosaicGeneratorProtocol> {
                         // Create VideoInput here to avoid blocking the main loop
                         let video = await VideoInput(url: fileURL)
                         self.logger.debug("starting generation for \(fileURL.lastPathComponent)")
-                        let result = try await self.generateMosaic(
+                        let result = try await self.generateMosaicForBatch(
                             for: video,
                             config: config,
                             forIphone: forIphone,
-                            progressHandler: progressHandler
+                            progressHandler: progressHandler,
+                            epoch: epoch
                         )
                         self.signposter.endInterval("processing video", videoProcessState,
                                                      "URL: \(fileURL.lastPathComponent)")
@@ -552,6 +553,28 @@ public actor MosaicGeneratorCoordinator<Generator: MosaicGeneratorProtocol> {
     /// captured `epoch` started.
     private func batchWasCancelled(_ epoch: Int) -> Bool {
         batchEpoch != epoch
+    }
+
+    /// Batch entry point for `generateMosaic` that refuses to start work for a
+    /// cancelled batch. The epoch guard and the task registration inside
+    /// `generateMosaic` run in one actor-isolated window with no intervening
+    /// suspension (same-actor call, no awaits before registration), so a
+    /// concurrent `cancelAllGenerations()` either bumps the epoch first (guard
+    /// throws, nothing starts) or finds the task registered and cancels it.
+    private func generateMosaicForBatch(
+        for video: VideoInput,
+        config: MosaicConfiguration,
+        forIphone: Bool,
+        progressHandler: @escaping @Sendable (MosaicGenerationProgress) -> Void,
+        epoch: Int
+    ) async throws -> MosaicGenerationResult {
+        guard batchEpoch == epoch else { throw CancellationError() }
+        return try await generateMosaic(
+            for: video,
+            config: config,
+            forIphone: forIphone,
+            progressHandler: progressHandler
+        )
     }
 
     /// Whether `error` represents cancellation (task-level or generator-level).
@@ -693,11 +716,12 @@ public actor MosaicGeneratorCoordinator<Generator: MosaicGeneratorProtocol> {
                     do {
 
                         self.logger.debug("starting generation")
-                        let result = try await self.generateMosaic(
+                        let result = try await self.generateMosaicForBatch(
                             for: video,
                             config: config,
                             forIphone: forIphone,
-                            progressHandler: videoProgressHandler
+                            progressHandler: videoProgressHandler,
+                            epoch: epoch
                         )
                         self.logger.debug("finished generation")
                         self.signposter.endInterval("processing video", videoProcessstate,"Video: \(video.title)")

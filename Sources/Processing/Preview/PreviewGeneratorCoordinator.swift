@@ -179,7 +179,7 @@ public actor PreviewGeneratorCoordinator {
                         if let handler = progressHandler {
                             await self.previewGenerator.setProgressHandler(for: video, handler: handler)
                         }
-                        let playerItem = try await self.runTrackedCompositionGeneration(for: video, config: config)
+                        let playerItem = try await self.runTrackedCompositionGeneration(for: video, config: config, batchEpoch: epoch)
                         return PreviewCompositionResult.success(video: video, playerItem: playerItem)
                     } catch {
                         // A batch-wide cancel tears the whole group down; a single-video
@@ -272,7 +272,7 @@ public actor PreviewGeneratorCoordinator {
                         if let handler = progressHandler {
                             await self.previewGenerator.setProgressHandler(for: video, handler: handler)
                         }
-                        let outputURL = try await self.runTrackedGeneration(for: video, config: config)
+                        let outputURL = try await self.runTrackedGeneration(for: video, config: config, batchEpoch: epoch)
                         return PreviewGenerationResult.success(video: video, outputURL: outputURL)
                     } catch {
                         // A batch-wide cancel tears the whole group down; a single-video
@@ -379,10 +379,19 @@ public actor PreviewGeneratorCoordinator {
     /// Runs a single preview generation as a task registered in `activeTasks`, so
     /// `cancelGeneration(for:)` and `cancelAllGenerations()` can reach it, and
     /// bridges cancellation of the caller (e.g. a batch group child) into that task.
+    ///
+    /// When called from a batch, `batchEpoch` carries the epoch captured at batch
+    /// start. The epoch guard and the task registration run in one actor-isolated
+    /// synchronous window, so a `cancelAllGenerations()` call can never slip
+    /// between them: it either bumps the epoch first (guard throws, nothing
+    /// starts) or finds the task already registered and cancels it.
     private func runTrackedGeneration(
         for video: VideoInput,
-        config: PreviewConfiguration
+        config: PreviewConfiguration,
+        batchEpoch epoch: Int? = nil
     ) async throws -> URL {
+        if let epoch, batchEpoch != epoch { throw CancellationError() }
+
         let task = Task<URL, Error> { [previewGenerator, video, config] in
             try await self.executeWithBackgroundRetry(videoTitle: video.title, config: config) {
                 try await previewGenerator.generate(for: video, config: config)
@@ -398,12 +407,15 @@ public actor PreviewGeneratorCoordinator {
         }
     }
 
-    /// Composition counterpart of `runTrackedGeneration(for:config:)`, registered in
-    /// `activeCompositionTasks`.
+    /// Composition counterpart of `runTrackedGeneration(for:config:batchEpoch:)`,
+    /// registered in `activeCompositionTasks`.
     private func runTrackedCompositionGeneration(
         for video: VideoInput,
-        config: PreviewConfiguration
+        config: PreviewConfiguration,
+        batchEpoch epoch: Int? = nil
     ) async throws -> AVPlayerItem {
+        if let epoch, batchEpoch != epoch { throw CancellationError() }
+
         let task = Task<AVPlayerItem, Error> { [previewGenerator, video, config] in
             try await self.executeWithBackgroundRetry(videoTitle: video.title, config: config) {
                 try await previewGenerator.generateComposition(for: video, config: config)
