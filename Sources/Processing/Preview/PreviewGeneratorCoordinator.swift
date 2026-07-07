@@ -173,18 +173,22 @@ public actor PreviewGeneratorCoordinator {
                 activeTasks += 1
 
                 group.addTask(priority: .utility) { @Sendable in
-                    try Task.checkCancellation()
-
                     do {
+                        try Task.checkCancellation()
                         if let handler = progressHandler {
                             await self.previewGenerator.setProgressHandler(for: video, handler: handler)
                         }
                         let playerItem = try await self.runTrackedCompositionGeneration(for: video, config: config, batchEpoch: epoch)
                         return PreviewCompositionResult.success(video: video, playerItem: playerItem)
                     } catch {
-                        // A batch-wide cancel tears the whole group down; a single-video
-                        // cancel or ordinary failure only affects this video's result.
-                        if await self.batchWasCancelled(epoch) {
+                        // A batch-wide cancel (or cancellation of the batch call itself)
+                        // tears the whole group down; a single-video cancel or ordinary
+                        // failure only affects this video's result. Report the terminal
+                        // .cancelled state before rethrowing — batch handlers are not
+                        // registered in `progressHandlers`, so cancelAllGenerations()
+                        // cannot report it and the UI would stay at .queued/.encoding.
+                        if await self.batchWasCancelled(epoch) || Task.isCancelled {
+                            progressHandler?(.cancelled(for: video))
                             throw CancellationError()
                         }
                         if Self.isCancellation(error) {
@@ -266,18 +270,22 @@ public actor PreviewGeneratorCoordinator {
                 activeTasks += 1
 
                 group.addTask(priority: .medium) { @Sendable in
-                    try Task.checkCancellation()
-
                     do {
+                        try Task.checkCancellation()
                         if let handler = progressHandler {
                             await self.previewGenerator.setProgressHandler(for: video, handler: handler)
                         }
                         let outputURL = try await self.runTrackedGeneration(for: video, config: config, batchEpoch: epoch)
                         return PreviewGenerationResult.success(video: video, outputURL: outputURL)
                     } catch {
-                        // A batch-wide cancel tears the whole group down; a single-video
-                        // cancel or ordinary failure only affects this video's result.
-                        if await self.batchWasCancelled(epoch) {
+                        // A batch-wide cancel (or cancellation of the batch call itself)
+                        // tears the whole group down; a single-video cancel or ordinary
+                        // failure only affects this video's result. Report the terminal
+                        // .cancelled state before rethrowing — batch handlers are not
+                        // registered in `progressHandlers`, so cancelAllGenerations()
+                        // cannot report it and the UI would stay at .queued/.encoding.
+                        if await self.batchWasCancelled(epoch) || Task.isCancelled {
+                            progressHandler?(.cancelled(for: video))
                             throw CancellationError()
                         }
                         if Self.isCancellation(error) {

@@ -705,15 +705,14 @@ public actor MosaicGeneratorCoordinator<Generator: MosaicGeneratorProtocol> {
                                      "Video: \(video.title), Index: \(videoIndex), Active: \(activeTasks)/\(effectiveConcurrencyLimit)")
                // let videoProcessstate = signposter.beginInterval("processing video", "Video: \(video.title)")
                 group.addTask(priority: .medium) { @Sendable in
-                    // Check for cancellation at start
-                    try Task.checkCancellation()
-
                     // Create individual progress handler to track this video
                     let videoProgressHandler: @Sendable (MosaicGenerationProgress) -> Void = { progress in
                         progressHandler(progress)
                     }
                     let videoProcessstate = self.signposter.beginInterval("processing video",id: signpostVideoID,  "Video: \(video.title)")
                     do {
+                        // Check for cancellation at start
+                        try Task.checkCancellation()
 
                         self.logger.debug("starting generation")
                         let result = try await self.generateMosaicForBatch(
@@ -730,9 +729,18 @@ public actor MosaicGeneratorCoordinator<Generator: MosaicGeneratorProtocol> {
 
                     } catch {
                         self.signposter.endInterval("processing video", videoProcessstate,"Error Video: \(video.title)")
-                        // A batch-wide cancel tears the whole group down; a single-video
-                        // cancel or ordinary failure only affects this video's result.
-                        if await self.batchWasCancelled(epoch) {
+                        // A batch-wide cancel (or cancellation of the batch call itself)
+                        // tears the whole group down; a single-video cancel or ordinary
+                        // failure only affects this video's result. Report the terminal
+                        // .cancelled state before rethrowing so videos still shown as
+                        // .queued don't linger in that state.
+                        if await self.batchWasCancelled(epoch) || Task.isCancelled {
+                            progressHandler(MosaicGenerationProgress(
+                                video: video,
+                                progress: 0.0,
+                                status: .cancelled,
+                                error: error
+                            ))
                             throw CancellationError()
                         }
                         return MosaicGenerationResult(video: video, error: error)
