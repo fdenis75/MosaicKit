@@ -90,30 +90,40 @@ public actor PreviewVideoGenerator {
         // Report analyzing status
         reportProgress(for: video, progress: 0.0, status: .analyzing)
 
-        do {
-            let outputURL = try await PreviewGenerationLogic.generate(
-                for: video,
-                config: config,
-                progressHandler: { [weak self] progress, status, url, message in
-                    Task { [weak self] in
-                        await self?.reportProgress(for: video, progress: progress, status: status, outputURL: url, message: message)
+        // Bridge structured Task cancellation into the token: cancelling the
+        // surrounding task (coordinator wrapper or batch group child) flips the
+        // token, which every phase check and export watchdog polls. Without this
+        // bridge, task-level cancellation is invisible to the generation logic.
+        return try await withTaskCancellationHandler {
+            do {
+                if token.isCancelled { throw PreviewError.cancelled }
+
+                let outputURL = try await PreviewGenerationLogic.generate(
+                    for: video,
+                    config: config,
+                    progressHandler: { [weak self] progress, status, url, message in
+                        Task { [weak self] in
+                            await self?.reportProgress(for: video, progress: progress, status: status, outputURL: url, message: message)
+                        }
+                    },
+                    cancellationCheck: { [token] in
+                        token.isCancelled
                     }
-                },
-                cancellationCheck: { [token] in
-                    token.isCancelled
+                )
+
+                // Report completion
+                reportProgress(for: video, progress: 1.0, status: .completed,outputURL: outputURL)
+                logger.info("Preview generation completed: \(outputURL.lastPathComponent)")
+
+                return outputURL
+            } catch {
+                if token.isCancelled {
+                    throw PreviewError.cancelled
                 }
-            )
-
-            // Report completion
-            reportProgress(for: video, progress: 1.0, status: .completed,outputURL: outputURL)
-            logger.info("Preview generation completed: \(outputURL.lastPathComponent)")
-
-            return outputURL
-        } catch {
-            if token.isCancelled {
-                throw PreviewError.cancelled
+                throw error
             }
-            throw error
+        } onCancel: { [token] in
+            token.cancel()
         }
     }
 
@@ -153,30 +163,37 @@ public actor PreviewVideoGenerator {
         // Report analyzing status
         reportProgress(for: video, progress: 0.0, status: .analyzing)
 
-        do {
-            let playerItem = try await PreviewGenerationLogic.generateComposition(
-                for: video,
-                config: config,
-                progressHandler: { [weak self] progress, status, url, message in
-                    Task { [weak self] in
-                        await self?.reportProgress(for: video, progress: progress, status: status, outputURL: url, message: message)
+        // Bridge structured Task cancellation into the token (see generate(for:config:)).
+        return try await withTaskCancellationHandler {
+            do {
+                if token.isCancelled { throw PreviewError.cancelled }
+
+                let playerItem = try await PreviewGenerationLogic.generateComposition(
+                    for: video,
+                    config: config,
+                    progressHandler: { [weak self] progress, status, url, message in
+                        Task { [weak self] in
+                            await self?.reportProgress(for: video, progress: progress, status: status, outputURL: url, message: message)
+                        }
+                    },
+                    cancellationCheck: { [token] in
+                        token.isCancelled
                     }
-                },
-                cancellationCheck: { [token] in
-                    token.isCancelled
+                )
+
+                // Report completion
+                reportProgress(for: video, progress: 1.0, status: .completed)
+                logger.info("Preview composition generated successfully")
+
+                return playerItem
+            } catch {
+                if token.isCancelled {
+                    throw PreviewError.cancelled
                 }
-            )
-
-            // Report completion
-            reportProgress(for: video, progress: 1.0, status: .completed)
-            logger.info("Preview composition generated successfully")
-
-            return playerItem
-        } catch {
-            if token.isCancelled {
-                throw PreviewError.cancelled
+                throw error
             }
-            throw error
+        } onCancel: { [token] in
+            token.cancel()
         }
     }
 
@@ -1257,14 +1274,57 @@ struct PreviewGenerationLogic {
                 }
             }
             
+            // Perform the export — detached at userInitiated priority so the export is
+            // not deprioritized when the calling process goes to the background.
+            //
+            // SJSAssetExportSession has no cancelExport()-style API: its SampleWriter
+            // responds to Swift task cancellation only. The export therefore runs in a
+            // *stored* detached task so the stall/cancellation monitor (and structured
+            // cancellation of this function) can cancel it — a fire-and-forget
+            // `Task.detached { … }.value` would be unreachable and run to completion.
+            //
+            // Safe: composition is created and fully configured on this actor before the cast;
+            // SJSAssetExportSession only reads the asset during the export call below.
+            nonisolated(unsafe) let compositionAsset = composition as AVAsset
+
+            let exportTask: Task<Void, Error>
+            if let vc = videoComposition {
+                // Use the raw-settings overload so we can pass our custom video composition for scaling.
+                exportTask = Task.detached(priority: .userInitiated) {
+                    try await exporter.export(
+                        asset: compositionAsset,
+                        audioOutputSettings: AudioOutputSettings.default.settingsDictionary,
+                        videoOutputSettings: videoConfig.settingsDictionary,
+                        composition: vc,
+                        to: outputURL,
+                        as: config.format.avFileType
+                    )
+                }
+            } else {
+                exportTask = Task.detached(priority: .userInitiated) {
+                    try await exporter.export(
+                        asset: compositionAsset,
+                        audio: .default,
+                        video: videoConfig,
+                        to: outputURL,
+                        as: config.format.avFileType
+                    )
+                }
+            }
+
             // Stall + cancellation monitor for SJS export
             let stallMonitor = Task {
                 while !Task.isCancelled {
-                    if cancellationCheck() { break }
+                    if cancellationCheck() {
+                        logger.warning("Cancellation requested, cancelling SJS export")
+                        exportTask.cancel()
+                        break
+                    }
                     let elapsed = progressTracker.secondsSinceLastProgress
                     if elapsed >= stallTimeout {
                         logger.error("SJS export stalled: no progress for \(Int(elapsed))s, cancelling")
                         stallDetected.cancel()
+                        exportTask.cancel()
                         progressTask.cancel()
                         break
                     }
@@ -1272,45 +1332,21 @@ struct PreviewGenerationLogic {
                 }
             }
             defer { stallMonitor.cancel() }
-            
-            // Perform the export — detached at userInitiated priority so the export is
-            // not deprioritized when the calling process goes to the background.
-            do {
-                // Safe: composition is created and fully configured on this actor before the cast;
-                // SJSAssetExportSession only reads the asset during the export call below.
-                nonisolated(unsafe) let compositionAsset = composition as AVAsset
 
-                if let vc = videoComposition {
-                    // Use the raw-settings overload so we can pass our custom video composition for scaling.
-                    try await Task.detached(priority: .userInitiated) {
-                        try await exporter.export(
-                            asset: compositionAsset,
-                            audioOutputSettings: AudioOutputSettings.default.settingsDictionary,
-                            videoOutputSettings: videoConfig.settingsDictionary,
-                            composition: vc,
-                            to: outputURL,
-                            as: config.format.avFileType
-                        )
-                    }.value
-                } else {
-                    try await Task.detached(priority: .userInitiated) {
-                        try await exporter.export(
-                            asset: compositionAsset,
-                            audio: .default,
-                            video: videoConfig,
-                            to: outputURL,
-                            as: config.format.avFileType
-                        )
-                    }.value
+            do {
+                try await withTaskCancellationHandler {
+                    try await exportTask.value
+                } onCancel: {
+                    exportTask.cancel()
                 }
-                
+
                 progressTask.cancel()
-                
+
                 if stallDetected.isCancelled {
                     try? FileManager.default.removeItem(at: outputURL)
                     throw PreviewError.exportStalled(elapsedSeconds: Int(progressTracker.secondsSinceLastProgress))
                 }
-                
+
                 if cancellationCheck() {
                     try? FileManager.default.removeItem(at: outputURL)
                     throw PreviewError.cancelled
@@ -1334,6 +1370,10 @@ struct PreviewGenerationLogic {
                 if stallDetected.isCancelled {
                     logger.error("SJS export stalled and was cancelled")
                     throw PreviewError.exportStalled(elapsedSeconds: Int(progressTracker.secondsSinceLastProgress))
+                }
+                if error is CancellationError || cancellationCheck() {
+                    logger.info("SJS export cancelled")
+                    throw PreviewError.cancelled
                 }
                 logger.error("SJS export failed: \(error.localizedDescription)")
                 progressHandler(1.0, .failed, nil, error.localizedDescription)

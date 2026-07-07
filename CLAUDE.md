@@ -145,6 +145,25 @@ daemons/XPC/CLI tools where the app never becomes foreground.
 - Use `Task { }` for fire-and-forget; propagate `CancellationError` where appropriate.
 - Conform new types to `Sendable` when crossing actor boundaries.
 
+### Cancellation model
+
+- Internal work runs in *tracked* unstructured tasks (`activeTasks` /
+  `generationTasks` dictionaries keyed by video ID). Every `try await task.value`
+  on a tracked task must be wrapped in `withTaskCancellationHandler` with
+  `onCancel: { task.cancel() }` — unstructured tasks do not inherit the caller's
+  cancellation.
+- `PreviewVideoGenerator` bridges task cancellation into its `CancellationToken`s
+  (`withTaskCancellationHandler` → `token.cancel()`); the token is what export
+  watchdogs and phase checks poll.
+- Coordinators keep a `batchEpoch` counter; `cancelAllGenerations()` bumps it and
+  the batch loops check it, so a cancelled batch stops dequeuing queued videos and
+  throws `CancellationError`. Single-video cancellation only fails that video's
+  result; the batch continues.
+- Long loops (frame extraction, animated-image encoding, `generateallcombinations`)
+  must call `try Task.checkCancellation()` per iteration.
+- Report cancelled work to progress handlers with the `.cancelled` status, never
+  `.failed`.
+
 ---
 
 ## Error Handling

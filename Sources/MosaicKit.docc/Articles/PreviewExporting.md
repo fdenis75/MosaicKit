@@ -87,3 +87,40 @@ do {
     print("Other export error: \(error)")
 }
 ```
+
+## Cancelling Exports
+
+There are two equivalent ways to cancel preview work; both stop the underlying
+export session (native `AVAssetExportSession`, `SJSAssetExportSession`, and the
+external `ffmpeg` process all observe cancellation):
+
+1. **Cancel the Swift `Task`** that awaits the generator or coordinator call.
+   Task cancellation propagates into the export pipeline, including
+   foreground waits and stall-retry sleeps.
+2. **Call the coordinator's cancel API**:
+
+```swift
+// Cancel one video. During a batch, only this video is affected:
+// it finishes as a `.failure` result and the rest of the batch continues.
+await coordinator.cancelGeneration(for: video)
+
+// Cancel everything. In-flight exports are torn down, videos still queued
+// in a running batch are never started, and the awaited batch call
+// (`generatePreviewsForBatch` / `generatePreviewCompositionsForBatch`)
+// throws `CancellationError`.
+await coordinator.cancelAllGenerations()
+```
+
+Cancelled videos are reported to progress handlers with the `.cancelled`
+status (not `.failed`), and single-video calls throw `PreviewError.cancelled`.
+
+Catch the batch-wide cancellation where you await the batch:
+
+```swift
+do {
+    let results = try await coordinator.generatePreviewsForBatch(videos: videos, config: config)
+    // all videos processed (some may still be individual failures)
+} catch is CancellationError {
+    print("Batch was cancelled — remaining videos were not started")
+}
+```
