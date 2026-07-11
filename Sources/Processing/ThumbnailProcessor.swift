@@ -610,17 +610,30 @@ public final class ThumbnailProcessor: Sendable {
         return context.makeImage()
     }
     
+    /// Minimum header height as a fraction of the thumbnail height, scaling with
+    /// density: 0.3 for low densities (factor <= 1.0) up to 1.0 for XXS (factor 4.0).
+    static func minimumHeaderHeightFraction(for density: DensityConfig) -> CGFloat {
+        let lowFactor = DensityConfig.m.factor
+        let highFactor = DensityConfig.xxs.factor
+        let progress = (density.factor - lowFactor) / (highFactor - lowFactor)
+        let clamped = min(1.0, max(0.0, progress))
+        return CGFloat(0.3 + 0.7 * clamped)
+    }
+
     /// Creates a metadata header image to be placed at the top of the mosaic
     /// - Parameters:
     ///   - video: The video object containing metadata information
     ///   - width: The width of the mosaic
     ///   - height: Optional height override for the metadata header
+    ///   - thumbnailHeight: Height of a thumbnail in the layout, used to enforce a
+    ///     density-based minimum header height so the header stays readable at high densities
     ///   - backgroundColor: Optional background color (if nil, platform-specific default will be used)
     /// - Returns: A CGImage containing the metadata header
     public func createMetadataHeader(
         for video: VideoInput,
         width: Int,
         height: Int? = nil,
+        thumbnailHeight: CGFloat? = nil,
         backgroundColor: CGColor? = nil,
         forIphone: Bool = false,
         headerConfig: HeaderConfig = .default,
@@ -694,16 +707,35 @@ public final class ThumbnailProcessor: Sendable {
         // Determine header height
         let estimatedLineHeight = fontSize * 1.2
         let calculatedHeight = Int(estimatedLineHeight * totalPreferredLineScale + padding * 4)
-        let metadataHeight: Int
+        var metadataHeight: Int
         switch headerConfig.height {
         case .auto:    metadataHeight = height ?? calculatedHeight
         case .fixed(let h): metadataHeight = h
         }
 
-        // Clamp font size to fit the available height
+        // Enforce a density-based minimum so the header stays readable when
+        // thumbnails shrink at high densities. Vertical (portrait) outputs get
+        // double the minimum: the mosaic is narrower, so the header needs more
+        // height to stay readable.
+        var raisedToMinimumHeight = false
+        if let thumbnailHeight, thumbnailHeight > 0 {
+            var minFraction = Self.minimumHeaderHeightFraction(for: config.density)
+            if config.layout.aspectRatio.ratio < 1.0 {
+                minFraction *= 2.0
+            }
+            let minHeight = Int((thumbnailHeight * minFraction).rounded(.up))
+            if metadataHeight < minHeight {
+                metadataHeight = minHeight
+                raisedToMinimumHeight = true
+            }
+        }
+
+        // Clamp font size to fit the available height. When the height was raised
+        // to the density minimum, grow the font to fill it instead of keeping the
+        // small size computed for the original height.
         let availableHeight = CGFloat(metadataHeight) - (padding * 4)
         let maxFontByHeight = totalPreferredLineScale > 0 ? availableHeight / (totalPreferredLineScale * 1.5) : fontSize
-        fontSize = min(fontSize, maxFontByHeight)
+        fontSize = raisedToMinimumHeight ? maxFontByHeight : min(fontSize, maxFontByHeight)
         fontSize = max(baseFontSize, fontSize)
 
         // Create bitmap context

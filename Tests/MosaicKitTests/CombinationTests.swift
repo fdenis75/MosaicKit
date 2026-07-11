@@ -103,7 +103,7 @@ private struct ComboConfig: Sendable {
 
     func toMosaicConfiguration(outputDir: URL, accentColor: MosaicColor) -> MosaicConfiguration {
         var config = MosaicConfiguration(
-            width: 3000,
+            width: 5000,
             density: density,
             format: .heif,
             layout: LayoutConfiguration(
@@ -278,12 +278,12 @@ private extension ComboConfig {
         }
         
         // G01 – density sweep (7)
-        /*      for d in [DensityConfig.xxl, .m, .s, .xxs] {
+        for d in DensityConfig.allCases {
          add(group: "G01-density", density: d)
          }
          
          // G02 – layout type sweep (5)
-         for l in LayoutType.allCases {
+        for l in [LayoutType.classic] {
          add(group: "G02-layout", layout: l)
          }
          
@@ -291,16 +291,24 @@ private extension ComboConfig {
          for a in AspectRatio.allCases {
          add(group: "G03-aspect", aspect: a)
          }
-         
-         // G04 – includeMetadata sweep (2)
+      //  G04 -- density x AR
+        for d in DensityConfig.allCases {
+            
+            for a in AspectRatio.allCases {
+                add(group: "G04-denistyx AR", density: d, layout: LayoutType.classic, aspect: a)
+            }
+        }
+        
+        
+       /*  // G04 – includeMetadata sweep (2)
          for m in [true, false] {
          add(group: "G04-metadata", meta: m)
-         }
+         }*/
          
          
          
          // G06 – frame label position sweep (5)
-         //   for p in [FrameLabelPosition.topLeft, .topRight, .bottomLeft, .bottomRight, .center] {
+      //      for p in [FrameLabelPosition.topLeft, .topRight, .bottomLeft, .bottomRight, .center] {
          
          
          // G08 – watermark sweep (2)
@@ -308,22 +316,22 @@ private extension ComboConfig {
          // add(group: "G08-watermark", wm: "© Test Studio")
          
          // G09 – Color DNA sweep: off + 2 styles × 2 positions = 5
-         add(group: "G09-colorDNA")   // off
+   /*      add(group: "G09-colorDNA")   // off
          for style in [ColorDNAStyle.barcode, .gradient] {
          for pos in [ColorDNAPosition.bottom] {
          add(group: "G09-colorDNA", dnaStyle: style, dnaPos: pos)
          }
-         }
-         */
+         }*/
+         
         
         // G11 – density × layout cross-product (7 × 5 = 35)
-        for d in [DensityConfig.m, .xxl] {
+   /*     for d in DensityConfig.allCases {
             for l in [LayoutType.custom] {
                 for a in AspectRatio.allCases {
                     add(group: "G11-dens×layxasp", density: d, layout: l, aspect: a)
                 }
             }
-        }
+        }*/
 
        
 

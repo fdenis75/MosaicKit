@@ -1,28 +1,18 @@
 {
   "configurations" : [
+    {
+      "id" : "DA79C340-8DA4-470E-ACCE-21C41E0B9619",
+      "name" : "Test Scheme Action",
+      "options" : {
 
+      }
+    }
   ],
   "defaultOptions" : {
-    "codeCoverage" : false,
     "environmentVariableEntries" : [
       {
-        "enabled" : false,
-        "key" : "MOSAICKIT_SUITE_MODE",
-        "value" : "folder"
-      },
-      {
-        "enabled" : false,
-        "key" : "PREVIEW_FOLDER",
-        "value" : "\/Volumes\/Ext-Photos5\/PB\/test"
-      },
-      {
-        "enabled" : false,
-        "key" : "MOSAIC_TARGET_FOLDER",
-        "value" : "\/Users\/francois\/Downloads\/testvidsnodelete\/output"
-      },
-      {
         "key" : "MOSAIC_TEST_VIDEO",
-        "value" : "\/Volumes\/Ext-6TB\/Fansly\/thorriandjax_fansly\/Timeline\/Videos\/2025-02-20_at_07-50_id_748292850642329601_hash2_1f99813fdbeb8bad374c50d1261b90bb.mp4"
+        "value" : "\/Volumes\/Ext-Photos5\/Fansly\/coconutcrazy_fansly\/Timeline\/Videos\/2026-03-06_at_12-17_id_886258112019849216_hash2_8eb3c11add383d400a17ad1665d88fc3.mp4"
       }
     ],
     "performanceAntipatternCheckerEnabled" : true
