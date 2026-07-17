@@ -82,7 +82,7 @@ There is no factory or platform-selection wrapper — construct it directly.
 4. Process images (Metal GPU shaders via `MetalImageProcessor`)
 5. Extract dominant colors (`DominantColors` package → smart background)
 6. Compose final mosaic with optional metadata overlay
-7. Encode & save (HEIF / JPEG / PNG via `VideoFormat`)
+7. Encode & save (HEIF / JPEG / PNG / WebP via `OutputFormat`)
 
 ---
 
@@ -94,7 +94,7 @@ All model types are `Codable` and `Sendable`.
 The primary configuration object. Key fields:
 - `density: DensityConfig` – controls how many frames are extracted
 - `layout: LayoutConfiguration` – layout algorithm and target size
-- `format: VideoFormat` – output file format (`.heic`, `.jpg`, `.png`)
+- `format: OutputFormat` – output file format (`.heic`, `.jpg`, `.png`, `.webp`)
 - `compression` – quality settings per format
 - `gifMode: GifCreationMode` – `.disabled` / `.withMosaic` / `.gifOnly` animated export
 - `gifSize: GifSize`, `animatedFormat: AnimatedFormat` (`.gif`/`.heic`/`.webp`), `gifFps: Double`
@@ -322,7 +322,8 @@ CI runs `swift build` then `swift test --parallel` on push/PR to `main`.
 4. Add tests in `MosaicGeneratorCoordinatorTests.swift` or a new test file
 
 ### Add a new output format
-1. Add case to `VideoFormat` in `Models/VideoFormat.swift`
+1. Add case to `OutputFormat` in `Models/MosaicConfiguration.swift` (still mosaics) and/or
+   `VideoFormat` in `Models/VideoFormat.swift` (preview video containers)
 2. Handle encoding in `MetalMosaicGenerator` (mosaic still images) and/or
    `AnimatedGifGenerator` (animated formats)
 3. Update `README.md` format table

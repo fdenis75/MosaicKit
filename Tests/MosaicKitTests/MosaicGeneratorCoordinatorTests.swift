@@ -116,6 +116,37 @@ struct MosaicGeneratorCoordinatorTests {
         }
     }
     
+    @Test("Coordinator generates a WebP mosaic from embedded test video")
+    func coordinatorEmbeddedAssetWebP() async throws {
+        let videoURL = try embeddedVideoURL
+        let video = try await VideoInput(from: videoURL)
+
+        let outputDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("MosaicKitTests-WebP-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: outputDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: outputDir) }
+
+        let coordinator = try createDefaultMosaicCoordinator(concurrencyLimit: 1)
+        var config = makeTestConfiguration(outputDirectory: outputDir)
+        config.format = .webp
+
+        let result = try await coordinator.generateMosaic(for: video, config: config) { _ in }
+
+        #expect(result.isSuccess)
+        let outputURL = try #require(result.outputURL)
+        #expect(outputURL.pathExtension == "webp")
+        #expect(FileManager.default.fileExists(atPath: outputURL.path))
+        let attrs = try FileManager.default.attributesOfItem(atPath: outputURL.path)
+        let size = attrs[FileAttributeKey.size] as? Int ?? 0
+        #expect(size > 0)
+
+        // Verify the file is a valid WebP (RIFF....WEBP header).
+        let data = try Data(contentsOf: outputURL, options: .alwaysMapped)
+        #expect(data.count >= 12)
+        #expect(data.prefix(4).elementsEqual("RIFF".utf8))
+        #expect(data[8..<12].elementsEqual("WEBP".utf8))
+    }
+
     /// Exercises the metadata header path (previously always bypassed in CI because
     /// `makeTestConfiguration` used `includeMetadata: false`).
     @Test("Coordinator generates mosaic with metadata header and frame labels from embedded video")

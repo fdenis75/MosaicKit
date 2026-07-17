@@ -168,7 +168,7 @@ print("Mosaic saved to: \(mosaicURL.path)")
 public struct MosaicConfiguration {
     var width: Int                           // Output width (default: 5120)
     var density: DensityConfig               // Frame density (default: .m)
-    var format: OutputFormat                 // JPEG, PNG, or HEIF
+    var format: OutputFormat                 // JPEG, PNG, HEIF, or WebP
     var layout: LayoutConfiguration          // Layout settings
     var includeMetadata: Bool                // Add metadata header
     var useAccurateTimestamps: Bool          // Precise frame extraction
@@ -243,6 +243,10 @@ config.compressionQuality = 0.8
 
 // PNG - Lossless, larger file size
 config.format = .png
+
+// WebP - Web-compatible, encoded via the bundled webp.swift encoder
+config.format = .webp
+config.compressionQuality = 0.8
 ```
 
 ## Overlay & Annotations
@@ -433,7 +437,7 @@ previewConfig.filenameTemplate = "{name}_prev_{duration}_{audio}.{ext}"
 | Token | Value |
 |---|---|
 | `{name}` | Original filename without extension (sanitized) |
-| `{ext}` | Output format extension (`heic`, `jpg`, `png`) |
+| `{ext}` | Output format extension (`heic`, `jpg`, `png`, `webp`) |
 | `{width}` | Output width |
 | `{density}` | Density name |
 | `{aspectRatio}` | Aspect ratio raw value |

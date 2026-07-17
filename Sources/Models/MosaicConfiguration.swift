@@ -573,6 +573,8 @@ public enum OutputFormat: String, Codable, Sendable {
     case png
     /// High Efficiency Image Format (.heic).
     case heif
+    /// WebP format (.webp), encoded via the bundled `webp.swift` encoder.
+    case webp
 
     /// The file extension associated with the output format.
     public var fileExtension: String {
@@ -580,6 +582,7 @@ public enum OutputFormat: String, Codable, Sendable {
         case .jpeg: return "jpg"
         case .png: return "png"
         case .heif: return "heic"
+        case .webp: return "webp"
         }
     }
 }

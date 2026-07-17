@@ -5,6 +5,7 @@ import OSLog
 import Metal
 import VideoToolbox
 import UniformTypeIdentifiers
+import webp
 #if canImport(AppKit)
 import AppKit
 #elseif canImport(UIKit)
@@ -766,6 +767,19 @@ public actor MetalMosaicGenerator: MosaicGeneratorProtocol {
             try FileManager.default.removeItem(at: mosaicURL)
         }
         
+        if config.format == .webp {
+            let didStartAccessingDirectory = mosaicURL.deletingLastPathComponent().startAccessingSecurityScopedResource()
+            defer {
+                if didStartAccessingDirectory {
+                    mosaicURL.deletingLastPathComponent().stopAccessingSecurityScopedResource()
+                }
+            }
+            let webpConfig = WebpEncoderConfig.preset(.picture, quality: Float(config.compressionQuality * 100))
+            let data = try WebPEncoder().encode(RGBA: mosaic, config: webpConfig)
+            try data.write(to: mosaicURL)
+            return mosaicURL
+        }
+
         let identifier: CFString
         switch config.format {
         case .jpeg:
@@ -774,6 +788,8 @@ public actor MetalMosaicGenerator: MosaicGeneratorProtocol {
             identifier = UTType.png.identifier as CFString
         case .heif:
             identifier = UTType.heic.identifier as CFString
+        case .webp:
+            identifier = UTType.webP.identifier as CFString
         }
 
         // Use security scoped resource for HEIF
@@ -805,13 +821,13 @@ public actor MetalMosaicGenerator: MosaicGeneratorProtocol {
             options[kCGImageDestinationEmbedThumbnail as String] = true
             options[kCGImagePropertyHasAlpha as String] = false
         }
-        
+
         CGImageDestinationAddImage(destination, mosaic, options as CFDictionary)
 
         if !CGImageDestinationFinalize(destination) {
             throw MosaicError.saveFailed(mosaicURL, NSError(domain: "com.mosaicKit", code: -1))
         }
-        
+
         return mosaicURL
     }
     
