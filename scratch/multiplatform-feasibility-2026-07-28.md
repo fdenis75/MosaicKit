@@ -123,12 +123,17 @@ Two real options, not a spectrum of many:
    animated export, cancellation model) — 6-12+ months for a small team,
    optimistically, and a permanent second engine to maintain forever after.
 
-Option 1 is cheap and real but caps out at "ffmpeg CLI can do it" —
-custom layout algorithms, Metal-shader-specific effects, and the actor-based
-cancellation/progress model in `MosaicGeneratorCoordinator` don't transfer;
-you're driving `ffmpeg` as a black box, not reusing MosaicKit's compositor.
-Option 2 is the only way to keep today's feature set and control, at rewrite
-cost.
+Option 1 is cheap and real but caps out at "ffmpeg CLI can do it" — custom
+layout algorithms and Metal-shader-specific effects don't transfer, you're
+driving `ffmpeg` as a black box, not reusing MosaicKit's compositor.
+Cancellation and progress reporting *do* transfer, though: `FFmpegEncoder`
+(`Sources/Processing/Preview/FFmpegEncoder.swift`) already drives an
+`ffmpeg` subprocess with a `progressHandler`/`cancellationCheck` pair,
+parses `time=` output for progress, and calls `terminate()` on the process
+when cancellation is requested — that control-plane pattern is exactly what
+an ffmpeg-backed mosaic path would reuse. Option 2 is the only way to keep
+today's *compositing* feature set (custom layouts, overlays, dominant-color
+backgrounds) and control, at rewrite cost.
 
 ## Existing solutions worth knowing about (none solve this for free)
 
@@ -156,12 +161,21 @@ You listed performance as the top priority and a small API surface as a
 hard constraint. Both cut against multiplatform, not for it:
 
 - The package's speed today comes from being tightly wedded to Apple's
-  stack: `AVAssetImageGenerator`'s hardware decode path, zero-copy-ish
-  `CGImage`/`CVPixelBuffer` handoff into Metal textures, GPU compute
-  shaders written and tuned for Apple Silicon specifically. Any
-  cross-platform abstraction sits *below* that — by definition it can't be
-  faster than the specialized path, only slower, because it has to satisfy
-  the least-capable backend too.
+  stack: `AVAssetImageGenerator`'s hardware decode path and GPU compute
+  shaders written and tuned for Apple Silicon specifically. Worth being
+  precise here: the actual CGImage-to-Metal handoff in
+  `MetalImageProcessor.createTexture(from: CGImage)` currently draws each
+  frame into a `CGContext` and uploads it with `texture.replace` — a copy,
+  not zero-copy. A genuinely zero-copy `createTexture(from: CVPixelBuffer)`
+  overload backed by `CVMetalTextureCache` already exists in the same file
+  but has no callers in the generation path today. That's real headroom
+  left on the table on the *current* Apple-only engine, and it cuts the
+  other way on one point: it means "the existing path is already
+  maximally fast" is not quite true either. What still holds is the
+  structural argument — a cross-platform abstraction has to satisfy the
+  least-capable backend (no VideoToolbox, no Metal, no MTLTexture cache
+  equivalent), so closing MosaicKit's own zero-copy gap stays cheaper and
+  more valuable than building a portable layer underneath it.
 - A shared engine forces a choice: flatten the API to the lowest common
   denominator (lose overlay/layout capabilities that don't map cleanly to
   `ffmpeg` filters or a generic GPU backend), or grow the API to expose
