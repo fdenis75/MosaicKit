@@ -162,7 +162,8 @@ public actor MetalMosaicGenerator: MosaicGeneratorProtocol {
                     density: config.density,
                     layoutType: forIphone ? .iphone : config.layout.layoutType
                 )
-                
+                logger.debug("📐 Generation plan for \(video.title) - width: \(config.width), density: \(config.density.name), requested frames: \(frameCount), layout positions: \(layout.positions.count), mosaic size: \(Int(layout.mosaicSize.width))x\(Int(layout.mosaicSize.height))")
+
                 // MARK: - FIX: Create a mutable copy of config and use the static method
                 var mutableConfig = config // Create a mutable copy
                 mutableConfig.updateAspectRatio(new: AspectRatio.findNearest(to: layout.mosaicSize)) // Call on mutable copy using static method
