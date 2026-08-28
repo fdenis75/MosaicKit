@@ -829,6 +829,11 @@ public final class MetalImageProcessor: @unchecked Sendable {
         }
 
         logger.debug("📦 Collected \(allFrames.count) frames for processing")
+        if allFrames.isEmpty {
+            logger.error("❌ No frames were produced by the extraction stream — expected \(layout.positions.count) for a \(Int(layout.mosaicSize.width))x\(Int(layout.mosaicSize.height)) mosaic. Output will contain only the background/header.")
+        } else if allFrames.count < layout.positions.count {
+            logger.warning("⚠️ Collected \(allFrames.count)/\(layout.positions.count) expected frames — some mosaic cells will be left as background.")
+        }
 
         // Create mosaic texture with dominant color background
         var mosaicTexture: MTLTexture
@@ -876,6 +881,7 @@ public final class MetalImageProcessor: @unchecked Sendable {
         for batchStart in stride(from: 0, to: allFrames.count, by: batchSize) {
             let batchEnd = min(batchStart + batchSize, allFrames.count)
             let batch = Array(allFrames[batchStart..<batchEnd])
+            let batchIndex = batchStart / batchSize
 
             try processBatch(
                 batch,
@@ -884,7 +890,8 @@ public final class MetalImageProcessor: @unchecked Sendable {
                 visual: config.layout.visual,
                 spacing: config.layout.spacing,
                 hasMetadata: hasMetadata,
-                metadataHeight: CGFloat(metadataHeight)
+                metadataHeight: CGFloat(metadataHeight),
+                batchIndex: batchIndex
             )
             processedCount += batch.count
 
@@ -892,6 +899,21 @@ public final class MetalImageProcessor: @unchecked Sendable {
             let progress = 0.25 + (0.7 * Double(processedCount) / Double(totalExpected))
             progressHandler?(progress)
         }
+
+        // IMPORTANT: every texture write above (background fill, header composite, each
+        // frame batch) was committed to `commandQueue` without waiting for the GPU to
+        // actually finish — `commit()` only schedules the work. `createCGImage(from:)`
+        // below does a synchronous CPU-side `texture.getBytes(...)`, which is only safe
+        // once the GPU writes it depends on are guaranteed complete. Command buffers on the
+        // same MTLCommandQueue execute in commit order, so waiting on one final empty
+        // "barrier" buffer committed last is sufficient to guarantee everything before it
+        // has finished — without forcing every batch to serialize with the GPU.
+        //
+        // Without this, the race is invisible on large/slow mosaics (frame extraction and
+        // batch encoding give the GPU plenty of time to catch up) but reproduces reliably on
+        // small, low-density mosaics where the whole pipeline can finish before the last
+        // batch's GPU work has actually landed — producing a blank or partially-drawn output.
+        try await synchronizeGPU(context: "generateMosaicStream frames=\(allFrames.count) size=\(Int(mosaicSize.width))x\(Int(mosaicSize.height))")
 
         // Create CGImage from the final mosaic texture
         progressHandler?(0.95)
@@ -911,14 +933,20 @@ public final class MetalImageProcessor: @unchecked Sendable {
         visual: VisualSettings,
         spacing: CGFloat,
         hasMetadata: Bool,
-        metadataHeight: CGFloat
+        metadataHeight: CGFloat,
+        batchIndex: Int
     ) throws {
         guard let batchCommandBuffer = commandQueue.makeCommandBuffer() else {
             throw MetalProcessorError.commandBufferCreationFailed
         }
-        
+        batchCommandBuffer.label = "MosaicStreamBatch-\(batchIndex)"
+
+        var renderedCount = 0
         for (index, image) in batch {
-            guard index < layout.positions.count else { continue }
+            guard index < layout.positions.count else {
+                logger.warning("⚠️ Batch \(batchIndex): dropping frame index \(index) — outside layout bounds (\(layout.positions.count) positions)")
+                continue
+            }
 
             try renderFrame(
                 image,
@@ -930,9 +958,50 @@ public final class MetalImageProcessor: @unchecked Sendable {
                 metadataHeight: hasMetadata ? metadataHeight : 0,
                 commandBuffer: batchCommandBuffer
             )
+            renderedCount += 1
         }
-        
+
+        // Logged asynchronously on GPU completion so a failing batch is never silent —
+        // this does not block the CPU from moving on to encode the next batch, which is
+        // what keeps the batch loop pipelined. Correctness against `createCGImage`'s
+        // final read is guaranteed separately by the `synchronizeGPU` barrier, not by this
+        // handler.
+        let logger = self.logger
+        let finalRenderedCount = renderedCount
+        batchCommandBuffer.addCompletedHandler { buffer in
+            if buffer.status == .error {
+                let reason = buffer.error?.localizedDescription ?? "unknown error"
+                logger.error("❌ Mosaic batch \(batchIndex) (\(finalRenderedCount) frames) GPU execution failed: \(reason)")
+            }
+        }
         batchCommandBuffer.commit()
+    }
+
+    /// Blocks until every command buffer previously committed to `commandQueue` has finished
+    /// executing on the GPU, then surfaces any error.
+    ///
+    /// Metal's `commit()` only schedules work — it does not wait for the GPU. A CPU-side read
+    /// like `MTLTexture.getBytes` is only guaranteed to see prior GPU writes once the command
+    /// buffer(s) that performed them report `.completed`. Command buffers submitted to the same
+    /// queue always execute in commit order, so awaiting one empty "barrier" buffer committed
+    /// last is enough to prove every earlier one (background fill, header composite, all frame
+    /// batches) has landed, without needing to track each of them individually.
+    private func synchronizeGPU(context: String) async throws {
+        guard let barrier = commandQueue.makeCommandBuffer() else {
+            throw MetalProcessorError.commandBufferCreationFailed
+        }
+        barrier.label = "GPUSyncBarrier"
+
+        let state = signposter.beginInterval("GPU Sync")
+        barrier.commit()
+        await barrier.completed()
+        signposter.endInterval("GPU Sync", state)
+
+        if barrier.status == .error {
+            let reason = barrier.error?.localizedDescription ?? "unknown error"
+            logger.error("❌ GPU sync barrier failed (\(context)): \(reason)")
+            throw MetalProcessorError.commandBufferExecutionFailed(context: context, underlying: reason)
+        }
     }
 
     private func renderFrame(
@@ -1190,5 +1259,6 @@ public enum MetalProcessorError: Error {
     case dataProviderCreationFailed
     case cgImageCreationFailed
     case cancelled
-} 
+    case commandBufferExecutionFailed(context: String, underlying: String)
+}
 
