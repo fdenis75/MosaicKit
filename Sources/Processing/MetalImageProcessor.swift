@@ -967,10 +967,11 @@ public final class MetalImageProcessor: @unchecked Sendable {
         // final read is guaranteed separately by the `synchronizeGPU` barrier, not by this
         // handler.
         let logger = self.logger
+        let finalRenderedCount = renderedCount
         batchCommandBuffer.addCompletedHandler { buffer in
             if buffer.status == .error {
                 let reason = buffer.error?.localizedDescription ?? "unknown error"
-                logger.error("❌ Mosaic batch \(batchIndex) (\(renderedCount) frames) GPU execution failed: \(reason)")
+                logger.error("❌ Mosaic batch \(batchIndex) (\(finalRenderedCount) frames) GPU execution failed: \(reason)")
             }
         }
         batchCommandBuffer.commit()
