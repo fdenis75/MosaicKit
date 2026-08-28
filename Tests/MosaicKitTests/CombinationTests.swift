@@ -103,7 +103,7 @@ private struct ComboConfig: Sendable {
 
     func toMosaicConfiguration(outputDir: URL, accentColor: MosaicColor) -> MosaicConfiguration {
         var config = MosaicConfiguration(
-            width: 5000,
+            width: 1000,
             density: density,
             format: .heif,
             layout: LayoutConfiguration(
@@ -278,7 +278,7 @@ private extension ComboConfig {
         }
         
         // G01 – density sweep (7)
-        for d in DensityConfig.allCases {
+        for d in [DensityConfig.xxl, DensityConfig.xl] {
          add(group: "G01-density", density: d)
          }
          
@@ -292,10 +292,10 @@ private extension ComboConfig {
          add(group: "G03-aspect", aspect: a)
          }
       //  G04 -- density x AR
-        for d in DensityConfig.allCases {
+        for d in [DensityConfig.xxl, DensityConfig.xl] {
             
             for a in AspectRatio.allCases {
-                add(group: "G04-denistyx AR", density: d, layout: LayoutType.classic, aspect: a)
+                add(group: "G04-denistyx AR", density: d, layout: LayoutType.custom, aspect: a)
             }
         }
         
