@@ -99,13 +99,24 @@ public struct MosaicConfiguration: Codable, Sendable {
     /// file already exists at the resolved path.
     public var overwrite: Bool = false
 
+    /// Whether to create a subdirectory inside the output directory before
+    /// saving the mosaic.
+    ///
+    /// When `true` (default), the resolved subdirectory (from
+    /// `outputDirectoryTemplate`, or the legacy `{configurationHash}` folder
+    /// when no template is set) is created inside `outputdirectory` (or the
+    /// video's folder). When `false`, mosaics are saved directly into
+    /// `outputdirectory` with no extra subdirectory — `outputDirectoryTemplate`
+    /// is ignored in that case.
+    public var createOutputSubdirectory: Bool = true
+
     /// Optional token-based template controlling the output directory layout.
     ///
-    /// When `nil` (default), the legacy `{root}/{service}/{creator}/{configHash}/`
-    /// layout is used. When set, the template is resolved against the following
-    /// tokens (unknown tokens are left as-is, empty tokens are skipped):
-    /// `{root}`, `{service}`, `{creator}`, `{hash}`, `{width}`, `{density}`,
-    /// `{aspectRatio}`, `{layout}`, `{date}`.
+    /// When `nil` (default), the legacy `{root}/{configHash}/` layout is used.
+    /// When set, the template is resolved against the following tokens
+    /// (unknown tokens are left as-is, empty tokens are skipped):
+    /// `{root}`, `{hash}`, `{width}`, `{density}`, `{aspectRatio}`, `{layout}`,
+    /// `{date}`, `{time}`. Ignored when `createOutputSubdirectory` is `false`.
     public var outputDirectoryTemplate: String? = nil
 
     /// Optional token-based template controlling the output filename.
@@ -312,6 +323,11 @@ public struct MosaicConfiguration: Codable, Sendable {
     ///   - videoInput: The video input (used for template token resolution)
     /// - Returns: The full output directory URL
     public func generateOutputDirectory(rootDirectory: URL, videoInput: VideoInput) -> URL {
+        // Skip subdirectory creation entirely when disabled.
+        guard createOutputSubdirectory else {
+            return rootDirectory
+        }
+
         // When a custom template is provided, resolve it instead of the legacy layout.
         if let template = outputDirectoryTemplate {
             return resolveDirectoryTemplate(template, rootURL: rootDirectory, videoInput: videoInput)
@@ -339,6 +355,7 @@ public struct MosaicConfiguration: Codable, Sendable {
         videoInput: VideoInput
     ) -> URL {
         let today = Self.todayString()
+        let now = Self.timeString()
         let values: [String: String?] = [
             "root": rootURL.path,
             "hash": configurationHash,
@@ -346,7 +363,8 @@ public struct MosaicConfiguration: Codable, Sendable {
             "density": density.name,
             "aspectRatio": layout.aspectRatio.rawValue,
             "layout": layout.layoutType.rawValue,
-            "date": today
+            "date": today,
+            "time": now
         ]
 
         // Split template by "/" so that empty components (from nil tokens) can
@@ -495,6 +513,14 @@ public struct MosaicConfiguration: Codable, Sendable {
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.dateFormat = "yyyy-MM-dd"
+        return formatter.string(from: Date())
+    }
+
+    /// Current time formatted as `HH-mm-ss` (filesystem-safe, no colons).
+    fileprivate static func timeString() -> String {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "HH-mm-ss"
         return formatter.string(from: Date())
     }
 }
