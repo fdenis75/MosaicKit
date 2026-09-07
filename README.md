@@ -17,6 +17,11 @@ A high-performance Swift package for generating video mosaics with Metal-acceler
 - 📊 **Overlay Annotations** - Per-frame labels (timestamp, index), customisable metadata headers, watermarks, and Color DNA strips
 - 🎬 **Video Preview Generation** - Create short highlight reels from any video, either exported to file or as a live `AVPlayerItem` composition
 
+## New in 1.4.3
+
+- **`MosaicConfiguration.createOutputSubdirectory`** (default `true`) — set to `false` to save mosaics directly into the resolved output directory (`outputdirectory`, or the video's own folder) with no extra subdirectory. When `false`, `outputDirectoryTemplate` is ignored.
+- **`{time}` output-directory token** — `outputDirectoryTemplate` now supports a `{time}` token (current time as `HH-mm-ss`) alongside the existing `{date}` token.
+
 ## New in 1.4.2
 
 - **`PreviewConfiguration.exportDescription`** — new mode-agnostic `PreviewExportDescription` describing the encoding settings that `.native`, `.sjs`, and `.ffmpeg` export modes will actually produce (codec, profile, level, resolution, audio), so UI code can present "what will this export produce?" without branching on `exportMode`.
@@ -176,6 +181,7 @@ public struct MosaicConfiguration {
     var outputdirectory: URL?                // Root output directory
     var overlay: OverlayConfiguration        // Per-frame labels, header, watermark, Color DNA
     var overwrite: Bool                      // Overwrite existing files (default: false)
+    var createOutputSubdirectory: Bool       // Create a subdirectory before saving (default: true)
     var outputDirectoryTemplate: String?     // Token-based directory path (nil = default)
     var filenameTemplate: String?            // Token-based filename (nil = default)
 
@@ -386,16 +392,28 @@ config.overwrite = true
 
 The same flag applies to `PreviewConfiguration` for preview videos.
 
+### Disabling the output subdirectory
+
+By default, `MosaicConfiguration` creates a subdirectory inside the output directory before saving
+a mosaic — either the resolved `outputDirectoryTemplate`, or a `{configurationHash}` folder when no
+template is set. Set `createOutputSubdirectory = false` to save mosaics directly into the output
+directory instead, with no extra subdirectory (`outputDirectoryTemplate` is ignored when this is
+`false`):
+
+```swift
+config.createOutputSubdirectory = false
+```
+
 ### Custom output directory template
 
-Set `outputDirectoryTemplate` to a token string. Tokens are resolved at generation time; unknown tokens are left as-is.
+Set `outputDirectoryTemplate` to a token string. Tokens are resolved at generation time; unknown tokens are left as-is. Ignored when `createOutputSubdirectory` is `false`.
 
 ```swift
 // Group output by density under the root
 config.outputDirectoryTemplate = "{root}/{density}"
 
-// Flat structure with a date-based subfolder
-config.outputDirectoryTemplate = "{root}/{date}"
+// Flat structure with a date- and time-based subfolder
+config.outputDirectoryTemplate = "{root}/{date}/{time}"
 ```
 
 **Available tokens — `MosaicConfiguration`**
@@ -409,6 +427,7 @@ config.outputDirectoryTemplate = "{root}/{date}"
 | `{aspectRatio}` | Aspect ratio raw value (e.g. `16:9`) |
 | `{layout}` | Layout type raw value (e.g. `custom`) |
 | `{date}` | Today's date in `yyyy-MM-dd` format |
+| `{time}` | Current time in `HH-mm-ss` format |
 
 **Available tokens — `PreviewConfiguration`**
 

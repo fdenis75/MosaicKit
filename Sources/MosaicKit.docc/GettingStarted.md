@@ -285,19 +285,29 @@ config.overwrite = false   // skip if already generated (default)
 config.overwrite = true    // always regenerate
 ```
 
+### Disabling the output subdirectory
+
+`MosaicConfiguration` creates a subdirectory inside the output directory before saving a mosaic
+(the resolved `outputDirectoryTemplate`, or a `{configurationHash}` folder by default). Set
+`createOutputSubdirectory = false` to save mosaics directly into the output directory instead:
+
+```swift
+config.createOutputSubdirectory = false   // no subdirectory; outputDirectoryTemplate is ignored
+```
+
 ### Custom directory and filename templates
 
 Use token strings to fully control where output files are placed and how they are named:
 
 ```swift
-// Group by creator, then density level
-config.outputDirectoryTemplate = "{root}/{creator}/{density}"
+// Group by density, then a date/time-stamped run folder
+config.outputDirectoryTemplate = "{root}/{density}/{date}_{time}"
 
 // Name each file with density and date
 config.filenameTemplate = "{name}_{density}_{date}.{ext}"
 ```
 
-Available tokens for `MosaicConfiguration`: `{root}`, `{service}`, `{creator}`, `{hash}`, `{width}`, `{density}`, `{aspectRatio}`, `{layout}`, `{date}` (directory); `{name}`, `{ext}`, `{width}`, `{density}`, `{aspectRatio}`, `{layout}`, `{hash}`, `{service}`, `{creator}`, `{postID}`, `{date}` (filename).
+Available tokens for `MosaicConfiguration`: `{root}`, `{service}`, `{creator}`, `{hash}`, `{width}`, `{density}`, `{aspectRatio}`, `{layout}`, `{date}`, `{time}` (directory); `{name}`, `{ext}`, `{width}`, `{density}`, `{aspectRatio}`, `{layout}`, `{hash}`, `{service}`, `{creator}`, `{postID}`, `{date}` (filename).
 
 Available tokens for `PreviewConfiguration`: `{root}`, `{duration}`, `{density}`, `{format}`, `{date}` (directory); `{name}`, `{ext}`, `{duration}`, `{density}`, `{format}`, `{audio}`, `{date}` (filename).
 

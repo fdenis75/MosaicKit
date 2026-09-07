@@ -140,6 +140,79 @@ struct MosaicConfigurationTests {
         #expect(fullPathFilename.hasSuffix(".png"))
     }
 
+    @Test("createOutputSubdirectory disables subdirectory creation")
+    func createOutputSubdirectoryDisabled() async {
+        let video = await makeVideoInput(filePath: "/Volumes/volname/test/test.mp4")
+        let root = URL(fileURLWithPath: "/tmp/output-root")
+
+        var config = MosaicConfiguration(width: 5120, density: .m, format: .png)
+        config.createOutputSubdirectory = false
+
+        let outputDirectory = config.generateOutputDirectory(rootDirectory: root, videoInput: video)
+        #expect(outputDirectory == root)
+    }
+
+    @Test("createOutputSubdirectory false overrides outputDirectoryTemplate")
+    func createOutputSubdirectoryOverridesTemplate() async {
+        let video = await makeVideoInput(filePath: "/Volumes/volname/test/test.mp4")
+        let root = URL(fileURLWithPath: "/tmp/output-root")
+
+        var config = MosaicConfiguration(width: 5120, density: .m, format: .png)
+        config.outputDirectoryTemplate = "{root}/{density}"
+        config.createOutputSubdirectory = false
+
+        let outputDirectory = config.generateOutputDirectory(rootDirectory: root, videoInput: video)
+        #expect(outputDirectory == root)
+    }
+
+    @Test("outputDirectoryTemplate resolves width, density, aspectRatio, layout, date, and time tokens")
+    func outputDirectoryTemplateTokens() async {
+        let video = await makeVideoInput(filePath: "/Volumes/volname/test/test.mp4")
+        let root = URL(fileURLWithPath: "/tmp/output-root")
+
+        var config = MosaicConfiguration(
+            width: 3840,
+            density: .s,
+            format: .png,
+            layout: LayoutConfiguration(aspectRatio: .vertical, layoutType: .classic)
+        )
+        config.outputDirectoryTemplate = "{root}/{date}/{time}/{width}_{density}_{aspectRatio}_{layout}"
+
+        let outputDirectory = config.generateOutputDirectory(rootDirectory: root, videoInput: video)
+        let relativePath = outputDirectory.path.replacingOccurrences(of: root.path + "/", with: "")
+        let components = relativePath.split(separator: "/")
+
+        #expect(components.count == 3)
+        #expect(components[0].wholeMatch(of: /\d{4}-\d{2}-\d{2}/) != nil, "Missing date component")
+        #expect(components[1].wholeMatch(of: /\d{2}-\d{2}-\d{2}/) != nil, "Missing time component")
+        #expect(components[2] == "3840_S_9:16_classic")
+    }
+
+    @Test("createOutputSubdirectory round-trips through Codable")
+    func createOutputSubdirectoryCodableRoundTrip() throws {
+        var config = MosaicConfiguration.default
+        config.createOutputSubdirectory = false
+
+        let data = try JSONEncoder().encode(config)
+        let decoded = try JSONDecoder().decode(MosaicConfiguration.self, from: data)
+
+        #expect(decoded.createOutputSubdirectory == false)
+    }
+
+    @Test("Decoding a payload missing createOutputSubdirectory (pre-1.4.3) defaults to true")
+    func decodeMissingCreateOutputSubdirectoryDefaultsToTrue() throws {
+        var config = MosaicConfiguration.default
+        config.createOutputSubdirectory = false
+
+        let data = try JSONEncoder().encode(config)
+        var jsonObject = try #require(try JSONSerialization.jsonObject(with: data) as? [String: Any])
+        jsonObject.removeValue(forKey: "createOutputSubdirectory")
+        let strippedData = try JSONSerialization.data(withJSONObject: jsonObject)
+
+        let decoded = try JSONDecoder().decode(MosaicConfiguration.self, from: strippedData)
+        #expect(decoded.createOutputSubdirectory == true)
+    }
+
     @Test("Deprecated iPhone initializer maps to modern background settings")
     func deprecatedIphoneInitMapping() {
         let iphoneConfig = MosaicConfiguration(forIphone: true)

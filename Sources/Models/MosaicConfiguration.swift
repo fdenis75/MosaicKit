@@ -99,13 +99,24 @@ public struct MosaicConfiguration: Codable, Sendable {
     /// file already exists at the resolved path.
     public var overwrite: Bool = false
 
+    /// Whether to create a subdirectory inside the output directory before
+    /// saving the mosaic.
+    ///
+    /// When `true` (default), the resolved subdirectory (from
+    /// `outputDirectoryTemplate`, or the legacy `{configurationHash}` folder
+    /// when no template is set) is created inside `outputdirectory` (or the
+    /// video's folder). When `false`, mosaics are saved directly into
+    /// `outputdirectory` with no extra subdirectory — `outputDirectoryTemplate`
+    /// is ignored in that case.
+    public var createOutputSubdirectory: Bool = true
+
     /// Optional token-based template controlling the output directory layout.
     ///
-    /// When `nil` (default), the legacy `{root}/{service}/{creator}/{configHash}/`
-    /// layout is used. When set, the template is resolved against the following
-    /// tokens (unknown tokens are left as-is, empty tokens are skipped):
-    /// `{root}`, `{service}`, `{creator}`, `{hash}`, `{width}`, `{density}`,
-    /// `{aspectRatio}`, `{layout}`, `{date}`.
+    /// When `nil` (default), the legacy `{root}/{configHash}/` layout is used.
+    /// When set, the template is resolved against the following tokens
+    /// (unknown tokens are left as-is, empty tokens are skipped):
+    /// `{root}`, `{hash}`, `{width}`, `{density}`, `{aspectRatio}`, `{layout}`,
+    /// `{date}`, `{time}`. Ignored when `createOutputSubdirectory` is `false`.
     public var outputDirectoryTemplate: String? = nil
 
     /// Optional token-based template controlling the output filename.
@@ -117,6 +128,66 @@ public struct MosaicConfiguration: Codable, Sendable {
     /// with `{ext}` or a literal extension; if no extension is present,
     /// `.{ext}` is appended automatically.
     public var filenameTemplate: String? = nil
+
+    // MARK: - Codable
+
+    private enum CodingKeys: String, CodingKey {
+        case width, density, format, layout, includeMetadata, useAccurateTimestamps,
+             compressionQuality, outputdirectory, fullPathInName, useMovieColorsForBg,
+             backgroundColor, overlay, gifMode, gifSize, animatedFormat, gifFps,
+             overwrite, createOutputSubdirectory, outputDirectoryTemplate, filenameTemplate
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        width = try container.decode(Int.self, forKey: .width)
+        density = try container.decode(DensityConfig.self, forKey: .density)
+        format = try container.decode(OutputFormat.self, forKey: .format)
+        layout = try container.decode(LayoutConfiguration.self, forKey: .layout)
+        includeMetadata = try container.decode(Bool.self, forKey: .includeMetadata)
+        useAccurateTimestamps = try container.decode(Bool.self, forKey: .useAccurateTimestamps)
+        compressionQuality = try container.decode(Double.self, forKey: .compressionQuality)
+        outputdirectory = try container.decodeIfPresent(URL.self, forKey: .outputdirectory)
+        fullPathInName = try container.decode(Bool.self, forKey: .fullPathInName)
+        useMovieColorsForBg = try container.decode(Bool.self, forKey: .useMovieColorsForBg)
+        backgroundColor = try container.decode(MosaicColor.self, forKey: .backgroundColor)
+        overlay = try container.decode(OverlayConfiguration.self, forKey: .overlay)
+        gifMode = try container.decode(GifCreationMode.self, forKey: .gifMode)
+        gifSize = try container.decode(GifSize.self, forKey: .gifSize)
+        animatedFormat = try container.decode(AnimatedFormat.self, forKey: .animatedFormat)
+        gifFps = try container.decode(Double.self, forKey: .gifFps)
+        overwrite = try container.decode(Bool.self, forKey: .overwrite)
+        // Added after configurations were already being persisted; missing key
+        // (older saved config) resolves to `true`, preserving the previous,
+        // unconditional subdirectory-creation behavior.
+        createOutputSubdirectory = try container.decodeIfPresent(Bool.self, forKey: .createOutputSubdirectory) ?? true
+        outputDirectoryTemplate = try container.decodeIfPresent(String.self, forKey: .outputDirectoryTemplate)
+        filenameTemplate = try container.decodeIfPresent(String.self, forKey: .filenameTemplate)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(width, forKey: .width)
+        try container.encode(density, forKey: .density)
+        try container.encode(format, forKey: .format)
+        try container.encode(layout, forKey: .layout)
+        try container.encode(includeMetadata, forKey: .includeMetadata)
+        try container.encode(useAccurateTimestamps, forKey: .useAccurateTimestamps)
+        try container.encode(compressionQuality, forKey: .compressionQuality)
+        try container.encodeIfPresent(outputdirectory, forKey: .outputdirectory)
+        try container.encode(fullPathInName, forKey: .fullPathInName)
+        try container.encode(useMovieColorsForBg, forKey: .useMovieColorsForBg)
+        try container.encode(backgroundColor, forKey: .backgroundColor)
+        try container.encode(overlay, forKey: .overlay)
+        try container.encode(gifMode, forKey: .gifMode)
+        try container.encode(gifSize, forKey: .gifSize)
+        try container.encode(animatedFormat, forKey: .animatedFormat)
+        try container.encode(gifFps, forKey: .gifFps)
+        try container.encode(overwrite, forKey: .overwrite)
+        try container.encode(createOutputSubdirectory, forKey: .createOutputSubdirectory)
+        try container.encodeIfPresent(outputDirectoryTemplate, forKey: .outputDirectoryTemplate)
+        try container.encodeIfPresent(filenameTemplate, forKey: .filenameTemplate)
+    }
 
     // MARK: - Initialization
 
@@ -282,12 +353,19 @@ public struct MosaicConfiguration: Codable, Sendable {
     /// Returns the URL where the animated image would be saved for a given video.
     /// Placed in the same directory as the mosaic, same base filename, with the
     /// extension determined by `animatedFormat` (`.gif`, `.heics`, or `.webp`).
-    public func animatedOutputURL(for video: VideoInput) -> URL {
+    ///
+    /// - Parameter referenceDate: The date/time used to resolve `{date}`/`{time}`
+    ///   tokens in `outputDirectoryTemplate`. Defaults to `Date()`; callers that
+    ///   also call `generateOutputDirectory(...)` for the same logical save
+    ///   operation (e.g. an existence check followed by the actual save) should
+    ///   pass the same `referenceDate` to both so a `{time}` token can't resolve
+    ///   to two different directories.
+    public func animatedOutputURL(for video: VideoInput, referenceDate: Date = Date()) -> URL {
         let rootFolder = outputdirectory ?? video.url.deletingLastPathComponent()
-        let outputDir = generateOutputDirectory(rootDirectory: rootFolder, videoInput: video)
+        let outputDir = generateOutputDirectory(rootDirectory: rootFolder, videoInput: video, referenceDate: referenceDate)
         let originalFilename = video.url.deletingPathExtension().lastPathComponent
         let mosaicFilename = generateFilename(originalFilename: originalFilename, videoInput: video)
-        
+
         let animFilename = "\(gifSize.name) -" + (mosaicFilename as NSString).deletingPathExtension + ".\(animatedFormat.fileExtension)"
         return outputDir.appendingPathComponent(animFilename)
     }
@@ -310,11 +388,22 @@ public struct MosaicConfiguration: Codable, Sendable {
     /// - Parameters:
     ///   - rootDirectory: The root directory for output
     ///   - videoInput: The video input (used for template token resolution)
+    ///   - referenceDate: The date/time used to resolve `{date}`/`{time}` tokens
+    ///     in `outputDirectoryTemplate`. Defaults to `Date()`; callers that
+    ///     resolve the output directory more than once for the same logical
+    ///     save operation (e.g. an existence check followed by the actual
+    ///     save) should pass the same `referenceDate` to every call so a
+    ///     `{time}` token can't resolve to two different directories.
     /// - Returns: The full output directory URL
-    public func generateOutputDirectory(rootDirectory: URL, videoInput: VideoInput) -> URL {
+    public func generateOutputDirectory(rootDirectory: URL, videoInput: VideoInput, referenceDate: Date = Date()) -> URL {
+        // Skip subdirectory creation entirely when disabled.
+        guard createOutputSubdirectory else {
+            return rootDirectory
+        }
+
         // When a custom template is provided, resolve it instead of the legacy layout.
         if let template = outputDirectoryTemplate {
-            return resolveDirectoryTemplate(template, rootURL: rootDirectory, videoInput: videoInput)
+            return resolveDirectoryTemplate(template, rootURL: rootDirectory, videoInput: videoInput, referenceDate: referenceDate)
         }
 
         var path = rootDirectory
@@ -332,13 +421,16 @@ public struct MosaicConfiguration: Codable, Sendable {
     ///   - rootURL: The root URL used to substitute `{root}` and as the
     ///     absolute base for the resulting URL.
     ///   - videoInput: Source of `{service}`, `{creator}`, and related tokens.
+    ///   - referenceDate: The date/time used to resolve `{date}`/`{time}`.
     /// - Returns: The resolved output directory URL.
     private func resolveDirectoryTemplate(
         _ template: String,
         rootURL: URL,
-        videoInput: VideoInput
+        videoInput: VideoInput,
+        referenceDate: Date
     ) -> URL {
-        let today = Self.todayString()
+        let today = Self.todayString(referenceDate)
+        let now = Self.timeString(referenceDate)
         let values: [String: String?] = [
             "root": rootURL.path,
             "hash": configurationHash,
@@ -346,7 +438,8 @@ public struct MosaicConfiguration: Codable, Sendable {
             "density": density.name,
             "aspectRatio": layout.aspectRatio.rawValue,
             "layout": layout.layoutType.rawValue,
-            "date": today
+            "date": today,
+            "time": now
         ]
 
         // Split template by "/" so that empty components (from nil tokens) can
@@ -450,7 +543,7 @@ public struct MosaicConfiguration: Codable, Sendable {
         originalFilename: String,
         videoInput: VideoInput
     ) -> String {
-        let today = Self.todayString()
+        let today = Self.todayString(Date())
         let values: [String: String?] = [
             "name": Self.sanitizeForFilePath(originalFilename),
             "ext": format.fileExtension,
@@ -490,12 +583,20 @@ public struct MosaicConfiguration: Codable, Sendable {
         return output
     }
 
-    /// Current date formatted as `yyyy-MM-dd`.
-    fileprivate static func todayString() -> String {
+    /// `date` formatted as `yyyy-MM-dd`.
+    fileprivate static func todayString(_ date: Date) -> String {
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.dateFormat = "yyyy-MM-dd"
-        return formatter.string(from: Date())
+        return formatter.string(from: date)
+    }
+
+    /// `date` formatted as `HH-mm-ss` (filesystem-safe, no colons).
+    fileprivate static func timeString(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "HH-mm-ss"
+        return formatter.string(from: date)
     }
 }
 
