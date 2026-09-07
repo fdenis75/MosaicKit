@@ -93,18 +93,24 @@ public actor MetalMosaicGenerator: MosaicGeneratorProtocol {
         }
         layoutProcessor.mosaicAspectRatio = config.layout.aspectRatio.ratio
 
+        // Resolved once and reused for both the existence check below and the
+        // actual save, so a `{time}` token in outputDirectoryTemplate can't
+        // resolve to a different directory between the two (generation can
+        // take many seconds).
+        let referenceDate = Date()
+
         // Early-exit: if the output already exists and `overwrite` is false,
         // skip generation entirely and return the existing URL.
         if !config.overwrite {
             if config.gifMode == .gifOnly {
-                let animURL = config.animatedOutputURL(for: video)
+                let animURL = config.animatedOutputURL(for: video, referenceDate: referenceDate)
                 if FileManager.default.fileExists(atPath: animURL.path) {
                     logger.debug("⏭️ Animation already exists, skipping generation: \(animURL.path)")
                     return animURL
                 }
             } else {
                 let rootFolder = config.outputdirectory ?? video.url.deletingLastPathComponent()
-                let outputDir = config.generateOutputDirectory(rootDirectory: rootFolder, videoInput: video)
+                let outputDir = config.generateOutputDirectory(rootDirectory: rootFolder, videoInput: video, referenceDate: referenceDate)
                 let originalFilename = video.url.deletingPathExtension().lastPathComponent
                 let filename = config.generateFilename(originalFilename: originalFilename, videoInput: video)
                 let mosaicURL = outputDir.appendingPathComponent(filename)
@@ -174,7 +180,7 @@ public actor MetalMosaicGenerator: MosaicGeneratorProtocol {
 
                 // Animation-only mode: skip mosaic entirely
                 if mutableConfig.gifMode == .gifOnly {
-                    let animURL = mutableConfig.animatedOutputURL(for: video)
+                    let animURL = mutableConfig.animatedOutputURL(for: video, referenceDate: referenceDate)
                     try FileManager.default.createDirectory(
                         at: animURL.deletingLastPathComponent(),
                         withIntermediateDirectories: true,
@@ -316,7 +322,8 @@ public actor MetalMosaicGenerator: MosaicGeneratorProtocol {
                     mosaic,
                     for: video,
                     config: config,
-                    forIphone: forIphone
+                    forIphone: forIphone,
+                    referenceDate: referenceDate
                 )
 
                 progressHandlers[videoID]?(MosaicGenerationProgress(
@@ -724,17 +731,22 @@ public actor MetalMosaicGenerator: MosaicGeneratorProtocol {
     ///   - mosaic: The mosaic image to save
     ///   - video: The video the mosaic was generated for
     ///   - config: The mosaic configuration
+    ///   - referenceDate: The date/time used to resolve `{date}`/`{time}` tokens
+    ///     in `config.outputDirectoryTemplate`. Callers should pass the same
+    ///     `referenceDate` used for any earlier existence check on this same
+    ///     save operation so a `{time}` token resolves to the same directory.
     /// - Returns: The URL of the saved mosaic
     private func saveMosaic(
         _ mosaic: CGImage,
         for video: VideoInput,
         config: MosaicConfiguration,
-        forIphone: Bool = false
+        forIphone: Bool = false,
+        referenceDate: Date = Date()
     ) async throws -> URL {
         let state = signposter.beginInterval("Save Mosaic")
         defer { signposter.endInterval("Save Mosaic", state) }
         signposter.emitEvent("saving mosaic","name : \(video.url.lastPathComponent)")
-        
+
         // Determine base output directory
         var baseOutputDirectory: URL
         var mosaicURL: URL!
@@ -743,7 +755,7 @@ public actor MetalMosaicGenerator: MosaicGeneratorProtocol {
         let rootFolder = config.outputdirectory ?? video.url.deletingLastPathComponent()
 
         // Generate structured path: {root}/{service}/{creator}/{configHash}/
-        baseOutputDirectory = config.generateOutputDirectory(rootDirectory: rootFolder, videoInput: video)
+        baseOutputDirectory = config.generateOutputDirectory(rootDirectory: rootFolder, videoInput: video, referenceDate: referenceDate)
 
         let didStartAccessingBaseDirectory = baseOutputDirectory.startAccessingSecurityScopedResource()
         defer {
