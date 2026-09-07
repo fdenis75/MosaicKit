@@ -5,7 +5,6 @@ import OSLog
 import Metal
 import VideoToolbox
 import UniformTypeIdentifiers
-import webp
 #if canImport(AppKit)
 import AppKit
 #elseif canImport(UIKit)
@@ -787,8 +786,10 @@ public actor MetalMosaicGenerator: MosaicGeneratorProtocol {
                     mosaicURL.deletingLastPathComponent().stopAccessingSecurityScopedResource()
                 }
             }
-            let webpConfig = WebpEncoderConfig.preset(.picture, quality: Float(config.compressionQuality * 100))
-            let data = try WebPEncoder().encode(RGBA: mosaic, config: webpConfig)
+            guard let encoder = MosaicKitWebPSupport.encoder else {
+                throw MosaicKitWebPError.encoderNotRegistered
+            }
+            let data = try encoder.encodeStillWebP(mosaic, quality: Float(config.compressionQuality * 100))
             try data.write(to: mosaicURL)
             return mosaicURL
         }

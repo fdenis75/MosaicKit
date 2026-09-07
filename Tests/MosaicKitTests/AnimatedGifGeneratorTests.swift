@@ -2,8 +2,15 @@ import Foundation
 import CoreGraphics
 import Testing
 @testable import MosaicKit
+import MosaicKitWebP
 
 struct AnimatedGifGeneratorTests {
+
+    init() {
+        // .webp tests below need an encoder registered; MosaicKit itself no
+        // longer links webp directly (see Sources/Processing/WebPSupport.swift).
+        MosaicKitWebP.register()
+    }
 
     // MARK: - AnimatedGifGenerator unit tests
 

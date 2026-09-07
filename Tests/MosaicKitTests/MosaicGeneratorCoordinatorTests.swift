@@ -1,8 +1,16 @@
 import Foundation
 import Testing
 @testable import MosaicKit
+import MosaicKitWebP
 
 struct MosaicGeneratorCoordinatorTests {
+    init() {
+        // The WebP coordinator test below needs an encoder registered;
+        // MosaicKit itself no longer links webp directly (see
+        // Sources/Processing/WebPSupport.swift).
+        MosaicKitWebP.register()
+    }
+
     // Set MOSAICKIT_TEST_VIDEOS_DIR env var to a folder of test videos to enable folder/batch tests
     private static let defaultMediaFolderPath = "/tmp/mosaickit-test-videos"
     private static let folderPathEnvKey = "MOSAICKIT_TEST_VIDEOS_DIR"

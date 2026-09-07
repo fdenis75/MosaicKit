@@ -2,12 +2,6 @@ import Foundation
 import CoreGraphics
 import ImageIO
 import OSLog
-import webp
-#if os(macOS)
-import AppKit
-#else
-import UIKit
-#endif
 
 /// Creates animated image files from a sequence of `CGImage` frames using Core Graphics / ImageIO.
 ///
@@ -83,26 +77,12 @@ public struct AnimatedGifGenerator: Sendable {
     // MARK: - Private helpers
 
     private static func saveWebP(frames: [CGImage], to url: URL, frameDelay: Double) throws {
-        guard let first = frames.first else { return }
-        let encoder = WebPAnimatedEncoder()
-        let config = WebpEncoderConfig.preset(.picture, quality: 80)
-        try encoder.create(config: config, width: first.width, height: first.height)
-        let durationMs = Int(frameDelay * 1000)
-        for frame in frames {
-            try Task.checkCancellation()
-            try encoder.addImage(image: makePlatformImage(from: frame), duration: durationMs)
+        guard let encoder = MosaicKitWebPSupport.encoder else {
+            throw MosaicKitWebPError.encoderNotRegistered
         }
-        let data = try encoder.encode(loopCount: 0)
+        let data = try encoder.encodeAnimatedWebP(frames: frames, frameDelay: frameDelay)
         try data.write(to: url)
         logger.debug("✅ WEBP saved — \(frames.count) frames at \(String(format: "%.3f", frameDelay))s/frame → \(url.lastPathComponent)")
-    }
-
-    private static func makePlatformImage(from cgImage: CGImage) -> WebPPlatformImage {
-        #if os(macOS)
-        return NSImage(cgImage: cgImage, size: NSSize(width: cgImage.width, height: cgImage.height))
-        #else
-        return UIImage(cgImage: cgImage)
-        #endif
     }
 
     private static func containerProperties(for format: AnimatedFormat) -> [String: Any] {
