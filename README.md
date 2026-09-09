@@ -16,6 +16,12 @@ A high-performance Swift package for generating video mosaics with Metal-acceler
 - 🎯 **Hardware-Accelerated Frame Extraction** - Uses VideoToolbox for optimal performance
 - 📊 **Overlay Annotations** - Per-frame labels (timestamp, index), customisable metadata headers, watermarks, and Color DNA strips
 - 🎬 **Video Preview Generation** - Create short highlight reels from any video, either exported to file or as a live `AVPlayerItem` composition
+## New in 1.6.2
+```
+. fix max output resolution
+```
+
+
 
 ## New in 1.6.0
 
