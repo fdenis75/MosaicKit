@@ -35,6 +35,21 @@ public enum nativeExportPreset: String, Codable, Sendable, CaseIterable, Identif
         }
     }
     
+    public var availableResolutions: [ExportMaxResolution]?
+    {
+        switch self{
+        case .AVAssetExportPresetPassthrough:
+            return nil
+        case  .AVAssetExportPresetHEVCHighestQuality, .AVAssetExportPresetHighestQuality  :
+            return ExportMaxResolution.allCases
+        case .AVAssetExportPresetHEVC1920x1080:
+            return [ExportMaxResolution.SD, ExportMaxResolution._720p, ExportMaxResolution._1080p ]
+        case .AVAssetExportPresetMediumQuality, .AVAssetExportPreset960x540, .AVAssetExportPresetLowQuality:
+            return [ExportMaxResolution.SD]
+        }
+        
+    }
+    
     /// A human-readable display string for the preset.
     public var displayString: String {
         switch self {
@@ -109,7 +124,7 @@ public enum nativeExportPreset: String, Codable, Sendable, CaseIterable, Identif
         case .AVAssetExportPresetHEVC1920x1080:
             return NativeExportPresetProfile(
                 codec: .hevc, profile: "Main", level: "4.0",
-                maxResolution: CGSize(width: 1920, height: 1080),
+                maxResolution: nil,
                 resolutionDescription: "1920x1080 (1080p)"
             )
         case .AVAssetExportPresetHighestQuality:
@@ -289,6 +304,7 @@ public enum ExportMaxResolution: String, Codable, Sendable, CaseIterable, Identi
         }
     }
 
+    
     /// Alias for ``maxWidth``, matching the naming used by `FFmpegEncodingOptions`'s
     /// now-unified resolution type.
     public var width: Int { maxWidth }

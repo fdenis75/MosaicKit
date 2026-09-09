@@ -61,7 +61,7 @@ private struct PreviewComboConfig: Sendable {
     let ffmpegOptions: FFmpegEncodingOptions?
     let minimumExtractDuration: TimeInterval
     let maximumPlaybackSpeed: Double
-
+    let maxRes: ExportMaxResolution?
     // MARK: FFmpeg binary discovery
 
     /// Resolves the ffmpeg binary path from, in order:
@@ -147,6 +147,7 @@ private struct PreviewComboConfig: Sendable {
         )
         config.outputDirectoryTemplate = "{root}"
         config.overwrite = false
+        config.exportMaxResolution = maxRes
         return config
     }
 }
@@ -185,17 +186,15 @@ private extension PreviewComboConfig {
     /// FFMPEG_PATH=/opt/homebrew/bin/ffmpeg PREVIEW_COMBO_RUN=1 swift test --filter PreviewCombinationTests
     /// ```
     static func makeAll() -> [PreviewComboConfig] {
-        let durations:   [TimeInterval]          = [60]
-        let densities:   [DensityConfig]         = [.s]
+        let durations:   [TimeInterval]          = [30]
+        let densities:   [DensityConfig]         = [.xl]
         let audioValues: [Bool]                  = [true]
         let minDurations:[TimeInterval]          = [2.0]
         let maxSpeeds:   [Double]                = [1.0]
+        let maxResolutions: [ExportMaxResolution] = [.SD]
 
-        let nativePresets: [nativeExportPreset]  = [
-            
-            .AVAssetExportPresetHEVCHighestQuality,
-            .AVAssetExportPresetHEVC1920x1080
-        ]
+        let nativePresets: [nativeExportPreset]  = nativeExportPreset.allCases
+        
         // let sjsPresets: [SjSExportPreset]        = [.hevc]
 
         // FFmpeg option variants — ordered from fastest to highest quality:
@@ -250,18 +249,21 @@ private extension PreviewComboConfig {
                 for audio in audioValues {
                     for minDur in minDurations {
                         for maxSpd in maxSpeeds {
-
-                            // --- Native export ---
-                       /*     for preset in nativePresets {
-                                configs.append(PreviewComboConfig(
-                                    index: idx, targetDuration: dur, density: dens,
-                                    includeAudio: audio,
-                                    exportMode: .native,
-                                    nativePreset: preset, sjsPreset: nil, ffmpegOptions: nil,
-                                    minimumExtractDuration: minDur, maximumPlaybackSpeed: maxSpd
-                                ))
-                                idx += 1
+                            for maxRes in maxResolutions {
+                                
+                                // --- Native export ---
+                                for preset in nativePresets {
+                                    configs.append(PreviewComboConfig(
+                                        index: idx, targetDuration: dur, density: dens,
+                                        includeAudio: audio,
+                                        exportMode: .native,
+                                        nativePreset: preset, sjsPreset: nil, ffmpegOptions: nil,
+                                        minimumExtractDuration: minDur, maximumPlaybackSpeed: maxSpd, maxRes: maxRes
+                                    ))
+                                    idx += 1
+                                }
                             }
+                         /*
 
                             // --- SJS export ---
                                        for preset in sjsPresets {
@@ -274,7 +276,7 @@ private extension PreviewComboConfig {
                                 ))
                                 idx += 1
                             }
-*/
+
                             // --- FFmpeg export (only when binary is available) ---
                          if ffmpegPath != nil {
                                 for options in ffmpegOptionsList {
@@ -288,6 +290,7 @@ private extension PreviewComboConfig {
                                     idx += 1
                                 }
                             }
+                            */
                         }
                     }
                 }
@@ -493,10 +496,10 @@ struct PreviewCombinationTests {
 
         let combos    = Self.allCombos
         let outputDir = Self.runOutputDirectory
-        let video     = await VideoInput(url: url(for: "DJI_0635.MP4"))
+        let video     = await VideoInput(url: url(for: "DJI_0003.MP4"))
         let reporter  = PreviewProgressReporter(total: combos.count)
 
-        printHeader(phase: 1, videos: ["DJI_0635.MP4"], combosPerVideo: combos.count)
+        printHeader(phase: 1, videos: ["DJI_003.MP4"], combosPerVideo: combos.count)
         print(String(format: "  Video info: %@  %.0fs  %dx%d\n",
                      video.title, video.duration ?? 0,
                      Int(video.width ?? 0), Int(video.height ?? 0)))

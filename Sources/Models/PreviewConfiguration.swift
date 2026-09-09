@@ -157,7 +157,7 @@ public struct PreviewConfiguration: Codable, Sendable, Hashable {
     /// Stored as a raw `String?` so `PreviewConfiguration` remains fully `Codable`
     /// on macOS 15+ even though `ExportMaxResolution` itself requires macOS 26+.
     /// Defaults to `"1080p"` (mirrors `ExportMaxResolution._1080p`).
-    private var _exportMaxResolutionRaw: String? = "1080p"
+    private var _exportMaxResolutionRaw: String? = "4K"
 
     /// Internal accessor for the raw resolution value, used by the video-generation
     /// pipeline to pass the preference through without requiring an `#available` context.

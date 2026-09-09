@@ -21,8 +21,8 @@
         "value" : "\/Users\/francois\/Downloads\/testvidsnodelete\/output"
       },
       {
-        "key" : "MOSAIC_TEST_VIDEO",
-        "value" : "\/Volumes\/Ext-6TB\/Fansly\/thorriandjax_fansly\/Timeline\/Videos\/2025-02-20_at_07-50_id_748292850642329601_hash2_1f99813fdbeb8bad374c50d1261b90bb.mp4"
+        "key" : "PREVIEW_COMBO_RUN",
+        "value" : "1"
       }
     ],
     "performanceAntipatternCheckerEnabled" : true
@@ -33,6 +33,9 @@
         "suites" : [
           {
             "name" : "AnimatedGifGeneratorTests"
+          },
+          {
+            "name" : "CombinationTests"
           },
           {
             "name" : "ErrorTypesTests"
@@ -53,7 +56,11 @@
             "name" : "OverlayProcessorTests"
           },
           {
-            "name" : "PreviewCombinationTests"
+            "name" : "PreviewCombinationTests",
+            "testFunctions" : [
+              "phase2_sequentialVideos()",
+              "phase3_concurrentVideos()"
+            ]
           },
           {
             "name" : "PreviewConfigurationTests"
