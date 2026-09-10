@@ -137,7 +137,7 @@ public actor PreviewGeneratorCoordinator {
     ) async throws -> [PreviewCompositionResult] {
         logger.info("Starting batch preview composition generation for \(videos.count) videos")
 
-        let batchConcurrencyLimit = self.effectiveConcurrencyLimit
+        var batchConcurrencyLimit = self.effectiveConcurrencyLimit
         logger.info("Using concurrency limit: \(batchConcurrencyLimit)")
 
         let epoch = batchEpoch
@@ -150,6 +150,15 @@ public actor PreviewGeneratorCoordinator {
         return try await withThrowingTaskGroup(of: PreviewCompositionResult.self) { group in
 
             for video in videos {
+                // Pick up any concurrency limit change made mid-batch (e.g. via
+                // Settings while this batch is running) before deciding whether
+                // to wait for a slot.
+                let currentLimit = self.effectiveConcurrencyLimit
+                if currentLimit != batchConcurrencyLimit {
+                    logger.debug("Applying concurrency limit change mid-batch: \(batchConcurrencyLimit) -> \(currentLimit)")
+                    batchConcurrencyLimit = currentLimit
+                }
+
                 // Wait for available slot by collecting a completed task
                 while activeTasks >= batchConcurrencyLimit {
                     if let result = try await group.next() {
@@ -159,6 +168,7 @@ public actor PreviewGeneratorCoordinator {
                         if result.isSuccess { successCount += 1 } else { failureCount += 1 }
                         logger.debug("Progress: \(completed)/\(videos.count) complete")
                     }
+                    batchConcurrencyLimit = self.effectiveConcurrencyLimit
                 }
 
                 // Stop dequeuing if cancelAllGenerations() arrived after this batch started
@@ -234,7 +244,7 @@ public actor PreviewGeneratorCoordinator {
     ) async throws -> [PreviewGenerationResult] {
         logger.info("Starting batch preview generation for \(videos.count) videos")
 
-        let batchConcurrencyLimit = self.effectiveConcurrencyLimit
+        var batchConcurrencyLimit = self.effectiveConcurrencyLimit
         logger.info("Using concurrency limit: \(batchConcurrencyLimit)")
 
         let epoch = batchEpoch
@@ -247,6 +257,15 @@ public actor PreviewGeneratorCoordinator {
         return try await withThrowingTaskGroup(of: PreviewGenerationResult.self) { group in
 
             for video in videos {
+                // Pick up any concurrency limit change made mid-batch (e.g. via
+                // Settings while this batch is running) before deciding whether
+                // to wait for a slot.
+                let currentLimit = self.effectiveConcurrencyLimit
+                if currentLimit != batchConcurrencyLimit {
+                    logger.debug("Applying concurrency limit change mid-batch: \(batchConcurrencyLimit) -> \(currentLimit)")
+                    batchConcurrencyLimit = currentLimit
+                }
+
                 // Wait for available slot by collecting a completed task
                 while activeTasks >= batchConcurrencyLimit {
                     if let result = try await group.next() {
@@ -256,6 +275,7 @@ public actor PreviewGeneratorCoordinator {
                         if result.isSuccess { successCount += 1 } else { failureCount += 1 }
                         logger.debug("Progress: \(completed)/\(videos.count) complete")
                     }
+                    batchConcurrencyLimit = self.effectiveConcurrencyLimit
                 }
 
                 // Stop dequeuing if cancelAllGenerations() arrived after this batch started
