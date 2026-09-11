@@ -11,17 +11,27 @@ A high-performance Swift package for generating video mosaics with Metal-acceler
 - 🚀 **Metal GPU Acceleration** - Hardware-accelerated mosaic generation on macOS, iOS, and macCatalyst
 - 🎨 **Multiple Layout Algorithms** - Classic, custom, auto-screen, dynamic, and iPhone-optimized layouts
 - ⚙️ **Configurable Density Levels** - From XXL (minimal) to XXS (maximal) frame extraction
-- 📦 **Multiple Output Formats** - JPEG, PNG, and HEIF with configurable compression
+- 📦 **Multiple Output Formats** - JPEG, PNG, HEIF, and WebP (via the optional `MosaicKitWebP` product) with configurable compression
 - 🔄 **Batch Processing** - Intelligent concurrency management for processing multiple videos
 - 🎯 **Hardware-Accelerated Frame Extraction** - Uses VideoToolbox for optimal performance
 - 📊 **Overlay Annotations** - Per-frame labels (timestamp, index), customisable metadata headers, watermarks, and Color DNA strips
 - 🎬 **Video Preview Generation** - Create short highlight reels from any video, either exported to file or as a live `AVPlayerItem` composition
+## New in 1.6.4
+
+- **`BackgroundProcessing` DocC article** — a how-to guide for wrapping mosaic/preview generation in iOS 26's `BGContinuedProcessingTask`, including the `PreviewConfiguration.enableAppLifecycleMonitor` gotcha (its foreground-wait gate stalls a background-task export unless disabled).
+- **More precise Metal batch-composite error** — a failing batch command buffer in `MetalImageProcessor` now throws `MetalProcessorError.commandBufferExecutionFailed(context:underlying:)` with the GPU's actual error description, instead of a generic buffer-creation-failure case.
+
+## New in 1.6.3
+
+- **Preview coordinator concurrency limit is now re-read live** — `PreviewGeneratorCoordinator`'s batch loops previously captured `concurrencyLimit` once at batch start; a `setConcurrencyLimit(_:)` call mid-batch now takes effect immediately, matching the mosaic coordinator's existing behaviour.
+
 ## New in 1.6.2
-```
-. fix max output resolution
-```
 
+- **Fixed max export resolution** — `PreviewConfiguration`'s default `ExportMaxResolution` is now `4K` (was `1080p`), and `nativeExportPreset` gained an `availableResolutions` accessor describing which `ExportMaxResolution` values are valid for each native export preset.
 
+## New in 1.6.1
+
+- **WebP support split into a separate product** — `MosaicKitWebP` is now its own library target so that linking `MosaicKit` alone no longer pulls in the `webp.swift` binary xcframework (which broke SwiftUI Preview's JIT execution for every client). Call `MosaicKitWebP.register()` at startup to enable `.webp` output.
 
 ## New in 1.6.0
 
@@ -83,8 +93,8 @@ All three new options are fully `Codable`/`Sendable` and default to backward-com
 
 ## Requirements
 
-- macOS 26.0+ or iOS 26.0+
-- Xcode 16.0+
+- macOS 26.0+, iOS 26.0+, or macCatalyst 26.0+
+- Xcode 26.0+
 - Swift 6.2+
 - Metal-capable device (guaranteed on all iOS 26+ and macOS 26+ devices)
 
@@ -130,7 +140,7 @@ let videoURL = URL(fileURLWithPath: "/path/to/video.mp4")
 let video = try await VideoInput(from: videoURL)
 
 // Configure mosaic settings
-var config = MosaicConfiguration.default
+var config = MosaicConfiguration()
 config.outputdirectory = URL(fileURLWithPath: "/path/to/output")
 
 // Generate the mosaic
@@ -155,7 +165,7 @@ let videoURL = URL(fileURLWithPath: "/path/to/video.mp4")
 let video = try await VideoInput(from: videoURL)
 
 // Configure mosaic settings
-var config = MosaicConfiguration.default
+var config = MosaicConfiguration()
 config.width = 5000
 config.density = .m
 config.format = .heif
@@ -231,9 +241,11 @@ layout.aspectRatio = .ultrawide   // 21:9
 layout.aspectRatio = .vertical    // 9:16 (portrait)
 
 // Layout modes
-layout.useCustomLayout = true     // Three-zone layout with large center thumbnails
-layout.useAutoLayout = true       // Adapt to screen size
-// Or use classic grid layout (default)
+layout.layoutType = .custom       // Three-zone layout with large center thumbnails (default)
+layout.layoutType = .auto         // Adapt to screen size
+layout.layoutType = .classic      // Uniform grid
+layout.layoutType = .dynamic      // Center-emphasized, variable sizing
+layout.layoutType = .iphone       // Mobile-optimized vertical scrolling
 
 // Visual settings
 layout.visual.addBorder = true
@@ -389,7 +401,7 @@ By default (`overwrite: false`) both generators check for the output file **befo
 
 ```swift
 // Process a large library incrementally — already-generated mosaics are skipped automatically
-var config = MosaicConfiguration.default
+var config = MosaicConfiguration()
 config.overwrite = false   // default — safe to omit
 
 // Force regeneration even when the file is present
@@ -534,23 +546,19 @@ let result = try await coordinator.generateMosaic(
 
 ### Custom Video Input
 
-Create VideoInput manually with specific metadata:
+Give a video a custom display `title` (metadata like duration/dimensions/frame rate is always
+re-extracted from the file itself via `AVAsset`, regardless of what you pass for those parameters):
 
 ```swift
-let video = VideoInput(
+let video = await VideoInput(
     url: videoURL,
-    title: "My Video",
-    duration: 120.0,
-    width: 1920,
-    height: 1080,
-    frameRate: 30.0,
-    fileSize: 50_000_000,
-    metadata: VideoMetadata(
-        codec: "H.264",
-        bitrate: 5_000_000
-    )
+    title: "My Video"
 )
 ```
+
+`VideoInput(from:postID:)` is the throwing async initializer used elsewhere in this guide; it
+acquires security-scoped access to the URL before extracting metadata and throws
+`MosaicError.invalidVideo` if that access can't be obtained.
 
 ### Performance Metrics
 
@@ -657,6 +665,8 @@ public struct PreviewConfiguration {
     public var overwrite: Bool                       // Overwrite existing files (default: false)
     public var outputDirectoryTemplate: String?      // Token-based directory path (nil = default)
     public var filenameTemplate: String?             // Token-based filename (nil = default)
+    public var enableAppLifecycleMonitor: Bool       // Wait for foreground before exporting (default: true)
+    public var enableExportRetry: Bool               // Retry on export stall, up to 3 times (default: true)
 }
 ```
 
@@ -701,7 +711,7 @@ let results = try await coordinator.generatePreviewCompositionsForBatch(
     videos: [video1, video2, video3],
     config: config
 ) { progress in
-    print("\(progress.video.filename): \(progress.status.displayLabel)")
+    print("\(progress.video.title): \(progress.status.displayLabel)")
 }
 
 let succeeded = results.filter(\.isSuccess)
@@ -723,7 +733,7 @@ batch call throws `CancellationError`.
 Three-zone layout with small thumbnails at top/bottom and large thumbnails in the center:
 
 ```swift
-config.layout.useCustomLayout = true
+config.layout.layoutType = .custom
 // Automatically calculates optimal grid based on:
 // - Target aspect ratio
 // - Video aspect ratio
@@ -736,8 +746,7 @@ config.layout.useCustomLayout = true
 Traditional grid layout with uniform thumbnail sizes:
 
 ```swift
-config.layout.useCustomLayout = false
-config.layout.useAutoLayout = false
+config.layout.layoutType = .classic
 // Simple rows × columns grid
 ```
 
@@ -746,7 +755,7 @@ config.layout.useAutoLayout = false
 Adapts to your display size for optimal viewing:
 
 ```swift
-config.layout.useAutoLayout = true
+config.layout.layoutType = .auto
 // Calculates based on:
 // - Screen resolution
 // - DPI/scaling factor
@@ -758,7 +767,7 @@ config.layout.useAutoLayout = true
 Center-emphasized layout with variable thumbnail sizes:
 
 ```swift
-config.layout.useDynamicLayout = true
+config.layout.layoutType = .dynamic
 // Larger thumbnails in center, smaller at edges
 ```
 
@@ -801,7 +810,7 @@ let mosaicURL = try await generator.generate(for: video, config: config)
 ### Example 3: Square Social Media Mosaic
 
 ```swift
-var config = MosaicConfiguration.default
+var config = MosaicConfiguration()
 config.width = 3000
 config.layout.aspectRatio = .square
 config.density = .m
@@ -856,8 +865,9 @@ MosaicKit uses an intelligent frame extraction strategy:
 
 ```swift
 do {
+    let generator = try MetalMosaicGenerator()  // throws MetalProcessorError.deviceNotAvailable
     let mosaicURL = try await generator.generate(for: video, config: config)
-} catch MosaicError.metalNotSupported {
+} catch MetalProcessorError.deviceNotAvailable {
     print("Metal is not available on this device")
 } catch MosaicError.invalidVideo(let message) {
     print("Invalid video: \(message)")
@@ -879,11 +889,11 @@ do {
 
 ## Concurrency Management
 
-Batch processing automatically adjusts concurrency based on:
+When `concurrencyLimit` is `0` (the default), `MosaicGeneratorCoordinator` picks a limit per batch:
 
-- **CPU cores**: max(2, processorCount - 1)
-- **Available memory**: max(2, physicalMemory / 4GB)
-- **Final limit**: min(cpu_limit, memory_limit, configured_limit)
+- **CPU-based limit**: `max(2, activeProcessorCount / 2)`
+- **Memory-based limit**: `max(2, Int(physicalMemoryGB / (config.width * config.density.factor / 2000)))` — scales down for larger/denser mosaics
+- **Effective limit**: the smaller of the two
 
 ```swift
 // Configure custom concurrency limit
@@ -896,10 +906,10 @@ let coordinator = MosaicGeneratorCoordinator(
 
 ## Troubleshooting
 
-### "Metal is not supported"
+### `MetalProcessorError.deviceNotAvailable`
 - Ensure you're running on a Metal-capable device
-- Check minimum OS requirements (macOS 26+ / iOS 26+)
-- Metal is guaranteed on all iOS 26+ and macOS 26+ devices; this error should not occur in practice
+- Check minimum OS requirements (macOS 26+ / iOS 26+ / macCatalyst 26+)
+- Metal is guaranteed on all iOS 26+ and macOS 26+ devices; this error should not occur in practice — there is no Core Graphics fallback to switch to if it does
 
 ### Out of memory errors
 - Reduce mosaic width

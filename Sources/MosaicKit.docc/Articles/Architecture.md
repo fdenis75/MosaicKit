@@ -1,6 +1,6 @@
 # Architecture Overview
 
-Understanding MosaicKit's dual-platform architecture and component design.
+Understanding MosaicKit's Metal-based architecture and component design.
 
 @Metadata {
     @PageImage(purpose: card, source: "architecture-diagram")
@@ -8,29 +8,29 @@ Understanding MosaicKit's dual-platform architecture and component design.
 
 ## Overview
 
-MosaicKit is built on a modular architecture that uses Metal GPU acceleration on all supported platforms while maintaining a unified API. The library uses a factory pattern to create the right implementation.
+MosaicKit is built on a single Metal GPU backend used on every supported platform (macOS, iOS,
+macCatalyst). There is no factory or platform-selection wrapper — `MetalMosaicGenerator` is the
+sole public entry point and is constructed directly.
 
 ## High-Level Architecture
 
 ```mermaid
 graph TB
     App[Application Code]
-    
-    App --> MG[MosaicGenerator]
-    
-    MG --> Factory[MosaicGeneratorFactory]
-    
-    Factory -->|all platforms| Metal[MetalMosaicGenerator]
-    
+
+    App --> Metal[MetalMosaicGenerator]
+    App --> Coord[MosaicGeneratorCoordinator]
+    Coord --> Metal
+
     Metal --> MetalProc[MetalImageProcessor]
-    
+
     MetalProc --> GPU[Metal GPU Shaders]
-    
+
     Metal --> Layout[LayoutProcessor]
     Metal --> Thumb[ThumbnailProcessor]
-    
+
     Thumb --> VT[VideoToolbox]
-    
+
     style Metal fill:#4A90E2
     style GPU fill:#F5A623
 ```
@@ -39,48 +39,29 @@ graph TB
 
 ### Entry Point Layer
 
-**MosaicGenerator**
+**MetalMosaicGenerator**
 
-The primary public API that applications interact with. This class:
-- Provides a simple, unified interface for mosaic generation
-- Delegates to platform-specific implementations via the factory pattern
-- Handles VideoInput creation from URLs
-- Manages logging and error propagation
+The primary public API that applications interact with. This actor:
+- Conforms to ``MosaicGeneratorProtocol``
+- Owns the Metal, layout, and thumbnail-extraction pipeline for one generator instance
+- Tracks in-flight generation tasks per `VideoInput` for cancellation and progress reporting
 
 ```swift
-public final class MosaicGenerator {
-    private let internalGenerator: Any?
-    private let generatorPreference: GeneratorPreference
-    
-    public init(preference: GeneratorPreference = .auto) throws
-    public func generate(from: URL, config: MosaicConfiguration, 
-                        outputDirectory: URL) async throws -> URL
-    public func generateBatch(from: [URL], config: MosaicConfiguration, 
-                             outputDirectory: URL) async throws -> [URL]
+public actor MetalMosaicGenerator: MosaicGeneratorProtocol {
+    public init(layoutProcessor: LayoutProcessor = LayoutProcessor()) throws
+
+    public func generate(for video: VideoInput, config: MosaicConfiguration,
+                         forIphone: Bool = false) async throws -> URL
+    public func generateMosaicImage(for video: VideoInput, config: MosaicConfiguration,
+                                    forIphone: Bool) async throws -> CGImage
+    public func generateallcombinations(for video: VideoInput,
+                                        config: MosaicConfiguration) async throws -> [URL]
 }
 ```
 
-### Factory Layer
-
-**MosaicGeneratorFactory**
-
-Responsible for creating the appropriate generator implementation:
-
-```swift
-public enum MosaicGeneratorFactory {
-    public enum GeneratorPreference {
-        case auto          // Metal (default)
-        case preferMetal   // Metal (explicit)
-    }
-    
-    static func createGenerator(preference: GeneratorPreference) throws 
-        -> any MosaicGeneratorProtocol
-}
-```
-
-Decision logic:
-1. `.auto`: Metal GPU on all platforms
-2. `.preferMetal`: Metal GPU (explicit)
+For batches, wrap it in ``MosaicGeneratorCoordinator`` (or use the `createDefaultMosaicCoordinator`/
+`createMosaicCoordinatorWithMetal` convenience functions), which adds CPU/memory-aware
+concurrency limits and per-video cancellation on top of a single generator instance.
 
 ### Protocol Layer
 
@@ -90,30 +71,25 @@ Defines the contract that both implementations must fulfill:
 
 ```swift
 public protocol MosaicGeneratorProtocol: Actor {
-    func generate(for: VideoInput, config: MosaicConfiguration, 
+    func generate(for video: VideoInput, config: MosaicConfiguration,
                  forIphone: Bool) async throws -> URL
-    func generateallcombinations(for: VideoInput, 
+    func generateMosaicImage(for video: VideoInput, config: MosaicConfiguration,
+                             forIphone: Bool) async throws -> CGImage
+    func generateallcombinations(for video: VideoInput,
                                 config: MosaicConfiguration) async throws -> [URL]
-    func cancel(for: VideoInput)
+    func cancel(for video: VideoInput)
     func cancelAll()
-    func setProgressHandler(for: VideoInput, 
+    func setProgressHandler(for video: VideoInput,
                            handler: @escaping @Sendable (MosaicGenerationProgress) -> Void)
     func getPerformanceMetrics() -> [String: Any]
 }
 ```
 
 This protocol enables:
-- Uniform interface across platforms
-- Type-safe factory pattern
+- A single, testable interface in front of the Metal engine
 - Seamless actor-isolated concurrency
 
-### Implementation Layer
-
-#### MetalMosaicGenerator (all platforms)
-
-Actor-based generator leveraging Metal GPU acceleration:
-
-**Key Features:**
+**Key Features of `MetalMosaicGenerator`:**
 - GPU-parallel frame processing
 - High-quality texture scaling with bilinear/trilinear filtering
 - Alpha-blended compositing using Metal shaders
@@ -125,23 +101,12 @@ Actor-based generator leveraging Metal GPU acceleration:
 - Memory: GPU memory pooling, texture reuse
 - Concurrency: GPU command buffer parallelization
 
-```swift
-public actor MetalMosaicGenerator: MosaicGeneratorProtocol {
-    private let metalProcessor: MetalImageProcessor
-    private let layoutProcessor: LayoutProcessor
-    private let thumbnailProcessor: ThumbnailProcessor
-    
-    // Actor-isolated state
-    private var generationTasks: [UUID: Task<URL, Error>]
-    private var frameCache: [UUID: [CMTime: CGImage]]
-}
-```
-
 ### Processing Layer
 
 #### LayoutProcessor
 
-Calculates optimal thumbnail layouts using multiple algorithms:
+Calculates optimal thumbnail layouts using multiple algorithms, cached by
+`(aspectRatio, thumbnailCount, mosaicWidth, density, layoutType)`:
 
 ```swift
 public final class LayoutProcessor {
@@ -167,16 +132,18 @@ See <doc:LayoutAlgorithms> for detailed algorithm descriptions.
 
 #### ThumbnailProcessor
 
-Extracts frames from video using VideoToolbox hardware acceleration:
+Extracts frames from video using `AVAssetImageGenerator`, hardware-accelerated via VideoToolbox:
 
 ```swift
-final class ThumbnailProcessor {
-    func extractThumbnails(
-        from: URL,
-        count: Int,
-        density: DensityConfig,
-        config: MosaicConfiguration
-    ) async throws -> [CMTime: CGImage]
+public final class ThumbnailProcessor: Sendable {
+    public func extractThumbnails(
+        from file: URL,
+        layout: MosaicLayout,
+        asset: AVAsset,
+        preview: Bool = false,
+        accurate: Bool = false,
+        progressHandler: ((Double) -> Void)? = nil
+    ) async throws -> [(image: CGImage, timestamp: String)]
 }
 ```
 
@@ -186,21 +153,21 @@ final class ThumbnailProcessor {
 - Last third: 20% of frames
 - Skips first/last 5% to avoid fade effects
 
-#### MetalImageProcessor (all platforms)
+#### MetalImageProcessor
 
 GPU-accelerated image composition using Metal shaders:
 
 ```swift
-final class MetalImageProcessor {
-    private let device: MTLDevice
-    private let commandQueue: MTLCommandQueue
-    private let pipelineState: MTLComputePipelineState
-    
-    func composeMosaic(
+public final class MetalImageProcessor: @unchecked Sendable {
+    public func generateMosaic(
+        from frames: [(image: CGImage, timestamp: String)],
         layout: MosaicLayout,
-        thumbnails: [CGImage],
-        config: MosaicConfiguration
-    ) throws -> CGImage
+        metadata: VideoMetadata,
+        config: MosaicConfiguration,
+        metadataHeader: CGImage? = nil,
+        forIphone: Bool = false,
+        progressHandler: (@Sendable (Double) -> Void)? = nil
+    ) async throws -> CGImage
 }
 ```
 
@@ -220,7 +187,7 @@ final class MetalImageProcessor {
 
 3. **Frame Extraction**
    ```
-   ThumbnailProcessor + VideoToolbox → [CMTime: CGImage]
+   ThumbnailProcessor + VideoToolbox → [(image: CGImage, timestamp: String)]
    ```
 
 4. **Image Composition**
@@ -313,43 +280,42 @@ public enum MosaicError: LocalizedError {
     case saveFailed(URL, Error)
     case invalidDimensions(CGSize)
     case invalidConfiguration(String)
+    case generationFailed(Error)
+    case fileExists(URL)
+    case contextCreationFailed
+    case imageCreationFailed
+    case invalidVideo(String)
     case metalNotSupported
     case processingFailed(String)
 }
 ```
 
+`MosaicError.metalNotSupported` is a reserved case for callers to use in their own Metal-availability
+checks; MosaicKit itself surfaces a missing/unusable Metal device through `MetalProcessorError`
+instead (see below), propagated unwrapped from `MetalMosaicGenerator.init()`.
+
 ## Metal Availability Check
 
-Factory verifies Metal at runtime:
+`MetalImageProcessor.init()` (invoked internally by `MetalMosaicGenerator.init()`) verifies Metal at
+construction time and throws `MetalProcessorError.deviceNotAvailable` if no device is present:
 
 ```swift
-guard MTLCreateSystemDefaultDevice() != nil else {
-    throw MosaicError.metalNotSupported
-}
-return try MetalMosaicGenerator()
-```
-
-## Extension Points
-
-### Custom Layout Algorithms
-
-Extend `LayoutProcessor` with custom algorithms:
-
-```swift
-extension LayoutProcessor {
-    func calculateMyCustomLayout(...) -> MosaicLayout {
-        // Your layout logic
-    }
+public enum MetalProcessorError: Error {
+    case deviceNotAvailable
+    case commandQueueCreationFailed
+    case libraryCreationFailed
+    // ...
+    case commandBufferExecutionFailed(context: String, underlying: String)
 }
 ```
 
-### Custom Image Processors
-
-Implement custom processing pipelines:
-
 ```swift
-protocol ImageProcessor {
-    func composeMosaic(...) throws -> CGImage
+do {
+    let generator = try MetalMosaicGenerator()
+} catch MetalProcessorError.deviceNotAvailable {
+    // No usable Metal device — required on every platform this package targets
+    // (macOS 26+, iOS 26+, macCatalyst 26+), so this should only happen in
+    // unusual sandboxed/virtualized environments.
 }
 ```
 
@@ -359,4 +325,5 @@ protocol ImageProcessor {
 - <doc:PerformanceGuide>
 - <doc:LayoutAlgorithms>
 - ``MosaicGeneratorProtocol``
-- ``MosaicGeneratorFactory``
+- ``MetalMosaicGenerator``
+- ``MosaicGeneratorCoordinator``

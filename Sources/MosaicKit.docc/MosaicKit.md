@@ -4,8 +4,8 @@ High-performance video mosaic generation with platform-optimized image processin
 
 @Metadata {
     @TechnologyRoot
-    @Available(macOS, introduced: "15.0")
-    @Available(iOS, introduced: "15.0")
+    @Available(macOS, introduced: "26.0")
+    @Available(iOS, introduced: "26.0")
 }
 
 ## Overview
@@ -39,10 +39,11 @@ MosaicKit is a powerful Swift package that generates beautiful video mosaics by 
 
 ### Core Components
 
-- ``MosaicGenerator``
 - ``MosaicGeneratorProtocol``
-- ``MosaicGeneratorFactory``
+- ``MetalMosaicGenerator``
+- ``MosaicGeneratorCoordinator``
 - ``VideoInput``
+- ``VideoMetadataExtractor``
 
 ### Configuration
 
@@ -50,6 +51,9 @@ MosaicKit is a powerful Swift package that generates beautiful video mosaics by 
 - ``DensityConfig``
 - ``LayoutConfiguration``
 - ``OutputFormat``
+- ``AnimatedFormat``
+- ``GifCreationMode``
+- ``GifSize``
 
 ### Layout System
 
@@ -58,15 +62,24 @@ MosaicKit is a powerful Swift package that generates beautiful video mosaics by 
 - ``LayoutType``
 - ``AspectRatio``
 
-### Generator
+### Animated Export
 
-- ``MetalMosaicGenerator``
+- ``AnimatedGifGenerator``
+
+WebP output (`OutputFormat.webp` / `AnimatedFormat.webp`) requires linking the separate
+`MosaicKitWebP` product and calling `MosaicKitWebP.register()` at startup — see
+<doc:GettingStarted>.
 
 ### Preview Generation
 
 - ``PreviewGeneratorCoordinator``
 - ``PreviewVideoGenerator``
 - ``PreviewConfiguration``
+- ``PreviewExportMode``
+- ``FFmpegEncodingOptions``
+- ``FFmpegEncoder``
+- ``PreviewGenerationProgress``
+- ``PreviewExportDescription``
 
 ### Performance & Optimization
 
@@ -76,3 +89,6 @@ MosaicKit is a powerful Swift package that generates beautiful video mosaics by 
 
 - ``MosaicError``
 - ``LibraryError``
+- ``VideoError``
+- ``PreviewError``
+- ``MetalProcessorError``

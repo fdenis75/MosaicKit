@@ -11,9 +11,9 @@ By the end of this tutorial, you'll have:
 
 ## Prerequisites
 
-- Xcode 16.0+
+- Xcode 26.0+
 - Swift 6.2+
-- macOS 15.0+ or iOS 15.0+
+- macOS 26.0+, iOS 26.0+, or macCatalyst 26.0+
 - A video file to test with (any common format: MP4, MOV, M4V)
 
 ## Step 1: Add MosaicKit to Your Project
@@ -23,7 +23,7 @@ Add MosaicKit via Swift Package Manager:
 ```swift
 // Package.swift
 dependencies: [
-    .package(url: "https://github.com/fdenis75/MosaicKit.git", from: "1.1.4")
+    .package(url: "https://github.com/fdenis75/MosaicKit.git", from: "1.6.0")
 ]
 ```
 
@@ -34,8 +34,8 @@ Or in Xcode: **File → Add Package Dependencies**
 ```swift
 import MosaicKit
 
-// Create a generator (auto-selects best implementation for your platform)
-let generator = try MosaicGenerator()
+// Construct the Metal engine directly — there's no factory or platform switch.
+let generator = try MetalMosaicGenerator()
 ```
 
 ## Step 3: Generate Your First Mosaic
@@ -47,15 +47,12 @@ let videoURL = URL(fileURLWithPath: "/path/to/your/video.mp4")
 // Output directory
 let outputDir = URL(fileURLWithPath: "/path/to/output")
 
-// Use default configuration
-let config = MosaicConfiguration.default
+// Describe the source video and use a default configuration
+let video = try await VideoInput(from: videoURL)
+let config = MosaicConfiguration(outputdirectory: outputDir)
 
 // Generate the mosaic
-let mosaicURL = try await generator.generate(
-    from: videoURL,
-    config: config,
-    outputDirectory: outputDir
-)
+let mosaicURL = try await generator.generate(for: video, config: config)
 
 print("Mosaic saved to: \(mosaicURL.path)")
 ```
@@ -66,20 +63,12 @@ print("Mosaic saved to: \(mosaicURL.path)")
 
 ```swift
 // Quick preview with fewer frames
-let quickConfig = MosaicConfiguration(density: .xl)
-let quickMosaic = try await generator.generate(
-    from: videoURL,
-    config: quickConfig,
-    outputDirectory: outputDir
-)
+let quickConfig = MosaicConfiguration(density: .xl, outputdirectory: outputDir)
+let quickMosaic = try await generator.generate(for: video, config: quickConfig)
 
 // Maximum detail with more frames
-let detailedConfig = MosaicConfiguration(density: .xxs)
-let detailedMosaic = try await generator.generate(
-    from: videoURL,
-    config: detailedConfig,
-    outputDirectory: outputDir
-)
+let detailedConfig = MosaicConfiguration(density: .xxs, outputdirectory: outputDir)
+let detailedMosaic = try await generator.generate(for: video, config: detailedConfig)
 ```
 
 ### Change Layout
@@ -147,35 +136,33 @@ import MosaicKit
 @main
 struct MosaicApp {
     static func main() async throws {
-        // 1. Create generator
-        let generator = try MosaicGenerator()
-        
+        let videoURL = URL(fileURLWithPath: "/Users/you/Videos/sample.mp4")
+        let outputDir = URL(fileURLWithPath: "/Users/you/Output")
+
+        // 1. Create generator and describe the source video
+        let generator = try MetalMosaicGenerator()
+        let video = try await VideoInput(from: videoURL)
+
         // 2. Configure mosaic
         let config = MosaicConfiguration(
             width: 4000,                    // 4K width
-            density: .m,                    // High density
+            density: .m,                    // Default density
             format: .heif,                  // HEIF format
             layout: LayoutConfiguration(
                 aspectRatio: .widescreen,   // 16:9
                 layoutType: .custom         // Custom layout
             ),
             includeMetadata: true,          // Include header
-            compressionQuality: 0.8         // High quality
+            compressionQuality: 0.8,        // High quality
+            outputdirectory: outputDir
         )
-        
+
         // 3. Generate mosaic
-        let videoURL = URL(fileURLWithPath: "/Users/you/Videos/sample.mp4")
-        let outputDir = URL(fileURLWithPath: "/Users/you/Output")
-        
         print("Generating mosaic...")
         let startTime = ContinuousClock.now
-        
-        let mosaicURL = try await generator.generate(
-            from: videoURL,
-            config: config,
-            outputDirectory: outputDir
-        )
-        
+
+        let mosaicURL = try await generator.generate(for: video, config: config)
+
         let duration = startTime.duration(to: .now)
         print("✅ Mosaic generated in \(duration)")
         print("📍 Saved to: \(mosaicURL.path)")
@@ -185,7 +172,7 @@ struct MosaicApp {
 
 ## Step 6: Generate Multiple Mosaics
 
-Process multiple videos at once:
+Process multiple videos concurrently with ``MosaicGeneratorCoordinator``:
 
 ```swift
 let videoURLs = [
@@ -194,15 +181,21 @@ let videoURLs = [
     URL(fileURLWithPath: "/path/to/video3.mp4")
 ]
 
-let mosaicURLs = try await generator.generateBatch(
-    from: videoURLs,
-    config: config,
-    outputDirectory: outputDir
-) { completed, total in
-    print("Progress: \(completed)/\(total)")
+var videos: [VideoInput] = []
+for url in videoURLs {
+    videos.append(try await VideoInput(from: url))
 }
 
-print("Generated \(mosaicURLs.count) mosaics")
+let coordinator = try createDefaultMosaicCoordinator()
+
+let results = try await coordinator.generateMosaicsforbatch(
+    videos: videos,
+    config: config
+) { progress in
+    print("Progress: \(progress)")
+}
+
+print("Generated \(results.count) mosaics")
 ```
 
 ## Next Steps
@@ -237,19 +230,21 @@ try fileManager.createDirectory(at: outputDir, withIntermediateDirectories: true
 
 ### Metal Not Available
 
+There's no Core Graphics fallback — MosaicKit is Metal-only on every platform it targets. A missing
+device throws at generator construction time:
+
 ```swift
-// Fall back to Core Graphics
 do {
-    let generator = try MosaicGenerator(preference: .preferMetal)
-} catch MosaicError.metalNotSupported {
-    print("Metal not available, using Core Graphics")
-    let generator = try MosaicGenerator(preference: .preferMetal)
+    let generator = try MetalMosaicGenerator()
+} catch MetalProcessorError.deviceNotAvailable {
+    print("No usable Metal device on this system")
 }
 ```
 
 ## See Also
 
-- ``MosaicGenerator``
+- ``MetalMosaicGenerator``
+- ``MosaicGeneratorCoordinator``
 - ``MosaicConfiguration``
 - ``DensityConfig``
 - ``LayoutConfiguration``

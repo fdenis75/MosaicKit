@@ -25,15 +25,36 @@ Alternatively, add it to your `Package.swift`:
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/fdenis75/MosaicKit.git", from: "1.1.16")
+    .package(url: "https://github.com/fdenis75/MosaicKit.git", from: "1.6.0")
 ]
+```
+
+Link the `MosaicKit` product for mosaic and preview generation. If you also need `.webp` /
+`.heic`-animated output, additionally link the separate `MosaicKitWebP` product and call
+`MosaicKitWebP.register()` once at startup (before generating any WebP output) — it's kept
+out of the main `MosaicKit` product because it's the only thing in the dependency graph that
+pulls in a binary xcframework (`webp.swift` → `libwebp-ios`), which otherwise breaks Xcode
+SwiftUI Preview's JIT execution for every client, even ones that never touch WebP:
+
+```swift
+dependencies: [
+    .product(name: "MosaicKit", package: "MosaicKit"),
+    .product(name: "MosaicKitWebP", package: "MosaicKit")  // only if you need .webp output
+]
+```
+
+```swift
+import MosaicKitWebP
+
+MosaicKitWebP.register()
 ```
 
 ## Platform Requirements
 
-- **macOS 15.0+** (uses Metal GPU acceleration by default)
-- **iOS 15.0+** (uses Core Graphics with vImage optimization)
+- **macOS 26.0+**, **iOS 26.0+**, **macCatalyst 26.0+**
 - **Swift 6.2+**
+- A single Metal GPU engine (`MetalMosaicGenerator`) is used on every platform — there is no
+  Core Graphics fallback or platform-selection wrapper.
 
 ## Basic Usage
 
@@ -44,21 +65,16 @@ Generate a mosaic from a single video file:
 ```swift
 import MosaicKit
 
-// 1. Create a generator (auto-selects best implementation)
-let generator = try MosaicGenerator()
+// 1. Create a generator
+let generator = try MetalMosaicGenerator()
 
-// 2. Configure the mosaic
-let config = MosaicConfiguration.default
-
-// 3. Generate the mosaic
+// 2. Describe the source video
 let videoURL = URL(fileURLWithPath: "/path/to/video.mp4")
-let outputDir = URL(fileURLWithPath: "/path/to/output")
+let video = try await VideoInput(from: videoURL)
 
-let mosaicURL = try await generator.generate(
-    from: videoURL,
-    config: config,
-    outputDirectory: outputDir
-)
+// 3. Configure and generate the mosaic
+let config = MosaicConfiguration(outputdirectory: URL(fileURLWithPath: "/path/to/output"))
+let mosaicURL = try await generator.generate(for: video, config: config)
 
 print("Mosaic saved to: \(mosaicURL.path)")
 ```
@@ -71,61 +87,47 @@ Customize the mosaic appearance and settings:
 let config = MosaicConfiguration(
     width: 5120,                           // Output width in pixels
     density: .xl,                          // Frame extraction density
-    format: .heif,                         // Output format (HEIF, JPEG, PNG)
+    format: .heif,                         // Output format (.heif, .jpeg, .png, .webp)
     layout: LayoutConfiguration(
         aspectRatio: .widescreen,          // 16:9 aspect ratio
         layoutType: .custom                // Use custom layout algorithm
     ),
     includeMetadata: true,                 // Include metadata header
-    compressionQuality: 0.8                // High quality output
+    compressionQuality: 0.8,               // High quality output
+    outputdirectory: outputDir
 )
 
-let mosaicURL = try await generator.generate(
-    from: videoURL,
-    config: config,
-    outputDirectory: outputDir
-)
+let mosaicURL = try await generator.generate(for: video, config: config)
 ```
 
 ### Batch Processing
 
-Generate mosaics for multiple videos:
+Generate mosaics for multiple videos concurrently with `MosaicGeneratorCoordinator`:
 
 ```swift
-let videoURLs = [url1, url2, url3, url4, url5]
-
-let mosaicURLs = try await generator.generateBatch(
-    from: videoURLs,
-    config: config,
-    outputDirectory: outputDir
-) { completed, total in
-    print("Progress: \(completed)/\(total) videos processed")
+var videos: [VideoInput] = []
+for url in [url1, url2, url3, url4, url5] {
+    videos.append(try await VideoInput(from: url))
 }
 
-print("Generated \(mosaicURLs.count) mosaics")
+let coordinator = try createDefaultMosaicCoordinator(concurrencyLimit: 4)
+
+let results = try await coordinator.generateMosaicsforbatch(
+    videos: videos,
+    config: config
+) { progress in
+    print("Progress: \(progress)")
+}
+
+print("Generated \(results.count) mosaics")
 ```
 
-## Choosing a Generator Implementation
-
-MosaicKit automatically selects the best generator for your platform, but you can override this:
+`scanVideos(in:recursive:)` builds a `[VideoInput]` from every video file in a directory if you'd
+rather not construct `VideoInput` values by hand:
 
 ```swift
-// Automatic selection (recommended)
-let generator = try MosaicGenerator()
-
-// Force Core Graphics on macOS (useful for testing iOS behavior)
-let metalGenerator = try MosaicGenerator(preference: .preferMetal)
-
-// Prefer Metal (macOS only, falls back to Core Graphics on iOS)
-let metalGenerator = try MosaicGenerator(preference: .preferMetal)
+let videos = await scanVideos(in: URL(fileURLWithPath: "/path/to/folder"), recursive: true)
 ```
-
-### When to Choose Core Graphics on macOS
-
-- Testing iOS behavior without an iOS device
-- Systems without adequate GPU resources
-- Environments where Metal is unavailable
-- Comparing performance between implementations
 
 ## Understanding Density Levels
 
@@ -280,7 +282,7 @@ config.overlay = OverlayConfiguration(
 Both `MosaicConfiguration` and `PreviewConfiguration` expose an `overwrite` flag (default `false`). When `false`, the generator checks for the output file before doing any work and returns the existing URL immediately if it is already present — ideal for incremental batch runs.
 
 ```swift
-var config = MosaicConfiguration.default
+var config = MosaicConfiguration()
 config.overwrite = false   // skip if already generated (default)
 config.overwrite = true    // always regenerate
 ```
@@ -319,17 +321,13 @@ MosaicKit provides comprehensive error types:
 
 ```swift
 do {
-    let mosaicURL = try await generator.generate(
-        from: videoURL,
-        config: config,
-        outputDirectory: outputDir
-    )
+    let generator = try MetalMosaicGenerator()
+    let mosaicURL = try await generator.generate(for: video, config: config)
+} catch MetalProcessorError.deviceNotAvailable {
+    // No usable Metal device — there is no Core Graphics fallback to retry with.
+    print("Metal is not supported on this device")
 } catch MosaicError.invalidVideo(let message) {
     print("Invalid video: \(message)")
-} catch MosaicError.metalNotSupported {
-    print("Metal not available, falling back to Core Graphics")
-    let metalGenerator = try MosaicGenerator(preference: .preferMetal)
-    // Retry with Core Graphics...
 } catch {
     print("Generation failed: \(error.localizedDescription)")
 }
@@ -339,14 +337,16 @@ do {
 
 Now that you've created your first mosaic, explore these topics:
 
-- <doc:Architecture> - Understanding the dual-platform architecture
+- <doc:Architecture> - Understanding the Metal-based architecture
 - <doc:LayoutAlgorithms> - Deep dive into layout algorithms
 - <doc:PerformanceGuide> - Optimization strategies for large batches
-- <doc:CustomLayouts> - Creating custom layout configurations
+- <doc:PreviewExporting> - Generating condensed preview videos
+- <doc:BackgroundProcessing> - Running generation from an iOS background task
 
 ## See Also
 
-- ``MosaicGenerator``
+- ``MetalMosaicGenerator``
+- ``MosaicGeneratorCoordinator``
 - ``MosaicConfiguration``
 - ``PreviewConfiguration``
 - ``DensityConfig``

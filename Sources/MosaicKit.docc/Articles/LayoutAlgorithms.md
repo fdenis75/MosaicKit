@@ -444,8 +444,9 @@ let config = MosaicConfiguration(layout: layout)
 
 ```swift
 // Square mosaic with custom layout
-var config = MosaicConfiguration.default
-config.updateAspectRatio(new: .square)
+var config = MosaicConfiguration(
+    layout: LayoutConfiguration(aspectRatio: .square, layoutType: .custom)
+)
 
 // Ultrawide mosaic with dynamic layout
 var ultrawideConfig = MosaicConfiguration(
@@ -465,15 +466,12 @@ let layouts: [LayoutType] = [.custom, .classic, .auto, .dynamic, .iphone]
 
 for layoutType in layouts {
     let config = MosaicConfiguration(
-        layout: LayoutConfiguration(layoutType: layoutType)
+        layout: LayoutConfiguration(layoutType: layoutType),
+        outputdirectory: outputDir
     )
-    
-    let outputURL = try await generator.generate(
-        from: videoURL,
-        config: config,
-        outputDirectory: outputDir
-    )
-    
+
+    let outputURL = try await generator.generate(for: video, config: config)
+
     print("\(layoutType.rawValue) layout saved to: \(outputURL.lastPathComponent)")
 }
 ```

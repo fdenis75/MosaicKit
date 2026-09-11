@@ -6,26 +6,38 @@ Welcome to the MosaicKit documentation! This guide will help you find the right 
 
 ```
 MosaicKit/
-├── README.md              # Main documentation (start here!)
-├── QUICKSTART.md          # 5-minute tutorial
-├── API.md                 # Complete API reference
-├── CLAUDE.md              # Developer guide for Claude Code
-├── DOCUMENTATION.md       # This file (documentation index)
+├── README.md                    # Main documentation (start here!)
+├── CLAUDE.md / AGENTS.md        # Developer guide for AI coding assistants
+├── CONTRIBUTING.md              # Contribution guidelines
+├── MosaicKit-DeepDive.md        # Detailed architecture & structural breakdown
+├── DOCUMENTATION.md             # This file (documentation index)
+├── Sources/MosaicKit.docc/      # DocC catalog (API reference + guides)
+│   ├── GettingStarted.md
+│   ├── Articles/QuickStart.md
+│   ├── Articles/Architecture.md
+│   ├── Articles/LayoutAlgorithms.md
+│   ├── Articles/PerformanceGuide.md
+│   ├── Articles/PlatformStrategy.md
+│   ├── Articles/PreviewExporting.md
+│   └── Articles/BackgroundProcessing.md
 └── Examples/
-    ├── README.md          # Examples overview
+    ├── README.md                # Examples overview
+    ├── SimpleExample.swift
     ├── BasicExample.swift
     ├── BatchExample.swift
-    └── AdvancedExample.swift
+    ├── AdvancedExample.swift
+    └── PreviewCompositionExample.swift
 ```
+
+Build the DocC catalog into browsable API documentation with `swift package generate-documentation`.
 
 ## 🚀 Getting Started
 
 ### I'm new to MosaicKit
-👉 **Start here**: [QUICKSTART.md](QUICKSTART.md)
-- 5-minute tutorial
-- Simple working example
-- Common use cases
-- Configuration cheat sheet
+👉 **Start here**: <doc:GettingStarted> and <doc:QuickStart> in the DocC catalog
+- Installation and platform requirements
+- Your first mosaic in a few lines of code
+- Configuration basics
 
 ### I want comprehensive documentation
 👉 **Read**: [README.md](README.md)
@@ -37,23 +49,22 @@ MosaicKit/
 - Troubleshooting
 
 ### I need API documentation
-👉 **Reference**: [API.md](API.md)
-- Complete API reference
-- All classes, methods, properties
-- Parameter descriptions
-- Return types and errors
-- Code examples
+👉 **Reference**: the DocC catalog at `Sources/MosaicKit.docc/`
+- Build it with `swift package generate-documentation`, or browse the `.md` sources directly
+- Every public type, method, and property is documented in Sources/ doc comments and surfaced there
 
 ### I want working code examples
 👉 **Check out**: [Examples/](Examples/)
-- BasicExample.swift - Simple single-video generation
-- BatchExample.swift - Process multiple videos
-- AdvancedExample.swift - Multiple configurations
+- `SimpleExample.swift` - Minimal single-video generation
+- `BasicExample.swift` - Single-video generation with configuration
+- `BatchExample.swift` - Process multiple videos
+- `AdvancedExample.swift` - Multiple configurations
+- `PreviewCompositionExample.swift` - Preview video / `AVPlayerItem` composition
 - Error handling patterns
 - Progress tracking
 
-### I'm using Claude Code
-👉 **See**: [CLAUDE.md](CLAUDE.md)
+### I'm using an AI coding assistant
+👉 **See**: [CLAUDE.md](CLAUDE.md) (also mirrored as [AGENTS.md](AGENTS.md))
 - Build and test commands
 - Architecture overview
 - Development guidelines
@@ -67,18 +78,18 @@ MosaicKit/
 - Xcode integration
 
 ### Basic Usage
-- [QUICKSTART.md - Step-by-step](QUICKSTART.md#5-minute-tutorial)
+- DocC `Articles/QuickStart.md` - Step-by-step tutorial
 - [Examples/BasicExample.swift](Examples/BasicExample.swift)
 
 ### Configuration
 - [README.md - Configuration Options](README.md#configuration-options)
-- [QUICKSTART.md - Configuration Cheat Sheet](QUICKSTART.md#configuration-cheat-sheet)
-- [API.md - MosaicConfiguration](API.md#mosaicconfiguration)
+- DocC `GettingStarted.md` and `Articles/QuickStart.md`
+- DocC catalog - `MosaicConfiguration` reference (from doc comments in `Sources/Models/MosaicConfiguration.swift`)
 
 ### Batch Processing
 - [README.md - Batch Processing](README.md#batch-processing)
 - [Examples/BatchExample.swift](Examples/BatchExample.swift)
-- [API.md - MosaicGeneratorCoordinator](API.md#mosaicgeneratorcoordinator)
+- DocC catalog - `MosaicGeneratorCoordinator` reference
 
 ### Advanced Features
 - [README.md - Advanced Usage](README.md#advanced-usage)
@@ -89,54 +100,57 @@ MosaicKit/
 
 ### Layout Algorithms
 - [README.md - Layout Algorithm Details](README.md#layout-algorithm-details)
+- DocC `Articles/LayoutAlgorithms.md`
 - Custom, Classic, Auto, Dynamic layouts
 - iPhone-optimized layouts
 
 ### Error Handling
 - [README.md - Error Handling](README.md#error-handling)
-- [Examples/AdvancedExample.swift - ErrorHandlingExample](Examples/AdvancedExample.swift)
-- [API.md - Errors](API.md#errors)
+- [Examples/AdvancedExample.swift](Examples/AdvancedExample.swift)
+- DocC catalog - `MosaicError`, `PreviewError`, `VideoError`, `MetalProcessorError` reference
 
 ### Performance
 - [README.md - Performance Tips](README.md#performance-tips)
 - [README.md - System Requirements](README.md#system-requirements-for-best-performance)
 - [README.md - Concurrency Management](README.md#concurrency-management)
+- DocC `Articles/PerformanceGuide.md`
+
+### Background Processing (iOS)
+- DocC `Articles/BackgroundProcessing.md` - wrapping generation in `BGContinuedProcessingTask`
 
 ### API Reference
-- [API.md - Core Classes](API.md#core-classes)
-- [API.md - Models](API.md#models)
-- [API.md - Configuration](API.md#configuration)
+- The DocC catalog at `Sources/MosaicKit.docc/` (build with `swift package generate-documentation`)
+- Doc comments on every public type in `Sources/`
 
 ## 🎯 Common Tasks
 
 ### "I want to generate a single mosaic"
-1. Read [QUICKSTART.md](QUICKSTART.md)
+1. Read DocC `Articles/QuickStart.md`
 2. Run [Examples/BasicExample.swift](Examples/BasicExample.swift)
 3. Customize configuration from [README.md](README.md#configuration-options)
 
 ### "I need to process multiple videos"
 1. Check [README.md - Batch Processing](README.md#batch-processing)
 2. Study [Examples/BatchExample.swift](Examples/BatchExample.swift)
-3. Reference [API.md - MosaicGeneratorCoordinator](API.md#mosaicgeneratorcoordinator)
+3. Reference the `MosaicGeneratorCoordinator` doc comments in `Sources/Processing/MosaicGeneratorCoordinator.swift`
 
 ### "I want to customize the layout"
 1. See [README.md - Layout Options](README.md#layout-options)
-2. Review [README.md - Layout Algorithm Details](README.md#layout-algorithm-details)
-3. Check [Examples/AdvancedExample.swift - Custom Layout](Examples/AdvancedExample.swift)
+2. Review [README.md - Layout Algorithm Details](README.md#layout-algorithm-details) and DocC `Articles/LayoutAlgorithms.md`
+3. Check [Examples/AdvancedExample.swift](Examples/AdvancedExample.swift)
 
 ### "I need to optimize performance"
-1. Read [README.md - Performance Tips](README.md#performance-tips)
+1. Read [README.md - Performance Tips](README.md#performance-tips) and DocC `Articles/PerformanceGuide.md`
 2. Check [README.md - System Requirements](README.md#system-requirements-for-best-performance)
-3. Review [QUICKSTART.md - Pro Tips](QUICKSTART.md#pro-tips)
 
 ### "I'm getting errors"
 1. Check [README.md - Error Handling](README.md#error-handling)
 2. Review [README.md - Troubleshooting](README.md#troubleshooting)
-3. See [Examples/AdvancedExample.swift - Error Handling](Examples/AdvancedExample.swift)
+3. See [Examples/AdvancedExample.swift](Examples/AdvancedExample.swift)
 
 ### "I need the API details"
-1. Go to [API.md](API.md)
-2. Use the Table of Contents to find specific APIs
+1. Build the DocC catalog with `swift package generate-documentation`, or browse `Sources/MosaicKit.docc/`
+2. Use the doc comments on public types in `Sources/` as the source of truth
 3. Reference code examples in [Examples/](Examples/)
 
 ## 📋 Quick Reference
@@ -180,6 +194,7 @@ config.compressionQuality = 0.6
 | `.heif` | .heic | Best compression | Most cases |
 | `.jpeg` | .jpg | Universal | Sharing |
 | `.png` | .png | Lossless | Quality critical |
+| `.webp` | .webp | Web-compatible compression | Requires linking `MosaicKitWebP` + calling `MosaicKitWebP.register()` |
 
 ### Aspect Ratios
 
@@ -199,9 +214,9 @@ config.compressionQuality = 0.6
 
 ## 💡 Tips for Reading Documentation
 
-1. **Start with QUICKSTART.md** if you're new
+1. **Start with the DocC `QuickStart` article** if you're new
 2. **Reference README.md** for comprehensive information
-3. **Use API.md** when you need exact method signatures
+3. **Build the DocC catalog** when you need exact method signatures
 4. **Run Examples** to see working code
 5. **Search this file** (DOCUMENTATION.md) to find specific topics
 
@@ -236,9 +251,9 @@ MosaicKit is available under the MIT License. See the LICENSE file for details.
 ---
 
 **Last Updated**: 2026
-**Documentation Version**: 1.1.4
-**Package Version**: 1.1.4
+**Documentation Version**: 1.6.4
+**Package Version**: 1.6.4
 
 ---
 
-Need help? Start with [QUICKSTART.md](QUICKSTART.md) 🚀
+Need help? Start with the DocC `QuickStart` article in `Sources/MosaicKit.docc/Articles/` 🚀

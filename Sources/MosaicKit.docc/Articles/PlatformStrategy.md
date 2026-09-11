@@ -24,13 +24,14 @@ and macOS 26+, so Metal support is guaranteed on every target device.
 ```swift
 public actor MetalMosaicGenerator: MosaicGeneratorProtocol {
     private let metalProcessor: MetalImageProcessor
-
-    // Core Metal resources (shared across platforms)
-    private let device: MTLDevice
-    private let commandQueue: MTLCommandQueue
-    private let pipelineState: MTLComputePipelineState
+    private let layoutProcessor: LayoutProcessor
+    private let thumbnailProcessor: ThumbnailProcessor
 }
 ```
+
+`MetalImageProcessor` owns the actual Metal resources (`MTLDevice`, `MTLCommandQueue`, compute
+pipeline states) — one instance per `MetalMosaicGenerator`, shared across every video that
+generator processes.
 
 **Key Components:**
 
@@ -53,13 +54,15 @@ let texture = device.makeTexture(descriptor: textureDescriptor)
 ```
 
 **Command Buffer Batching:**
+
+`MetalImageProcessor.generateMosaic` encodes and commits frames in batches of 20 per command
+buffer to avoid GPU timeouts, awaiting each batch's completion before moving on:
+
 ```swift
-// 20 frames per command buffer to avoid GPU timeout
-for batch in thumbnails.chunked(20) {
-    let commandBuffer = commandQueue.makeCommandBuffer()
-    // Encode batch operations
-    commandBuffer.commit()
-    await commandBuffer.completed()
+batchCommandBuffer.commit()
+await batchCommandBuffer.completed()
+if batchCommandBuffer.status == .error {
+    throw MetalProcessorError.commandBufferExecutionFailed(context: "...", underlying: "...")
 }
 ```
 
@@ -77,33 +80,22 @@ no explicit synchronisation is needed.
 
 **Optimal Scenarios:**
 ```swift
-// Metal is the default on every platform
-let generator = try MosaicGenerator()
+let coordinator = try createDefaultMosaicCoordinator()
 
-let config = MosaicConfiguration(
-    width: 5120,
-    density: .xxs
-)
-let mosaics = try await generator.generateBatch(
-    from: videoURLs,
-    config: config,
-    outputDirectory: outputDir
-)
+let config = MosaicConfiguration(width: 5120, density: .xxs, outputdirectory: outputDir)
+let results = try await coordinator.generateMosaicsforbatch(
+    videos: videos,
+    config: config
+) { progress in print(progress) }
 ```
 
 ## Usage
 
-### Automatic Selection (Recommended)
+There's no selection to make — construct `MetalMosaicGenerator` directly (or go through
+``MosaicGeneratorCoordinator`` for batches):
 
 ```swift
-// Metal is always selected automatically
-let generator = try MosaicGenerator()
-```
-
-### Explicit Metal
-
-```swift
-let generator = try MosaicGenerator(preference: .preferMetal)
+let generator = try MetalMosaicGenerator()
 ```
 
 ## Metal Debugging
@@ -122,5 +114,5 @@ sudo powermetrics --samplers gpu_power -i 1000
 
 - <doc:Architecture>
 - <doc:PerformanceGuide>
-- ``MosaicGeneratorFactory``
 - ``MetalMosaicGenerator``
+- ``MosaicGeneratorCoordinator``

@@ -207,9 +207,11 @@ sufficient — wrapping macOS calls in `BackgroundTasks` API is neither necessar
 Even with a `BGContinuedProcessingTask` granted, Metal GPU access can still be constrained while
 the app is backgrounded — the OS may throttle or briefly suspend GPU scheduling for a backgrounded
 process regardless of the background task's grant. Treat GPU-related failures surfaced by
-MosaicKit (for example `MosaicError.metalNotSupported` or `MosaicError.processingFailed`
-appearing only while backgrounded) as **retryable once the app returns to the foreground**, not as
-fatal errors — queue the video for retry rather than surfacing a permanent failure to the user.
+MosaicKit (a thrown `MetalProcessorError`, most notably `.deviceNotAvailable` from
+`MetalMosaicGenerator.init()` or `.commandBufferExecutionFailed(context:underlying:)` mid-generation
+— check `underlying` for the GPU's actual failure reason) as **retryable once the app returns to the
+foreground** when they appear only while backgrounded, not as fatal errors — queue the video for
+retry rather than surfacing a permanent failure to the user.
 
 ## Checklist
 

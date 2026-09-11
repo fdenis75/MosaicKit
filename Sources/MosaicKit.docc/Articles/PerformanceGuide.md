@@ -4,7 +4,7 @@ Best practices for optimizing mosaic generation performance and resource usage.
 
 ## Overview
 
-MosaicKit is designed for high performance, but understanding how to configure and use it optimally can dramatically improve processing speed and resource efficiency. This guide covers performance optimization strategies for both Metal and Core Graphics implementations.
+MosaicKit is designed for high performance, but understanding how to configure and use it optimally can dramatically improve processing speed and resource efficiency. This guide covers performance optimization strategies for the single Metal GPU engine used on every platform (macOS, iOS, macCatalyst) — see <doc:PlatformStrategy> for why there is no Core Graphics fallback.
 
 ## Performance Factors
 
@@ -12,9 +12,8 @@ The following factors affect mosaic generation performance:
 
 1. **Video Properties**: Duration, resolution, codec
 2. **Configuration**: Density, output size, format
-3. **Platform**: macOS (Metal/CG) vs iOS (CG)
-4. **Hardware**: CPU cores, GPU capabilities, available RAM
-5. **Batch Size**: Number of concurrent operations
+3. **Hardware**: GPU capabilities, CPU cores, available RAM
+4. **Batch Size**: Number of concurrent operations
 
 ## Optimization Strategies
 
@@ -111,18 +110,19 @@ let jpegConfig = MosaicConfiguration(
 Configure concurrency based on available resources:
 
 ```swift
-// Default - automatic concurrency limiting
-let defaultCoordinator = MosaicGeneratorCoordinator()
+// Default - automatic concurrency limiting (concurrencyLimit: 0)
+let defaultCoordinator = try createDefaultMosaicCoordinator()
 
 // Custom concurrency limit
-let customCoordinator = MosaicGeneratorCoordinator(concurrencyLimit: 4)
+let customCoordinator = try createDefaultMosaicCoordinator(concurrencyLimit: 4)
 
 // Process batch
-let results = try await customCoordinator.generateBatch(
-    from: videoURLs,
-    config: config,
-    outputDirectory: outputDir
-)
+let results = try await customCoordinator.generateMosaicsforbatch(
+    videos: videos,
+    config: config
+) { progress in
+    print("Progress: \(progress)")
+}
 ```
 
 **Concurrency Guidelines:**
@@ -136,73 +136,69 @@ let results = try await customCoordinator.generateBatch(
 
 **Dynamic Concurrency (Automatic):**
 
-MosaicKit automatically calculates optimal concurrency:
+When `concurrencyLimit` is `0` (the default from `createDefaultMosaicCoordinator()`),
+`MosaicGeneratorCoordinator` recalculates the effective limit for each batch:
 
 ```swift
-// Memory-based limit
-let memoryLimit = max(2, physicalMemory / 4GB)
+// CPU-based limit: half the active processor cores, minimum 2
+let cpuBasedLimit = max(2, ProcessInfo.processInfo.activeProcessorCount / 2)
 
-// CPU-based limit
-let cpuLimit = max(2, processorCount - 1)
+// Memory-based limit: scales down with output width and density
+let memoryGB = Double(ProcessInfo.processInfo.physicalMemory) / 1_073_741_824.0
+let memoryPerTask = Double(config.width) * config.density.factor / 2000.0
+let memoryBasedLimit = max(2, Int(memoryGB / memoryPerTask))
 
-// Final limit: min of constraints
-let finalLimit = min(memoryLimit, cpuLimit, userConfigured)
+// Final limit: the more conservative of the two
+let effectiveLimit = min(memoryBasedLimit, cpuBasedLimit)
 ```
 
-### 5. Leverage Metal on macOS
+Passing a non-zero `concurrencyLimit` (or calling `setConcurrencyLimit(_:)`) overrides this and is
+re-read live at the start of each batch iteration, so it can be adjusted mid-run.
 
-For batch processing on macOS, Metal provides significant speedup:
+### 5. Batch Through the Coordinator, Not a Loop of Single Calls
+
+`MosaicGeneratorCoordinator` reuses one `MetalMosaicGenerator` (and its GPU device/command queue)
+across every video in a batch, instead of paying Metal device/library setup cost per call:
 
 ```swift
-#if os(macOS)
-// Prefer Metal for batches
-let generator = try MosaicGenerator(preference: .preferMetal)
+let coordinator = try createDefaultMosaicCoordinator()
 
-let videos = Array(allVideos.prefix(50))
-let mosaics = try await generator.generateBatch(
-    from: videos,
-    config: config,
-    outputDirectory: outputDir
-)
-#endif
+let results = try await coordinator.generateMosaicsforbatch(
+    videos: Array(allVideos.prefix(50)),
+    config: config
+) { progress in
+    print("Progress: \(progress)")
+}
 ```
-
-**Metal vs Core Graphics Performance:**
-
-| Scenario | Metal | Core Graphics | Speedup |
-|----------|-------|---------------|---------|
-| Single video | 2.3s | 3.1s | 1.3x |
-| Batch (10 videos) | 18s | 35s | 1.9x |
-| Batch (50 videos) | 82s | 189s | 2.3x |
-| High-res (5K) | 3.8s | 8.2s | 2.2x |
 
 ### 6. Cache and Reuse VideoInput
 
-Creating VideoInput objects involves AVAsset metadata extraction:
+Creating `VideoInput` objects involves `AVAsset` metadata extraction:
 
 ```swift
-// Inefficient - recreates VideoInput each time
+// Inefficient - constructs a fresh VideoInput on every generate() call
 for url in videoURLs {
-    let mosaic = try await generator.generate(
-        from: url,  // Creates VideoInput internally
-        config: config,
-        outputDirectory: outputDir
-    )
+    let video = try await VideoInput(from: url)
+    let mosaic = try await generator.generate(for: video, config: config)
 }
 
-// Better - create VideoInput once
-let videos = try await videoURLs.asyncMap { url in
-    try await VideoInput(from: url)
+// Better - build every VideoInput once, then hand the coordinator the whole batch
+var videos: [VideoInput] = []
+for url in videoURLs {
+    videos.append(try await VideoInput(from: url))
 }
 
-// Use MosaicGeneratorCoordinator which handles this efficiently
-let coordinator = MosaicGeneratorCoordinator()
-let results = try await coordinator.generateBatch(
+let coordinator = try createDefaultMosaicCoordinator()
+let results = try await coordinator.generateMosaicsforbatch(
     videos: videos,
-    config: config,
-    outputDirectory: outputDir
-)
+    config: config
+) { progress in
+    print("Progress: \(progress)")
+}
 ```
+
+`scanVideos(in:recursive:)` builds a `[VideoInput]` directly from a directory if that fits your
+workflow better than constructing each `VideoInput` by hand.
 
 **Impact:** Saves ~50-100ms per video
 
@@ -249,72 +245,26 @@ let dynamicLayout = LayoutConfiguration(layoutType: .dynamic)
 | Custom | ~15ms | General use |
 | Dynamic | ~25ms | Artistic output |
 
-## Platform-Specific Optimization
+## GPU-Level Optimization
 
-### macOS Metal Optimization
+These are the techniques `MetalImageProcessor` itself already applies internally — useful context
+if you're profiling generation, though there's nothing here for callers to configure:
 
-**GPU Batch Processing:**
+**GPU Batch Processing:** frames are encoded and committed in batches of 20 per command buffer
+(`MetalImageProcessor.generateMosaic`), which keeps individual command buffers small enough to avoid
+GPU timeouts while still pipelining well.
 
-```swift
-// Process frames in batches to avoid GPU timeout
-let batchSize = 20  // Optimal for most GPUs
-for batch in thumbnails.chunked(batchSize) {
-    let commandBuffer = commandQueue.makeCommandBuffer()
-    // ... encode batch operations
-    commandBuffer.commit()
-}
-```
+**Texture Pooling:** `MetalImageProcessor` reuses a `CVMetalTextureCache` for `CVPixelBuffer`-backed
+textures rather than allocating a new `MTLTexture` per frame.
 
-**Texture Pooling:**
+**Unified Memory (Apple Silicon / iOS):** on unified-memory devices, textures are shared between CPU
+and GPU with no explicit copy step, which is one reason the single Metal path performs well across
+both macOS and iOS.
 
-```swift
-// Reuse texture allocations
-private var textureCache: CVMetalTextureCache
-CVMetalTextureCacheCreate(nil, nil, device, nil, &textureCache)
-```
+### Memory Warning Handling (iOS)
 
-**Unified Memory (Apple Silicon):**
-
-```swift
-// Zero-copy texture access on M-series
-#if arch(arm64)
-let buffer = device.makeBuffer(
-    bytesNoCopy: pixelData,
-    length: dataSize,
-    options: .storageModeShared  // Unified memory
-)
-#endif
-```
-
-### iOS Core Graphics Optimization
-
-**vImage Buffer Reuse:**
-
-```swift
-// Avoid repeated allocations
-var bufferPool: [vImage_Buffer] = []
-
-func processImage() {
-    var buffer = bufferPool.popLast() ?? allocateBuffer()
-    defer { bufferPool.append(buffer) }
-    
-    // ... process with buffer
-}
-```
-
-**Progressive Frame Extraction:**
-
-```swift
-// Extract frames in chunks to control memory
-let chunkSize = 20
-for chunk in frameTimestamps.chunked(chunkSize) {
-    let frames = try await extractFrames(at: chunk)
-    processFrames(frames)
-    frames.removeAll()  // Immediate cleanup
-}
-```
-
-**Memory Warning Handling:**
+There's no dedicated cache-clearing entry point beyond canceling in-flight work. On a memory
+warning, canceling active generations also drops their frame caches:
 
 ```swift
 #if os(iOS)
@@ -324,7 +274,7 @@ NotificationCenter.default.addObserver(
     queue: .main
 ) { _ in
     Task {
-        await generator.clearCaches()
+        await generator.cancelAll()  // Cancels in-flight tasks and clears frameCache
     }
 }
 #endif
@@ -341,35 +291,24 @@ let memory = ProcessInfo.processInfo.physicalMemory
 let usedMemory = // ... get used memory
 
 if usedMemory > memory * 0.8 {
-    // Reduce concurrency or clear caches
-    await generator.clearCaches()
+    // Reduce concurrency, or cancel in-flight work to drop cached frames
+    await generator.cancelAll()
 }
 ```
 
 ### Clear Caches Periodically
 
+`MetalMosaicGenerator` caches extracted frames per video (`frameCache: [UUID: [CMTime: CGImage]]`)
+until that video's generation completes or is cancelled. There's no standalone "clear caches"
+call — `cancelAll()` cancels every in-flight task and clears the cache as a side effect:
+
 ```swift
 // After processing a batch
-for await result in results {
+for result in results {
     // ... handle result
 }
 
-// Clear frame caches
-await generator.cancelAll()  // Clears internal caches
-```
-
-### Use Autorelease Pools (macOS)
-
-```swift
-for videoURL in largeVideoList {
-    autoreleasepool {
-        let mosaic = try await generator.generate(
-            from: videoURL,
-            config: config,
-            outputDirectory: outputDir
-        )
-    }
-}
+await generator.cancelAll()
 ```
 
 ## Performance Monitoring
@@ -377,23 +316,18 @@ for videoURL in largeVideoList {
 ### Track Generation Metrics
 
 ```swift
-let generator = try MosaicGenerator()
+let generator = try MetalMosaicGenerator()
+let video = try await VideoInput(from: videoURL)
 
 let startTime = ContinuousClock.now
-let mosaicURL = try await generator.generate(
-    from: videoURL,
-    config: config,
-    outputDirectory: outputDir
-)
+let mosaicURL = try await generator.generate(for: video, config: config)
 let duration = startTime.duration(to: .now)
 
 print("Generated mosaic in \(duration)")
 
-// Get detailed metrics (if using protocol directly)
-if let protocolGen = generator as? any MosaicGeneratorProtocol {
-    let metrics = await protocolGen.getPerformanceMetrics()
-    print("Metrics: \(metrics)")
-}
+// getPerformanceMetrics() is part of MosaicGeneratorProtocol
+let metrics = await generator.getPerformanceMetrics()
+print("Metrics: \(metrics)")
 ```
 
 ### Use Instruments
@@ -402,8 +336,7 @@ Profile with Xcode Instruments:
 
 1. **Time Profiler**: Identify CPU bottlenecks
 2. **Allocations**: Track memory usage and leaks
-3. **Metal System Trace**: GPU utilization (Metal implementation)
-4. **Core Animation**: Rendering performance
+3. **Metal System Trace**: GPU utilization
 
 ### OSSignposter Integration
 
@@ -486,16 +419,17 @@ let mobileConfig = MosaicConfiguration(
 )
 ```
 
-**Expected Time:** ~4s per video (iOS, Core Graphics)
+**Expected Time:** ~4s per video (Metal, 1080p)
 
 ## Troubleshooting Performance Issues
 
-### Slow Processing on macOS
+### Confirm Metal Is Available
 
-**Check Metal Availability:**
+Every platform this package targets (macOS 26+, iOS 26+, macCatalyst 26+) is expected to have a
+usable Metal device, but if `MetalMosaicGenerator()`'s initializer throws
+`MetalProcessorError.deviceNotAvailable`, inspect the device directly:
 
 ```swift
-#if os(macOS)
 import Metal
 
 if let device = MTLCreateSystemDefaultDevice() {
@@ -505,54 +439,50 @@ if let device = MTLCreateSystemDefaultDevice() {
 } else {
     print("Metal not available")
 }
-#endif
 ```
 
-**Solution:** Use Core Graphics if Metal is unavailable or limited:
-
-```swift
-let metalGenerator = try MosaicGenerator(preference: .preferMetal)
-```
+There is no Core Graphics fallback to switch to — this indicates an unusual sandboxed or
+virtualized environment rather than something to configure around.
 
 ### High Memory Usage
 
 **Reduce Concurrency:**
 
 ```swift
-let coordinator = MosaicGeneratorCoordinator(concurrencyLimit: 2)
+let coordinator = try createDefaultMosaicCoordinator(concurrencyLimit: 2)
 ```
 
 **Process in Smaller Batches:**
 
 ```swift
 let batchSize = 10
-for batch in videoURLs.chunked(batchSize) {
-    let results = try await coordinator.generateBatch(
-        from: batch,
-        config: config,
-        outputDirectory: outputDir
-    )
+for start in stride(from: 0, to: videos.count, by: batchSize) {
+    let batch = Array(videos[start..<min(start + batchSize, videos.count)])
+    let results = try await coordinator.generateMosaicsforbatch(
+        videos: batch,
+        config: config
+    ) { progress in print(progress) }
     // Process results before next batch
 }
 ```
 
 ### GPU Timeout (Metal)
 
-Reduce batch size in Metal shader operations:
-
-```swift
-// MosaicKit already uses optimal batch size (20 frames)
-// If still experiencing timeout, use Core Graphics:
-let metalGenerator = try MosaicGenerator(preference: .preferMetal)
-```
+`MetalImageProcessor` already batches frame composition at 20 frames per command buffer
+internally — this isn't something callers configure. If you still see command buffer failures,
+check for `MetalProcessorError.commandBufferExecutionFailed(context:underlying:)` in the thrown
+error's `underlying` string, which carries the GPU's actual failure reason.
 
 ## Benchmarking Best Practices
 
 ### Fair Comparisons
 
 ```swift
+let generator = try MetalMosaicGenerator()
+let testVideo = try await VideoInput(from: testURL)
+
 // Warm up (compile shaders, allocate resources)
-_ = try await generator.generate(from: testURL, config: config, outputDirectory: tempDir)
+_ = try await generator.generate(for: testVideo, config: config)
 
 // Actual benchmark
 let iterations = 10
@@ -560,7 +490,7 @@ var durations: [Duration] = []
 
 for _ in 0..<iterations {
     let start = ContinuousClock.now
-    _ = try await generator.generate(from: testURL, config: config, outputDirectory: tempDir)
+    _ = try await generator.generate(for: testVideo, config: config)
     durations.append(start.duration(to: .now))
 }
 
@@ -568,7 +498,7 @@ let average = durations.reduce(Duration.zero, +) / iterations
 print("Average time: \(average)")
 ```
 
-### Compare Implementations
+### Compare Configurations
 
 ```swift
 let testConfigs: [(String, MosaicConfiguration)] = [
@@ -579,7 +509,7 @@ let testConfigs: [(String, MosaicConfiguration)] = [
 
 for (name, config) in testConfigs {
     let start = ContinuousClock.now
-    _ = try await generator.generate(from: url, config: config, outputDirectory: dir)
+    _ = try await generator.generate(for: testVideo, config: config)
     let duration = start.duration(to: .now)
     print("\(name): \(duration)")
 }
@@ -589,6 +519,6 @@ for (name, config) in testConfigs {
 
 - <doc:Architecture>
 - <doc:PlatformStrategy>
-- <doc:BatchProcessing>
 - ``MosaicConfiguration``
 - ``DensityConfig``
+- ``MosaicGeneratorCoordinator``

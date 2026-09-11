@@ -243,7 +243,7 @@ public struct PreviewConfiguration: Codable, Sendable, Hashable {
         self.ffmpegEncodingOptions = ffmpegEncodingOptions
         self.enableAppLifecycleMonitor = enableAppLifecycleMonitor
         self.enableExportRetry = enableExportRetry
-        // _exportMaxResolutionRaw defaults to "1080p" via the property declaration
+        // _exportMaxResolutionRaw defaults to "4K" via the property declaration
     }
 
     /// Deprecated. Use ``init(exportMode:)`` instead.
