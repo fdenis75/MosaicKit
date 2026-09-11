@@ -766,8 +766,9 @@ public final class MetalImageProcessor: @unchecked Sendable {
 
             // Check for errors
             if batchCommandBuffer.status == .error {
-                logger.error("❌ Batch command buffer execution failed")
-                throw MetalProcessorError.commandBufferCreationFailed
+                let reason = batchCommandBuffer.error?.localizedDescription ?? "unknown error"
+                logger.error("❌ Batch command buffer execution failed: \(reason)")
+                throw MetalProcessorError.commandBufferExecutionFailed(context: "batch frame composite", underlying: reason)
             }
         }
         
