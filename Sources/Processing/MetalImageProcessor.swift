@@ -18,6 +18,7 @@ import UIKit
 public final class MetalImageProcessor: @unchecked Sendable {
     // MARK: - Properties
     
+    private static let staticSignposter = OSSignposter(subsystem: "com.mosaicKit", category: "metal-processor")
     private let logger = Logger(subsystem: "com.mosaicKit", category: "metal-processor")
     private let device: MTLDevice
     private let commandQueue: MTLCommandQueue
@@ -49,7 +50,9 @@ public final class MetalImageProcessor: @unchecked Sendable {
     
     /// Initialize the Metal image processor
     public init() throws {
-        let initState = signposter.beginInterval("Initialize Metal Processor")
+        Self.staticSignposter.emitEvent("init")
+        let initState = Self.staticSignposter.beginInterval("Initialize Metal Processor")
+        defer { Self.staticSignposter.endInterval("Initialize Metal Processor", initState) }
        
         
         logger.debug("🔧 Initializing Metal image processor")
@@ -132,7 +135,6 @@ public final class MetalImageProcessor: @unchecked Sendable {
             logger.error("❌ Failed to create compute pipeline: \(error.localizedDescription)")
             throw MetalProcessorError.pipelineCreationFailed
         }
-         defer { signposter.endInterval("Initialize Metal Processor", initState) }
      //   logger.debug("✅ Metal image processor initialized successfully")
     }
     
@@ -143,6 +145,9 @@ public final class MetalImageProcessor: @unchecked Sendable {
     /// - Returns: A Metal texture containing the image data
     /// - Note: This is the PREFERRED method for VideoToolbox frames as it avoids CPU-GPU copies
     public func createTexture(from pixelBuffer: CVPixelBuffer) throws -> MTLTexture {
+        signposter.emitEvent("createTexturePixelBuffer")
+        let intervalState = signposter.beginInterval("createTexturePixelBuffer")
+        defer { signposter.endInterval("createTexturePixelBuffer", intervalState) }
         let startTime = CFAbsoluteTimeGetCurrent()
         defer { trackPerformance(startTime: startTime) }
 
@@ -185,6 +190,9 @@ public final class MetalImageProcessor: @unchecked Sendable {
     /// - Returns: A Metal texture containing the image data
     /// - Note: Prefer createTexture(from: CVPixelBuffer) for VideoToolbox frames
     public func createTexture(from cgImage: CGImage) throws -> MTLTexture {
+        signposter.emitEvent("createTextureCGImage")
+        let intervalState = signposter.beginInterval("createTextureCGImage")
+        defer { signposter.endInterval("createTextureCGImage", intervalState) }
         let startTime = CFAbsoluteTimeGetCurrent()
         defer { trackPerformance(startTime: startTime) }
 
@@ -240,6 +248,9 @@ public final class MetalImageProcessor: @unchecked Sendable {
     /// - Parameter texture: The source Metal texture
     /// - Returns: A CGImage containing the texture data
     public func createCGImage(from texture: MTLTexture) throws -> CGImage {
+        signposter.emitEvent("createCGImage")
+        let intervalState = signposter.beginInterval("createCGImage")
+        defer { signposter.endInterval("createCGImage", intervalState) }
         let startTime = CFAbsoluteTimeGetCurrent()
         defer { trackPerformance(startTime: startTime) }
         
@@ -284,6 +295,9 @@ public final class MetalImageProcessor: @unchecked Sendable {
     }
     
     private func validateTextureSize(_ size: CGSize) throws {
+        signposter.emitEvent("validateTextureSize")
+        let intervalState = signposter.beginInterval("validateTextureSize")
+        defer { signposter.endInterval("validateTextureSize", intervalState) }
         guard size.width.isFinite, size.height.isFinite,
               size.width >= 1, size.height >= 1, size.width <= 16_384, size.height <= 16_384 else {
             throw MosaicError.invalidConfiguration("Texture dimensions must be finite and between 1 and 16384")
@@ -297,6 +311,9 @@ public final class MetalImageProcessor: @unchecked Sendable {
     ///   - commandBuffer: Optional shared command buffer for batching operations
     /// - Returns: A new scaled texture
     public func scaleTexture(_ texture: MTLTexture, to size: CGSize, commandBuffer: MTLCommandBuffer? = nil) throws -> MTLTexture {
+        signposter.emitEvent("scaleTexture")
+        let intervalState = signposter.beginInterval("scaleTexture")
+        defer { signposter.endInterval("scaleTexture", intervalState) }
         let startTime = CFAbsoluteTimeGetCurrent()
         defer { trackPerformance(startTime: startTime) }
 
@@ -368,6 +385,9 @@ public final class MetalImageProcessor: @unchecked Sendable {
         at position: CGPoint,
         commandBuffer: MTLCommandBuffer? = nil
     ) throws {
+        signposter.emitEvent("compositeTexture")
+        let intervalState = signposter.beginInterval("compositeTexture")
+        defer { signposter.endInterval("compositeTexture", intervalState) }
         let startTime = CFAbsoluteTimeGetCurrent()
         defer { trackPerformance(startTime: startTime) }
 
@@ -419,6 +439,9 @@ public final class MetalImageProcessor: @unchecked Sendable {
     ///   - commandBuffer: Optional shared command buffer for batching operations
     /// - Returns: A new texture filled with the specified color
     public func createFilledTexture(size: CGSize, color: SIMD4<Float>, commandBuffer: MTLCommandBuffer? = nil) throws -> MTLTexture {
+        signposter.emitEvent("createFilledTexture")
+        let intervalState = signposter.beginInterval("createFilledTexture")
+        defer { signposter.endInterval("createFilledTexture", intervalState) }
         let startTime = CFAbsoluteTimeGetCurrent()
         defer { trackPerformance(startTime: startTime) }
 
@@ -494,6 +517,9 @@ public final class MetalImageProcessor: @unchecked Sendable {
         width: Float,
         commandBuffer: MTLCommandBuffer? = nil
     ) throws {
+        signposter.emitEvent("addBorder")
+        let intervalState = signposter.beginInterval("addBorder")
+        defer { signposter.endInterval("addBorder", intervalState) }
         let startTime = CFAbsoluteTimeGetCurrent()
         defer { trackPerformance(startTime: startTime) }
 
@@ -546,6 +572,9 @@ public final class MetalImageProcessor: @unchecked Sendable {
 
 
     func processImagesToMTLTexture(images: [CGImage], maxColors: Int, outputSize: CGSize) -> MTLTexture? {
+        signposter.emitEvent("processImagesToMTLTexture")
+        let intervalState = signposter.beginInterval("processImagesToMTLTexture")
+        defer { signposter.endInterval("processImagesToMTLTexture", intervalState) }
         guard !images.isEmpty else { return nil }
         
         // Step 1: Sample images
@@ -706,6 +735,9 @@ public final class MetalImageProcessor: @unchecked Sendable {
         forIphone: Bool = false,
         progressHandler: (@Sendable (Double) -> Void)? = nil
     ) async throws -> CGImage {
+        signposter.emitEvent("generateMosaic")
+        let intervalState = signposter.beginInterval("generateMosaic")
+        defer { signposter.endInterval("generateMosaic", intervalState) }
         let startTime = CFAbsoluteTimeGetCurrent()
         defer { trackPerformance(startTime: startTime) }
       
@@ -831,6 +863,9 @@ public final class MetalImageProcessor: @unchecked Sendable {
         forIphone: Bool = false,
         progressHandler: (@Sendable (Double) -> Void)? = nil
     ) async throws -> CGImage {
+        signposter.emitEvent("generateMosaicStream")
+        let intervalState = signposter.beginInterval("generateMosaicStream")
+        defer { signposter.endInterval("generateMosaicStream", intervalState) }
         let startTime = CFAbsoluteTimeGetCurrent()
         defer { trackPerformance(startTime: startTime) }
 
@@ -957,6 +992,9 @@ public final class MetalImageProcessor: @unchecked Sendable {
         metadataHeight: CGFloat,
         batchIndex: Int
     ) async throws {
+        signposter.emitEvent("processBatch")
+        let intervalState = signposter.beginInterval("processBatch")
+        defer { signposter.endInterval("processBatch", intervalState) }
         guard let batchCommandBuffer = commandQueue.makeCommandBuffer() else {
             throw MetalProcessorError.commandBufferCreationFailed
         }
@@ -1001,15 +1039,16 @@ public final class MetalImageProcessor: @unchecked Sendable {
     /// last is enough to prove every earlier one (background fill, header composite, all frame
     /// batches) has landed, without needing to track each of them individually.
     private func synchronizeGPU(context: String) async throws {
+        signposter.emitEvent("synchronizeGPU")
+        let intervalState = signposter.beginInterval("synchronizeGPU")
+        defer { signposter.endInterval("synchronizeGPU", intervalState) }
         guard let barrier = commandQueue.makeCommandBuffer() else {
             throw MetalProcessorError.commandBufferCreationFailed
         }
         barrier.label = "GPUSyncBarrier"
 
-        let state = signposter.beginInterval("GPU Sync")
         barrier.commit()
         await barrier.completed()
-        signposter.endInterval("GPU Sync", state)
 
         if barrier.status == .error {
             let reason = barrier.error?.localizedDescription ?? "unknown error"
@@ -1028,6 +1067,9 @@ public final class MetalImageProcessor: @unchecked Sendable {
         metadataHeight: CGFloat,
         commandBuffer: MTLCommandBuffer
     ) throws {
+        signposter.emitEvent("renderFrame")
+        let intervalState = signposter.beginInterval("renderFrame")
+        defer { signposter.endInterval("renderFrame", intervalState) }
         let position = layout.positions[index]
         let size = layout.thumbnailSizes[index]
         let frameRect = renderRect(
@@ -1100,6 +1142,9 @@ public final class MetalImageProcessor: @unchecked Sendable {
         spacing: CGFloat,
         metadataHeight: CGFloat
     ) -> CGRect {
+        signposter.emitEvent("renderRect")
+        let intervalState = signposter.beginInterval("renderRect")
+        defer { signposter.endInterval("renderRect", intervalState) }
         let baselineSpacing = max(0, LayoutConfiguration.default.spacing)
         let extraSpacing = max(0, spacing - baselineSpacing)
         let maxInset = max(0, (min(size.width, size.height) - 1) / 2)
@@ -1114,6 +1159,9 @@ public final class MetalImageProcessor: @unchecked Sendable {
     }
 
     private func borderColor(for color: BorderColor) -> SIMD4<Float> {
+        signposter.emitEvent("borderColor")
+        let intervalState = signposter.beginInterval("borderColor")
+        defer { signposter.endInterval("borderColor", intervalState) }
         let grayscale = Float(color.withOpacity(1.0))
         return SIMD4<Float>(grayscale, grayscale, grayscale, 1.0)
     }
@@ -1123,6 +1171,9 @@ public final class MetalImageProcessor: @unchecked Sendable {
         targetSize: CGSize,
         settings: ShadowSettings
     ) throws -> (image: CGImage, offset: CGPoint) {
+        signposter.emitEvent("createShadowedImage")
+        let intervalState = signposter.beginInterval("createShadowedImage")
+        defer { signposter.endInterval("createShadowedImage", intervalState) }
         let targetWidth = max(1, Int(targetSize.width.rounded(.toNearestOrAwayFromZero)))
         let targetHeight = max(1, Int(targetSize.height.rounded(.toNearestOrAwayFromZero)))
         let radius = max(0, settings.radius)
@@ -1175,7 +1226,10 @@ public final class MetalImageProcessor: @unchecked Sendable {
     /// Get performance metrics for the Metal processor
     /// - Returns: A dictionary of performance metrics
     public func getPerformanceMetrics() -> [String: Any] {
-        _metrics.withLock { m in
+        signposter.emitEvent("getPerformanceMetrics")
+        let intervalState = signposter.beginInterval("getPerformanceMetrics")
+        defer { signposter.endInterval("getPerformanceMetrics", intervalState) }
+        return _metrics.withLock { m in
             [
                 "averageExecutionTime": m.count > 0 ? m.total / Double(m.count) : 0,
                 "totalExecutionTime": m.total,
@@ -1198,6 +1252,9 @@ public final class MetalImageProcessor: @unchecked Sendable {
         textureWidth: Int? = nil,
         textureHeight: Int? = nil
     ) -> MTLSize {
+        signposter.emitEvent("calculateThreadgroupSize")
+        let intervalState = signposter.beginInterval("calculateThreadgroupSize")
+        defer { signposter.endInterval("calculateThreadgroupSize", intervalState) }
         let threadExecutionWidth = pipeline.threadExecutionWidth
 
         // OPTIMIZATION: Adaptive threadgroup sizing based on texture dimensions
@@ -1226,6 +1283,9 @@ public final class MetalImageProcessor: @unchecked Sendable {
     }
     
     private func trackPerformance(startTime: CFAbsoluteTime) {
+        signposter.emitEvent("trackPerformance")
+        let intervalState = signposter.beginInterval("trackPerformance")
+        defer { signposter.endInterval("trackPerformance", intervalState) }
         let executionTime = CFAbsoluteTimeGetCurrent() - startTime
         _metrics.withLock {
             $0.last = executionTime
@@ -1235,6 +1295,9 @@ public final class MetalImageProcessor: @unchecked Sendable {
     }
     
     private func formatMetadata(_ metadata: VideoMetadata) -> String {
+        signposter.emitEvent("formatMetadata")
+        let intervalState = signposter.beginInterval("formatMetadata")
+        defer { signposter.endInterval("formatMetadata", intervalState) }
         var lines: [String] = []
         
         if let codec = metadata.codec {
@@ -1275,4 +1338,3 @@ public enum MetalProcessorError: Error {
     case cancelled
     case commandBufferExecutionFailed(context: String, underlying: String)
 }
-
