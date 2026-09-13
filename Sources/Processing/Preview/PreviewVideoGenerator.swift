@@ -338,7 +338,9 @@ struct PreviewGenerationLogic {
             extractDuration: extractDuration,
             playbackSpeed: playbackSpeed,
             includeAudio: config.includeAudio,
-            maxResolutionRaw: config.exportMaxResolutionRaw,
+            // Passthrough exports cannot apply a video composition. Do not build a
+            // scaling composition from the default resolution cap in that mode.
+            maxResolutionRaw: config.effectiveExportPreset == nativeExportPreset.AVAssetExportPresetPassthrough.rawValue ? nil : config.exportMaxResolutionRaw,
             customTargetSize: customTargetSize,
             includeOverlayCues: config.showTimestampOverlay,
             video: video,
@@ -807,6 +809,11 @@ struct PreviewGenerationLogic {
             // to the configured `exportMaxResolution` cap.
             targetMaxWidth = CGFloat(maxRes.maxWidth)
             targetMaxHeight = CGFloat(maxRes.maxHeight)
+            // Resolution presets are expressed in landscape coordinates. Preserve
+            // the equivalent portrait bound for rotated sources.
+            if sourceHeight > sourceWidth {
+                swap(&targetMaxWidth, &targetMaxHeight)
+            }
             needsScaling = true
         }
 

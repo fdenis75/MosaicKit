@@ -44,11 +44,8 @@ public actor GenerationJobController {
         let id = GenerationJobID()
         let attempt = GenerationAttemptID()
         let initial = GenerationJobSnapshot(id: id, attempt: attempt, state: .queued)
-        let task = Task { () throws -> URL in
-            try Task.checkCancellation()
-            return try await operation()
-        }
-        records[id] = Record(snapshot: initial, task: task, operation: operation)
+        // Admission is explicit: work does not begin until `value(for:)` is awaited.
+        records[id] = Record(snapshot: initial, task: nil, operation: operation)
         return id
     }
 
@@ -74,13 +71,20 @@ public actor GenerationJobController {
     public func retry(_ id: GenerationJobID) {
         guard var record = records[id], record.snapshot.state == .paused || record.snapshot.state == .failed || record.snapshot.state == .cancelled else { return }
         let attempt = GenerationAttemptID()
-        let operation = record.operation
         record.snapshot = GenerationJobSnapshot(id: id, attempt: attempt, state: .queued)
-        record.task = Task { try await operation() }
+        record.task = nil
         records[id] = record
     }
 
     public func value(for id: GenerationJobID) async throws -> URL {
+        guard var record = records[id] else { throw CancellationError() }
+        if record.task == nil {
+            guard record.snapshot.state == .queued else { throw CancellationError() }
+            let operation = record.operation
+            record.snapshot = GenerationJobSnapshot(id: id, attempt: record.snapshot.attempt, state: .running)
+            record.task = Task { try Task.checkCancellation(); return try await operation() }
+            records[id] = record
+        }
         guard let task = records[id]?.task else { throw CancellationError() }
         do {
             let url = try await task.value
