@@ -20,16 +20,30 @@ public struct DefaultMosaicKitWebPEncoder: MosaicKitWebPEncoding {
     public init() {}
 
     public func encodeStillWebP(_ image: CGImage, quality: Float) throws -> Data {
+        try Task.checkCancellation()
+        guard quality.isFinite, (0...100).contains(quality) else {
+            throw MosaicError.invalidConfiguration("WebP quality must be finite and between zero and 100")
+        }
         let config = WebpEncoderConfig.preset(.picture, quality: quality)
         return try WebPEncoder().encode(RGBA: image, config: config)
     }
 
     public func encodeAnimatedWebP(frames: [CGImage], frameDelay: Double) throws -> Data {
-        guard let first = frames.first else { return Data() }
+        try Task.checkCancellation()
+        guard let first = frames.first else {
+            throw MosaicError.invalidConfiguration("Animated WebP requires at least one frame")
+        }
+        let milliseconds = frameDelay * 1000
+        guard milliseconds.isFinite, milliseconds >= 1, milliseconds < Double(Int32.max) else {
+            throw MosaicError.invalidConfiguration("WebP frame delay must be representable as positive milliseconds")
+        }
+        guard frames.allSatisfy({ $0.width == first.width && $0.height == first.height }) else {
+            throw MosaicError.invalidConfiguration("Animated WebP frames must have matching dimensions")
+        }
         let encoder = WebPAnimatedEncoder()
         let config = WebpEncoderConfig.preset(.picture, quality: 80)
         try encoder.create(config: config, width: first.width, height: first.height)
-        let durationMs = Int(frameDelay * 1000)
+        let durationMs = Int(milliseconds.rounded())
         for frame in frames {
             try Task.checkCancellation()
             try encoder.addImage(image: makePlatformImage(from: frame), duration: durationMs)

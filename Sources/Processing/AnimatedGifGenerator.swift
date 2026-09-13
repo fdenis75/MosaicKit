@@ -20,15 +20,19 @@ public struct AnimatedGifGenerator: Sendable {
         frames: [CGImage],
         to url: URL,
         format: AnimatedFormat = .gif,
-        frameDelay: Double = 1.0 / 10.0
+        frameDelay: Double = 1.0 / 10.0,
+        overwrite: Bool = true
     ) throws {
-        guard !frames.isEmpty else {
-            logger.warning("⚠️ Animated image save skipped — no frames provided")
-            return
+        guard !frames.isEmpty, frameDelay.isFinite, frameDelay > 0 else {
+            throw MosaicError.processingFailed("Animation requires frames and a finite positive delay")
         }
+        try Task.checkCancellation()
+        let transaction = try OutputTransaction(finalURL: url, overwrite: overwrite)
+        defer { transaction.discard() }
 
         if format == .webp {
-            try saveWebP(frames: frames, to: url, frameDelay: frameDelay)
+            try saveWebP(frames: frames, to: transaction.stagingURL, frameDelay: frameDelay)
+            try transaction.commit()
             return
         }
 
@@ -41,7 +45,7 @@ public struct AnimatedGifGenerator: Sendable {
         }
 
         guard let destination = CGImageDestinationCreateWithURL(
-            url as CFURL,
+            transaction.stagingURL as CFURL,
             format.uti as CFString,
             frames.count,
             nil
@@ -71,6 +75,7 @@ public struct AnimatedGifGenerator: Sendable {
             ))
         }
 
+        try transaction.commit()
         logger.debug("✅ \(format.rawValue.uppercased()) saved — \(frames.count) frames at \(String(format: "%.3f", frameDelay))s/frame → \(url.lastPathComponent)")
     }
 

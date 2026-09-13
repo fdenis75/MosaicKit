@@ -17,8 +17,8 @@ struct PreviewConfigurationTests {
     @Test("PreviewConfiguration exposes optional extract timing controls")
     func optionalExtractTimingControls() async throws {
         let defaultConfig = PreviewConfiguration()
-        #expect(defaultConfig.minimumExtractDuration == 4.0)
-        #expect(defaultConfig.maximumPlaybackSpeed == 1.5)
+        #expect(defaultConfig.minimumExtractDuration == nil)
+        #expect(defaultConfig.maximumPlaybackSpeed == nil)
 
         let disabledConfig = PreviewConfiguration(
             targetDuration: 30,
@@ -161,7 +161,7 @@ struct PreviewConfigurationTests {
                                     #expect(filename.hasSuffix(".\(format.fileExtension)"))
 
                                     let outputDir = decoded.generateOutputDirectory(for: video)
-                                    #expect(outputDir.path.hasSuffix("/movieprev"))
+                                    #expect(outputDir.path == "/tmp/preview-output")
 
                                     checked += 1
                                 }
@@ -177,11 +177,9 @@ struct PreviewConfigurationTests {
 
     @Test("Preview extract parameter calculation honors min duration and speed cap")
     func extractParameterCalculation() throws {
-        let fastConfig = PreviewConfiguration(
-            targetDuration: 30,
-            density: .xxs,
-            compressionQuality: 0.8
-        )
+        var fastConfig = PreviewConfiguration(targetDuration: 30, density: .xxs, compressionQuality: 0.8)
+        fastConfig.minimumExtractDuration = 4.0
+        fastConfig.maximumPlaybackSpeed = 1.5
         let fastParams = fastConfig.calculateExtractParameters(forVideoDuration: 10_800)
         let fastMinimumExtractDuration = try #require(fastConfig.minimumExtractDuration)
         let fastMaximumPlaybackSpeed = try #require(fastConfig.maximumPlaybackSpeed)
@@ -190,11 +188,8 @@ struct PreviewConfigurationTests {
         #expect(fastParams.playbackSpeed <= fastMaximumPlaybackSpeed)
         #expect(fastParams.playbackSpeed >= 1.0)
 
-        let relaxedConfig = PreviewConfiguration(
-            targetDuration: 300,
-            density: .xxl,
-            compressionQuality: 0.8
-        )
+        var relaxedConfig = PreviewConfiguration(targetDuration: 300, density: .xxl, compressionQuality: 0.8)
+        relaxedConfig.minimumExtractDuration = 4.0
         let relaxedParams = relaxedConfig.calculateExtractParameters(forVideoDuration: 300)
         let relaxedMinimumExtractDuration = try #require(relaxedConfig.minimumExtractDuration)
         #expect(relaxedParams.playbackSpeed == 1.0)

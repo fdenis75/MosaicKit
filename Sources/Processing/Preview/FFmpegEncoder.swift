@@ -1,6 +1,10 @@
 import Foundation
 import AVFoundation
 import OSLog
+import Synchronization
+#if os(macOS)
+import Darwin
+#endif
 
 /// Handles the FFmpeg encoding stage of the passthrough pipeline.
 ///
@@ -90,7 +94,10 @@ enum FFmpegEncoder {
         try checkTempDiskSpace(at: tempDir)
 
         // Determine final output URL
-        let outputURL = try PreviewGenerationLogic.prepareOutputURL(config: config, video: video)
+        let finalURL = try PreviewGenerationLogic.prepareOutputURL(config: config, video: video)
+        let transaction = try OutputTransaction(finalURL: finalURL, overwrite: config.overwrite)
+        defer { transaction.discard() }
+        let outputURL = transaction.stagingURL
 
         logger.info("FFmpeg pipeline: passthrough → \(tempURL.lastPathComponent), encode → \(outputURL.lastPathComponent)")
 
@@ -164,8 +171,9 @@ enum FFmpegEncoder {
         let fileSize = (try? FileManager.default.attributesOfItem(atPath: outputURL.path)[.size] as? Int64) ?? 0
         logger.info("FFmpeg encode completed: \(outputURL.lastPathComponent) (\(String(format: "%.2f", Double(fileSize) / 1_048_576.0)) MB)")
 
-        progressHandler(1.0, .completed, outputURL, "Encoding complete")
-        return outputURL
+        if cancellationCheck() { throw PreviewError.cancelled }
+        try transaction.commit()
+        return finalURL
 
         #else
         throw PreviewError.invalidConfiguration("FFmpeg export is only supported on macOS")
@@ -185,7 +193,9 @@ enum FFmpegEncoder {
     ) async throws {
         guard let exportSession = AVAssetExportSession(
             asset: composition,
-            presetName: AVAssetExportPresetPassthrough
+            // Passthrough cannot apply a pitch-correction audio mix. Render the
+            // intermediate when audio processing is required, then transcode it.
+            presetName: audioMix == nil ? AVAssetExportPresetPassthrough : AVAssetExportPresetHighestQuality
         ) else {
             throw PreviewError.encodingFailed("Failed to create passthrough export session", nil)
         }
@@ -265,7 +275,7 @@ enum FFmpegEncoder {
 
     // MARK: - FFmpeg process
 
-    private static func runFFmpeg(
+    static func runFFmpeg(
         binaryPath: String,
         arguments: [String],
         totalDuration: Double,
@@ -289,6 +299,7 @@ enum FFmpegEncoder {
         progressTracker.recordProgress(0)
         let stallDetected = CancellationToken()
         let processFinished = CancellationToken()
+        let callerCancelled = CancellationToken()
 
         // Reference types so they can be safely captured across concurrency boundaries
         // without triggering Swift 6 Sendable errors (Process and Pipe are not Sendable).
@@ -298,21 +309,21 @@ enum FFmpegEncoder {
         // Mutable stderr state: only accessed from Foundation's serial readability queue.
         // Wrapped in a class so the @escaping closure can mutate it without a Swift 6
         // "capture of mutable variable" error.
-        final class StderrState: @unchecked Sendable { var buffer: String = "" }
-        let stderrState = StderrState()
+        let stderrState = Mutex<String>("")
 
         // readabilityHandler fires on Foundation's internal serial queue whenever
         // new data arrives from the ffmpeg process's stderr.
         pipeRef.fileHandleForReading.readabilityHandler = { handle in
             guard let chunk = String(data: handle.availableData, encoding: .utf8),
                   !chunk.isEmpty else { return }
-            stderrState.buffer += chunk
-
-            guard totalDuration > 0 else { return }
+            let snapshot = stderrState.withLock { buffer in
+                buffer = String((buffer + chunk).suffix(8192))
+                return buffer
+            }
+            guard totalDuration.isFinite, totalDuration > 0 else { return }
 
             // Parse every "time=HH:MM:SS.ss" token; keep only the last value.
             // Operate on a snapshot to avoid index-invalidation if the buffer is trimmed below.
-            let snapshot = stderrState.buffer
             var latestElapsed: Double?
             let pattern = #/time=(\d{2}):(\d{2}):(\d{2})\.(\d{2})/#
             var searchStart = snapshot.startIndex
@@ -331,19 +342,24 @@ enum FFmpegEncoder {
                 progressHandler(fraction, "FFmpeg: \(Int(fraction * 100))%")
             }
 
-            // Trim buffer to avoid unbounded growth (keep last 8 KB)
-            if stderrState.buffer.utf8.count > 8192 {
-                let drop = stderrState.buffer.utf8.count - 4096
-                stderrState.buffer = String(stderrState.buffer.dropFirst(drop))
-            }
+        }
+
+        try Task.checkCancellation()
+        if cancellationCheck() || callerCancelled.isCancelled { throw PreviewError.cancelled }
+        do { try processRef.run() }
+        catch {
+            pipeRef.fileHandleForReading.readabilityHandler = nil
+            throw error
         }
 
         // Watchdog: terminates the process on user cancellation or stall
         let watchdog = Task {
             while !Task.isCancelled && !processFinished.isCancelled {
-                if cancellationCheck() {
+                if cancellationCheck() || callerCancelled.isCancelled {
                     logger.warning("Cancellation requested, terminating ffmpeg")
                     processRef.terminate()
+                    try? await Task.sleep(for: .seconds(2))
+                    if processRef.isRunning { kill(processRef.processIdentifier, SIGKILL) }
                     return
                 }
                 let elapsed = progressTracker.secondsSinceLastProgress
@@ -352,6 +368,8 @@ enum FFmpegEncoder {
                     logger.error("FFmpeg stalled or timed out (\(Int(elapsed))s since last progress), terminating")
                     stallDetected.cancel()
                     processRef.terminate()
+                    try? await Task.sleep(for: .seconds(2))
+                    if processRef.isRunning { kill(processRef.processIdentifier, SIGKILL) }
                     return
                 }
                 try? await Task.sleep(nanoseconds: 2_000_000_000)
@@ -362,27 +380,29 @@ enum FFmpegEncoder {
             pipeRef.fileHandleForReading.readabilityHandler = nil
         }
 
-        try processRef.run()
-
         // Wait for process exit on a DispatchQueue thread to avoid blocking the Swift
         // concurrency pool (waitUntilExit() is a blocking call).
-        let exitCode = await withCheckedContinuation { (continuation: CheckedContinuation<Int32, Never>) in
-            DispatchQueue.global(qos: .utility).async {
-                processRef.waitUntilExit()
-                processFinished.cancel()
-                continuation.resume(returning: processRef.terminationStatus)
+        let exitCode = await withTaskCancellationHandler {
+            await withCheckedContinuation { (continuation: CheckedContinuation<Int32, Never>) in
+                DispatchQueue.global(qos: .utility).async {
+                    processRef.waitUntilExit()
+                    processFinished.cancel()
+                    continuation.resume(returning: processRef.terminationStatus)
+                }
             }
+        } onCancel: {
+            callerCancelled.cancel()
         }
 
         if exitCode != 0 {
             if stallDetected.isCancelled {
                 throw PreviewError.exportStalled(elapsedSeconds: Int(progressTracker.secondsSinceLastProgress))
             }
-            if cancellationCheck() { throw PreviewError.cancelled }
-            throw PreviewError.ffmpegEncodingFailed(exitCode: exitCode, output: "FFmpeg exited with code \(exitCode)")
+            if cancellationCheck() || callerCancelled.isCancelled { throw PreviewError.cancelled }
+            throw PreviewError.ffmpegEncodingFailed(exitCode: exitCode, output: stderrState.withLock { $0 })
         }
 
-        if cancellationCheck() { throw PreviewError.cancelled }
+        if cancellationCheck() || callerCancelled.isCancelled { throw PreviewError.cancelled }
         logger.info("FFmpeg process completed successfully (exit 0)")
     }
 

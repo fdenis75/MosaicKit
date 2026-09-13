@@ -124,7 +124,7 @@ public enum nativeExportPreset: String, Codable, Sendable, CaseIterable, Identif
         case .AVAssetExportPresetHEVC1920x1080:
             return NativeExportPresetProfile(
                 codec: .hevc, profile: "Main", level: "4.0",
-                maxResolution: nil,
+                maxResolution: CGSize(width: 1920, height: 1080),
                 resolutionDescription: "1920x1080 (1080p)"
             )
         case .AVAssetExportPresetHighestQuality:

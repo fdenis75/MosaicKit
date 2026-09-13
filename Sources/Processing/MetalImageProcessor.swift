@@ -33,7 +33,7 @@ public final class MetalImageProcessor: @unchecked Sendable {
     private let borderPipeline: MTLComputePipelineState
     // Note: shadowPipeline removed - unused in codebase
     
-    private lazy var ciContext = CIContext(mtlDevice: device)
+    private let ciContext: CIContext
 
     private nonisolated(unsafe) static let bitrateFormatter: ByteCountFormatter = {
         let f = ByteCountFormatter()
@@ -60,6 +60,7 @@ public final class MetalImageProcessor: @unchecked Sendable {
             throw MetalProcessorError.deviceNotAvailable
         }
         self.device = device
+        self.ciContext = CIContext(mtlDevice: device)
         logger.debug("✅ Using Metal device: \(device.name)")
         
         // Create command queue
@@ -282,6 +283,13 @@ public final class MetalImageProcessor: @unchecked Sendable {
         return cgImage
     }
     
+    private func validateTextureSize(_ size: CGSize) throws {
+        guard size.width.isFinite, size.height.isFinite,
+              size.width >= 1, size.height >= 1, size.width <= 16_384, size.height <= 16_384 else {
+            throw MosaicError.invalidConfiguration("Texture dimensions must be finite and between 1 and 16384")
+        }
+    }
+
     /// Scale a texture to a new size
     /// - Parameters:
     ///   - texture: The source texture
@@ -292,6 +300,7 @@ public final class MetalImageProcessor: @unchecked Sendable {
         let startTime = CFAbsoluteTimeGetCurrent()
         defer { trackPerformance(startTime: startTime) }
 
+        try validateTextureSize(size)
         // Create output texture
         // OPTIMIZATION: Use .private storage for GPU-only intermediate textures (2-3x faster)
         let textureDescriptor = MTLTextureDescriptor.texture2DDescriptor(
@@ -336,6 +345,11 @@ public final class MetalImageProcessor: @unchecked Sendable {
         // Only commit if we created the command buffer (not batching)
         if shouldCommit {
             cmdBuffer.commit()
+            cmdBuffer.waitUntilCompleted()
+            guard cmdBuffer.status == .completed else {
+                throw MetalProcessorError.commandBufferExecutionFailed(context: "Texture operation",
+                    underlying: cmdBuffer.error?.localizedDescription ?? "GPU did not complete")
+            }
         }
 
       //  logger.debug("✅ Scaled texture: \(texture.width)x\(texture.height) -> \(outputTexture.width)x\(outputTexture.height)")
@@ -388,6 +402,11 @@ public final class MetalImageProcessor: @unchecked Sendable {
         // Only commit if we created the command buffer (not batching)
         if shouldCommit {
             cmdBuffer.commit()
+            cmdBuffer.waitUntilCompleted()
+            guard cmdBuffer.status == .completed else {
+                throw MetalProcessorError.commandBufferExecutionFailed(context: "Texture operation",
+                    underlying: cmdBuffer.error?.localizedDescription ?? "GPU did not complete")
+            }
         }
 
        // logger.debug("✅ Composited texture at position: (\(position.x), \(position.y))")
@@ -403,6 +422,7 @@ public final class MetalImageProcessor: @unchecked Sendable {
         let startTime = CFAbsoluteTimeGetCurrent()
         defer { trackPerformance(startTime: startTime) }
 
+        try validateTextureSize(size)
         // Create output texture
         let textureDescriptor = MTLTextureDescriptor.texture2DDescriptor(
             pixelFormat: .rgba8Unorm,
@@ -447,6 +467,11 @@ public final class MetalImageProcessor: @unchecked Sendable {
         // Only commit if we created the command buffer (not batching)
         if shouldCommit {
             cmdBuffer.commit()
+            cmdBuffer.waitUntilCompleted()
+            guard cmdBuffer.status == .completed else {
+                throw MetalProcessorError.commandBufferExecutionFailed(context: "Texture operation",
+                    underlying: cmdBuffer.error?.localizedDescription ?? "GPU did not complete")
+            }
         }
 
        // logger.debug("✅ Created filled texture: \(outputTexture.width)x\(outputTexture.height)")
@@ -509,6 +534,11 @@ public final class MetalImageProcessor: @unchecked Sendable {
         // Only commit if we created the command buffer (not batching)
         if shouldCommit {
             cmdBuffer.commit()
+            cmdBuffer.waitUntilCompleted()
+            guard cmdBuffer.status == .completed else {
+                throw MetalProcessorError.commandBufferExecutionFailed(context: "Texture operation",
+                    underlying: cmdBuffer.error?.localizedDescription ?? "GPU did not complete")
+            }
         }
 
     //    logger.debug("✅ Added border at position: (\(position.x), \(position.y)), size: \(size.width)x\(size.height)")
@@ -817,32 +847,28 @@ public final class MetalImageProcessor: @unchecked Sendable {
             mosaicSize.height += CGFloat(metadataHeight)
         }
 
-        // Collect all frames first to enable dominant color sampling
-        var allFrames: [(Int, CGImage)] = []
-        progressHandler?(0.05)
-
-        for try await (index, image) in stream {
-            allFrames.append((index, image))
-
-            // Update progress during collection (0.05 to 0.15)
-            let collectionProgress = 0.05 + (0.1 * Double(allFrames.count) / Double(layout.positions.count))
-            progressHandler?(collectionProgress)
+        try Task.checkCancellation()
+        guard !layout.positions.isEmpty else { throw MosaicError.processingFailed("Empty mosaic layout") }
+        var iterator = stream.makeAsyncIterator()
+        try validateTextureSize(mosaicSize)
+        guard layout.thumbnailSizes.count == layout.positions.count else {
+            throw MosaicError.invalidConfiguration("Layout positions and cell sizes must match")
+        }
+        // A bounded sample establishes the background before incremental rendering.
+        var sample: [(Int, CGImage)] = []
+        for _ in 0..<min(5, layout.positions.count) {
+            guard let frame = try await iterator.next() else { break }
+            sample.append(frame)
         }
 
-        logger.debug("📦 Collected \(allFrames.count) frames for processing")
-        if allFrames.isEmpty {
-            logger.error("❌ No frames were produced by the extraction stream — expected \(layout.positions.count) for a \(Int(layout.mosaicSize.width))x\(Int(layout.mosaicSize.height)) mosaic. Output will contain only the background/header.")
-        } else if allFrames.count < layout.positions.count {
-            logger.warning("⚠️ Collected \(allFrames.count)/\(layout.positions.count) expected frames — some mosaic cells will be left as background.")
-        }
-
+        guard let setupBuffer = commandQueue.makeCommandBuffer() else { throw MetalProcessorError.commandBufferCreationFailed }
         // Create mosaic texture with dominant color background
         var mosaicTexture: MTLTexture
         progressHandler?(0.15)
 
         if config.useMovieColorsForBg {
             // Extract images for dominant color sampling
-            let frameImages = allFrames.map { $0.1 }
+            let frameImages = sample.map { $0.1 }
 
             // Generate gradient background from dominant colors
             if let texture = processImagesToMTLTexture(images: frameImages, maxColors: 5, outputSize: mosaicSize) {
@@ -851,14 +877,14 @@ public final class MetalImageProcessor: @unchecked Sendable {
             } else {
                 // Fallback to dark gray if color extraction fails
                 let color = SIMD4<Float>(0.1, 0.1, 0.1, 1.0)
-                mosaicTexture = try createFilledTexture(size: mosaicSize, color: color)
+                mosaicTexture = try createFilledTexture(size: mosaicSize, color: color, commandBuffer: setupBuffer)
                 logger.warning("⚠️ Falling back to solid color background")
             }
         } else {
             // Use the configured solid background color
             let bg = config.backgroundColor
             let color = SIMD4<Float>(Float(bg.red), Float(bg.green), Float(bg.blue), Float(bg.alpha))
-            mosaicTexture = try createFilledTexture(size: mosaicSize, color: color)
+            mosaicTexture = try createFilledTexture(size: mosaicSize, color: color, commandBuffer: setupBuffer)
         }
 
         progressHandler?(0.25)
@@ -870,51 +896,45 @@ public final class MetalImageProcessor: @unchecked Sendable {
             try compositeTexture(
                 headerTexture,
                 onto: mosaicTexture,
-                at: CGPoint(x: 0, y: 0)
+                at: CGPoint(x: 0, y: 0), commandBuffer: setupBuffer
             )
         }
 
-        // Process frames in batches
-        let batchSize = 20
-        var processedCount = 0
-        let totalExpected = allFrames.count
-
-        for batchStart in stride(from: 0, to: allFrames.count, by: batchSize) {
-            let batchEnd = min(batchStart + batchSize, allFrames.count)
-            let batch = Array(allFrames[batchStart..<batchEnd])
-            let batchIndex = batchStart / batchSize
-
-            try processBatch(
-                batch,
-                into: mosaicTexture,
-                layout: layout,
-                visual: config.layout.visual,
-                spacing: config.layout.spacing,
-                hasMetadata: hasMetadata,
-                metadataHeight: CGFloat(metadataHeight),
-                batchIndex: batchIndex
-            )
-            processedCount += batch.count
-
-            // Progress from 0.25 to 0.95
-            let progress = 0.25 + (0.7 * Double(processedCount) / Double(totalExpected))
-            progressHandler?(progress)
+        setupBuffer.commit()
+        await setupBuffer.completed()
+        guard setupBuffer.status == .completed else {
+            throw MetalProcessorError.commandBufferExecutionFailed(context: "Mosaic setup",
+                underlying: setupBuffer.error?.localizedDescription ?? "GPU did not complete")
         }
-
-        // IMPORTANT: every texture write above (background fill, header composite, each
-        // frame batch) was committed to `commandQueue` without waiting for the GPU to
-        // actually finish — `commit()` only schedules the work. `createCGImage(from:)`
-        // below does a synchronous CPU-side `texture.getBytes(...)`, which is only safe
-        // once the GPU writes it depends on are guaranteed complete. Command buffers on the
-        // same MTLCommandQueue execute in commit order, so waiting on one final empty
-        // "barrier" buffer committed last is sufficient to guarantee everything before it
-        // has finished — without forcing every batch to serialize with the GPU.
-        //
-        // Without this, the race is invisible on large/slow mosaics (frame extraction and
-        // batch encoding give the GPU plenty of time to catch up) but reproduces reliably on
-        // small, low-density mosaics where the whole pipeline can finish before the last
-        // batch's GPU work has actually landed — producing a blank or partially-drawn output.
-        try await synchronizeGPU(context: "generateMosaicStream frames=\(allFrames.count) size=\(Int(mosaicSize.width))x\(Int(mosaicSize.height))")
+        let batchSize = 8
+        var batch = sample
+        sample.removeAll(keepingCapacity: false)
+        var rendered = Set<Int>()
+        var batchIndex = 0
+        while true {
+            try Task.checkCancellation()
+            while batch.count < batchSize, let frame = try await iterator.next() {
+                batch.append(frame)
+            }
+            if batch.isEmpty { break }
+            for (index, _) in batch {
+                guard index >= 0, index < layout.positions.count, rendered.insert(index).inserted else {
+                    throw MosaicError.processingFailed("Duplicate or out-of-range mosaic frame")
+                }
+            }
+            try await processBatch(batch, into: mosaicTexture, layout: layout,
+                visual: config.layout.visual, spacing: config.layout.spacing,
+                hasMetadata: hasMetadata, metadataHeight: CGFloat(metadataHeight), batchIndex: batchIndex)
+            batch.removeAll(keepingCapacity: true)
+            batchIndex += 1
+            progressHandler?(0.25 + 0.7 * Double(rendered.count) / Double(layout.positions.count))
+        }
+        try Task.checkCancellation()
+        guard rendered.count == layout.positions.count else {
+            throw MosaicError.processingFailed("Missing mosaic frames: received \(rendered.count) of \(layout.positions.count)")
+        }
+        try await synchronizeGPU(context: "generateMosaicStream")
+        try Task.checkCancellation()
 
         // Create CGImage from the final mosaic texture
         progressHandler?(0.95)
@@ -936,7 +956,7 @@ public final class MetalImageProcessor: @unchecked Sendable {
         hasMetadata: Bool,
         metadataHeight: CGFloat,
         batchIndex: Int
-    ) throws {
+    ) async throws {
         guard let batchCommandBuffer = commandQueue.makeCommandBuffer() else {
             throw MetalProcessorError.commandBufferCreationFailed
         }
@@ -962,20 +982,13 @@ public final class MetalImageProcessor: @unchecked Sendable {
             renderedCount += 1
         }
 
-        // Logged asynchronously on GPU completion so a failing batch is never silent —
-        // this does not block the CPU from moving on to encode the next batch, which is
-        // what keeps the batch loop pipelined. Correctness against `createCGImage`'s
-        // final read is guaranteed separately by the `synchronizeGPU` barrier, not by this
-        // handler.
-        let logger = self.logger
-        let finalRenderedCount = renderedCount
-        batchCommandBuffer.addCompletedHandler { buffer in
-            if buffer.status == .error {
-                let reason = buffer.error?.localizedDescription ?? "unknown error"
-                logger.error("❌ Mosaic batch \(batchIndex) (\(finalRenderedCount) frames) GPU execution failed: \(reason)")
-            }
-        }
         batchCommandBuffer.commit()
+        await batchCommandBuffer.completed()
+        guard batchCommandBuffer.status == .completed else {
+            throw MetalProcessorError.commandBufferExecutionFailed(context: "Mosaic batch \(batchIndex)",
+                underlying: batchCommandBuffer.error?.localizedDescription ?? "GPU did not complete")
+        }
+        try Task.checkCancellation()
     }
 
     /// Blocks until every command buffer previously committed to `commandQueue` has finished

@@ -16,12 +16,14 @@ import UIKit
 public final class ThumbnailProcessor: Sendable {
     private let logger = Logger(subsystem: "com.mosaicKit", category: "thumbnail-processor")
     private let config: MosaicConfiguration
+    private let decodeQualityScale: CGFloat
     public let signposter = OSSignposter(subsystem: "com.mosaicKit", category: "thumbnail-processor")
 
     /// Initialize a new thumbnail processor
     /// - Parameter config: Configuration for thumbnail processing
-    public init(config: MosaicConfiguration) {
+    public init(config: MosaicConfiguration, decodeQualityScale: CGFloat = 1) {
         self.config = config
+        self.decodeQualityScale = decodeQualityScale.isFinite ? min(max(decodeQualityScale, 1), 4) : 1
     }
     
     /// Extract thumbnails from video with timestamps
@@ -40,134 +42,18 @@ public final class ThumbnailProcessor: Sendable {
         accurate: Bool = false,
         progressHandler: ((Double) -> Void)? = nil
     ) async throws -> [(image: CGImage, timestamp: String)] {
-        let state = signposter.beginInterval("Extract Thumbnails")
-        defer { signposter.endInterval("Extract Thumbnails", state) }
-        
-        let duration = try await asset.load(.duration).seconds
-        let generator = configureGenerator(for: asset, accurate: accurate, preview: preview, layout: layout)
-
-        let times = calculateExtractionTimes(
-            duration: duration,
-            count: layout.positions.count
-        )
-        
-        var thumbnails: [Int: (CGImage, String)] = [:] // Use dictionary to track by index
-        var failedIndices: [Int] = []
-        var extractedFrames: [(index: Int, image: CGImage, timestamp: String)] = []
-
-        // First pass: Extract all frames sequentially (AVAssetImageGenerator is not thread-safe)
-        // but process timestamps in parallel afterward
-        var currentIndex = 0
-        for await result in generator.images(for: times) {
-            let index = currentIndex
-            currentIndex += 1
-            progressHandler?(Double(currentIndex) / Double(times.count) * 0.6)
-            switch result {
-            case .success(requestedTime: _, image: let image, actualTime: let actual):
-                let timestamp = self.formatTimestamp(seconds: actual.seconds)
-                let copiedImage = self.createDeepCopy(of: image) ?? image
-                extractedFrames.append((index: index, image: copiedImage, timestamp: timestamp))
-            case .failure(requestedTime: let requestedTime, error: let error):
-                logger.warning("⚠️ Frame extraction failed at \(self.formatTimestamp(seconds: requestedTime.seconds)): \(error.localizedDescription)")
-                failedIndices.append(index)
-            }
-
-            // Report progress
-           
+        let source = makeFrameSource(file: file, layout: layout, asset: asset, accurate: accurate)
+        var thumbnails: [(image: CGImage, timestamp: String)] = []
+        thumbnails.reserveCapacity(layout.positions.count)
+        while let frame = try await source.next() {
+            try Task.checkCancellation()
+            let image = addTimestampToImage(image: frame.image, timestamp: frame.timestamp,
+                                            size: layout.thumbnailSizes[frame.index])
+            thumbnails.append((image, frame.timestamp))
+            progressHandler?(Double(thumbnails.count) / Double(layout.positions.count))
         }
-
-        // Process extracted frames in parallel (add timestamps)
-        await withTaskGroup(of: (Int, CGImage, String).self) { group in
-            for frame in extractedFrames {
-                let size = layout.thumbnailSizes[frame.index]
-                group.addTask { [self] in
-                    let imageWithTimestamp = self.addTimestampToImage(image: frame.image, timestamp: frame.timestamp, size: size)
-                    return (frame.index, imageWithTimestamp, frame.timestamp)
-                }
-            }
-
-            for await (index, image, timestamp) in group {
-                thumbnails[index] = (image, timestamp)
-                // Report progress
-                let calculatedProgress = 0.6 + (Double(thumbnails.count) / Double(times.count)) * 0.4
-                progressHandler?(calculatedProgress)
-            }
-        }
-
-        // Retry failed extractions once
-        var stillFailed: [Int] = []
-        if !failedIndices.isEmpty {
-            logger.debug("🔄 Retrying \(failedIndices.count) failed extractions...")
-            let failedTimes = failedIndices.map { times[$0] }
-            var retryIndex = 0
-            var retriedFrames: [(index: Int, image: CGImage, timestamp: String)] = []
-
-            for await result in generator.images(for: failedTimes) {
-                let originalIndex = failedIndices[retryIndex]
-                retryIndex += 1
-
-                switch result {
-                case .success(requestedTime: _, image: let image, actualTime: let actual):
-                    let timestamp = self.formatTimestamp(seconds: actual.seconds)
-                    let copiedImage = self.createDeepCopy(of: image) ?? image
-                    retriedFrames.append((index: originalIndex, image: copiedImage, timestamp: timestamp))
-                    logger.debug("✅ Retry successful for frame \(originalIndex)")
-                case .failure(requestedTime: let requestedTime, error: let error):
-                    logger.error("❌ Retry failed for frame \(originalIndex) at \(self.formatTimestamp(seconds: requestedTime.seconds)): \(error.localizedDescription)")
-                    stillFailed.append(originalIndex)
-                }
-            }
-
-            // Process retried frames in parallel
-            await withTaskGroup(of: (Int, CGImage, String).self) { group in
-                for frame in retriedFrames {
-                    let size = layout.thumbnailSizes[frame.index]
-                    group.addTask { [self] in
-                        let imageWithTimestamp = self.addTimestampToImage(image: frame.image, timestamp: frame.timestamp, size: size)
-                        return (frame.index, imageWithTimestamp, frame.timestamp)
-                    }
-                }
-
-                for await (index, image, timestamp) in group {
-                    thumbnails[index] = (image, timestamp)
-                }
-            }
-
-            // Use blank images for frames that failed twice
-            for index in stillFailed {
-                if let blankImage = createBlankImage(size: layout.thumbnailSizes[index]) {
-                    thumbnails[index] = (blankImage, "00:00:00")
-                    logger.debug("⚠️ Using blank image for frame \(index) after retry failure")
-                }
-            }
-
-            let successfulRetries = failedIndices.count - stillFailed.count
-            if successfulRetries > 0 {
-                logger.debug("✅ Successfully recovered \(successfulRetries) frames on retry")
-            }
-            if !stillFailed.isEmpty {
-                logger.warning("⚠️ \(stillFailed.count) frames still failed after retry, using blank images")
-            }
-        }
-
-        // Check if we have any valid thumbnails
-        if thumbnails.isEmpty {
-            logger.error("❌ All extractions failed")
-            throw MosaicError.generationFailed(NSError(
-                domain: "com.mosaicKit",
-                code: -1,
-                userInfo: [NSLocalizedDescriptionKey: "Failed to extract any thumbnails"]
-            ))
-        }
-        
-        let successCount = thumbnails.count
-        let totalExpected = times.count
-        logger.debug("✅ \(file.lastPathComponent) - Thumbnail extraction complete - Success: \(successCount)/\(totalExpected)")
-        progressHandler?(1.0)
-        // Convert dictionary back to sorted array
-        return (0..<totalExpected).compactMap { index in
-            thumbnails[index]
-        }
+        try Task.checkCancellation()
+        return thumbnails
     }
     
     /// Extract raw frames for animated GIF creation (no timestamp overlay).
@@ -186,7 +72,7 @@ public final class ThumbnailProcessor: Sendable {
         gifSize: GifSize,
         accurate: Bool = false
     ) async throws -> [CGImage] {
-        let duration = try await asset.load(.duration).seconds
+        try Task.checkCancellation()
         let generator = AVAssetImageGenerator(asset: asset)
         generator.appliesPreferredTrackTransform = true
 
@@ -207,26 +93,18 @@ public final class ThumbnailProcessor: Sendable {
             generator.maximumSize = CGSize(width: 960, height: 540)
         }
 
-        let times = calculateExtractionTimes(duration: duration, count: count)
-        var frames: [Int: CGImage] = [:]
-        var currentIndex = 0
-
-        for await result in generator.images(for: times) {
-            try Task.checkCancellation()
-            let index = currentIndex
-            currentIndex += 1
-            switch result {
-            case .success(_, let image, _):
-                frames[index] = image
-            case .failure(let requestedTime, let error):
-                logger.warning("⚠️ GIF frame extraction failed at \(self.formatTimestamp(seconds: requestedTime.seconds)): \(error.localizedDescription)")
-            }
+        let source = MosaicFrameSource(decoder: MosaicImageDecoder(asset: asset, generator: generator), count: count,
+            times: { self.calculateExtractionTimes(duration: $0, count: count) },
+            timestamp: { self.formatTimestamp(seconds: $0) })
+        var frames: [CGImage] = []
+        while let frame = try await source.next() {
+            frames.append(frame.image)
         }
-
-        logger.debug("✅ GIF frame extraction complete — \(frames.count)/\(times.count) frames")
-        return (0..<times.count).compactMap { frames[$0] }
+        try Task.checkCancellation()
+        guard frames.count == count, !frames.isEmpty else { throw MosaicError.processingFailed("Missing animation frames") }
+        return frames
     }
-
+    
     /// Extract thumbnails from video with timestamps as an async stream
     /// - Parameters:
     ///   - file: Video file URL
@@ -240,37 +118,32 @@ public final class ThumbnailProcessor: Sendable {
         asset: AVAsset,
         accurate: Bool = false
     ) -> AsyncThrowingStream<(index: Int, image: CGImage, timestamp: String), Error> {
-        return AsyncThrowingStream { continuation in
-            let task = Task {
-                do {
-                    // Create local asset to avoid capturing non-Sendable AVAsset
-                    let localAsset = AVURLAsset(url: file)
-                    let duration = try await localAsset.load(.duration).seconds
-                    let generator = configureGenerator(for: localAsset, accurate: accurate, preview: false, layout: layout)
-                    let times = calculateExtractionTimes(duration: duration, count: layout.positions.count)
+        let source = makeFrameSource(file: file, layout: layout, asset: asset, accurate: accurate)
+        return AsyncThrowingStream(unfolding: { try await source.next() })
+    }
 
-                    var currentIndex = 0
-                    for await result in generator.images(for: times) {
-                        if Task.isCancelled { break }
-                        let index = currentIndex
-                        currentIndex += 1
+    internal func processedFramesStream(
+        from file: URL, layout: MosaicLayout, asset: AVAsset, accurate: Bool,
+        labelConfig: FrameLabelConfig,
+        collectColor: (@Sendable (Int, CGImage) async -> Void)? = nil
+    ) -> AsyncThrowingStream<(Int, CGImage), Error> {
+        let source = makeFrameSource(file: file, layout: layout, asset: asset, accurate: accurate)
+        return AsyncThrowingStream(unfolding: {
+            guard let frame = try await source.next() else { return nil }
+            try Task.checkCancellation()
+            await collectColor?(frame.index, frame.image)
+            let image = self.addTimestampToImage(image: frame.image, timestamp: frame.timestamp,
+                frameIndex: frame.index, size: layout.thumbnailSizes[frame.index], labelConfig: labelConfig)
+            try Task.checkCancellation()
+            return (frame.index, image)
+        })
+    }
 
-                        switch result {
-                        case .success(_, let image, let actualTime):
-                             let timestamp = formatTimestamp(seconds: actualTime.seconds)
-                             let copiedImage = self.createDeepCopy(of: image) ?? image
-                             continuation.yield((index, copiedImage, timestamp))
-                        case .failure(let requestedTime, let error):
-                            logger.warning("⚠️ Frame extraction failed at \(requestedTime.seconds): \(error.localizedDescription)")
-                        }
-                    }
-                    continuation.finish()
-                } catch {
-                    continuation.finish(throwing: error)
-                }
-            }
-            continuation.onTermination = { _ in task.cancel() }
-        }
+    private func makeFrameSource(file: URL, layout: MosaicLayout, asset: AVAsset, accurate: Bool) -> MosaicFrameSource {
+        let generator = configureGenerator(for: asset, accurate: accurate, preview: false, layout: layout)
+        return MosaicFrameSource(decoder: MosaicImageDecoder(asset: asset, generator: generator), count: layout.positions.count,
+            times: { self.calculateExtractionTimes(duration: $0, count: layout.positions.count) },
+            timestamp: { self.formatTimestamp(seconds: $0) })
     }
     
     /// Extract thumbnails from video with timestamps
@@ -288,9 +161,12 @@ public final class ThumbnailProcessor: Sendable {
         asset: AVAsset,
         accurate: Bool = true
     ) async throws -> [(image: CGImage, timestamp: String)] {
+        try Task.checkCancellation()
         let duration = try await asset.load(.duration).seconds
+        guard duration.isFinite, duration > 0 else { throw MosaicError.invalidVideo("Invalid duration") }
         let generator = configureGenerator(for: asset, accurate: accurate, preview: false, layout: .init(rows: 1, cols: 1, thumbnailSize: size, positions: [(x: 0, y: 0)], thumbCount: count, thumbnailSizes: [size], mosaicSize: size))
         
+        guard count > 0, count <= 100_000 else { throw MosaicError.processingFailed("Invalid thumbnail count") }
         // Calculate evenly spaced times
         let interval = duration / Double(count + 1)
         let times = (1...count).map { i in
@@ -300,6 +176,7 @@ public final class ThumbnailProcessor: Sendable {
         var thumbnails: [(Int, CGImage, String)] = []
         
         for await result in generator.images(for: times) {
+            try Task.checkCancellation()
             switch result {
             case .success(requestedTime: _, image: let image, actualTime: let actual):
                 let timestamp = formatTimestamp(seconds: actual.seconds)
@@ -389,6 +266,7 @@ public final class ThumbnailProcessor: Sendable {
         // Draw thumbnails
         let totalFrames = frames.count
         for (index, frame) in frames.enumerated() {
+            try Task.checkCancellation()
             guard index < layout.positions.count else { break }
             
             // Get original position
@@ -516,8 +394,8 @@ public final class ThumbnailProcessor: Sendable {
         
         if !preview {
             generator.maximumSize = CGSize(
-                width: layout.thumbnailSize.width * 2,
-                height: layout.thumbnailSize.height * 2
+                width: (layout.thumbnailSizes.map(\.width).max() ?? layout.thumbnailSize.width) * decodeQualityScale,
+                height: (layout.thumbnailSizes.map(\.height).max() ?? layout.thumbnailSize.height) * decodeQualityScale
             )
         }
         
@@ -525,6 +403,7 @@ public final class ThumbnailProcessor: Sendable {
     }
     
     private func calculateExtractionTimes(duration: Double, count: Int) -> [CMTime] {
+        guard duration.isFinite, duration > 0, count > 0, count <= 100_000 else { return [] }
         let startPoint = duration * 0.05
         let endPoint = duration * 0.95
         let effectiveDuration = endPoint - startPoint

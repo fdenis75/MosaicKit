@@ -12,12 +12,10 @@ public actor PreviewGeneratorCoordinator {
     private let previewGenerator: PreviewVideoGenerator
     private let logger = Logger(subsystem: "com.mosaickit", category: "PreviewGeneratorCoordinator")
 
-    /// Active generation tasks keyed by video ID
+    /// Active generation tasks keyed by independent attempt identity
     private var activeTasks: [UUID: Task<URL, Error>] = [:]
+    private var taskSources: [UUID: UUID] = [:]
     private var activeCompositionTasks: [UUID: Task<AVPlayerItem, Error>] = [:]
-
-    /// Progress handlers for each video, storing the VideoInput alongside the handler
-    private var progressHandlers: [UUID: (video: VideoInput, handler: @Sendable (PreviewGenerationProgress) -> Void)] = [:]
 
     /// Maximum concurrent preview generations (0 = auto)
     private var concurrencyLimit: Int
@@ -59,27 +57,17 @@ public actor PreviewGeneratorCoordinator {
     ) async throws -> URL {
         logger.info("Starting preview generation for \(video.title)")
 
-        // Set progress handler
-        if let handler = progressHandler {
-            progressHandlers[video.id] = (video: video, handler: handler)
-            await previewGenerator.setProgressHandler(for: video, handler: handler)
-        }
-
-        defer {
-            progressHandlers.removeValue(forKey: video.id)
-        }
-
         do {
-            let outputURL = try await runTrackedGeneration(for: video, config: config)
+            let outputURL = try await runTrackedGeneration(for: video, config: config, progressHandler: progressHandler)
             logger.info("Preview generated: \(outputURL.lastPathComponent)")
             return outputURL
         } catch {
             if Self.isCancellation(error) {
                 logger.info("Preview generation cancelled for \(video.title)")
-                progressHandlers[video.id]?.handler(.cancelled(for: video))
+                progressHandler?(.cancelled(for: video))
             } else {
                 logger.error("Preview generation failed: \(error.localizedDescription)")
-                progressHandlers[video.id]?.handler(.failed(for: video, error: error))
+                progressHandler?(.failed(for: video, error: error))
             }
             throw error
         }
@@ -98,27 +86,17 @@ public actor PreviewGeneratorCoordinator {
     ) async throws -> AVPlayerItem {
         logger.info("Starting preview composition generation for \(video.title)")
 
-        // Set progress handler
-        if let handler = progressHandler {
-            progressHandlers[video.id] = (video: video, handler: handler)
-            await previewGenerator.setProgressHandler(for: video, handler: handler)
-        }
-
-        defer {
-            progressHandlers.removeValue(forKey: video.id)
-        }
-
         do {
-            let playerItem = try await runTrackedCompositionGeneration(for: video, config: config)
+            let playerItem = try await runTrackedCompositionGeneration(for: video, config: config, progressHandler: progressHandler)
             logger.info("Preview composition generated successfully")
             return playerItem
         } catch {
             if Self.isCancellation(error) {
                 logger.info("Preview composition generation cancelled for \(video.title)")
-                progressHandlers[video.id]?.handler(.cancelled(for: video))
+                progressHandler?(.cancelled(for: video))
             } else {
                 logger.error("Preview composition generation failed: \(error.localizedDescription)")
-                progressHandlers[video.id]?.handler(.failed(for: video, error: error))
+                progressHandler?(.failed(for: video, error: error))
             }
             throw error
         }
@@ -185,10 +163,7 @@ public actor PreviewGeneratorCoordinator {
                 group.addTask(priority: .utility) { @Sendable in
                     do {
                         try Task.checkCancellation()
-                        if let handler = progressHandler {
-                            await self.previewGenerator.setProgressHandler(for: video, handler: handler)
-                        }
-                        let playerItem = try await self.runTrackedCompositionGeneration(for: video, config: config, batchEpoch: epoch)
+                        let playerItem = try await self.runTrackedCompositionGeneration(for: video, config: config, batchEpoch: epoch, progressHandler: progressHandler)
                         return PreviewCompositionResult.success(video: video, playerItem: playerItem)
                     } catch {
                         // A batch-wide cancel (or cancellation of the batch call itself)
@@ -204,6 +179,7 @@ public actor PreviewGeneratorCoordinator {
                         if Self.isCancellation(error) {
                             progressHandler?(.cancelled(for: video))
                         } else {
+                            progressHandler?(.failed(for: video, error: error))
                             self.logger.error("Composition failed for: \(video.title) - \(error.localizedDescription)")
                         }
                         return PreviewCompositionResult.failure(video: video, error: error)
@@ -292,10 +268,7 @@ public actor PreviewGeneratorCoordinator {
                 group.addTask(priority: .medium) { @Sendable in
                     do {
                         try Task.checkCancellation()
-                        if let handler = progressHandler {
-                            await self.previewGenerator.setProgressHandler(for: video, handler: handler)
-                        }
-                        let outputURL = try await self.runTrackedGeneration(for: video, config: config, batchEpoch: epoch)
+                        let outputURL = try await self.runTrackedGeneration(for: video, config: config, batchEpoch: epoch, progressHandler: progressHandler)
                         return PreviewGenerationResult.success(video: video, outputURL: outputURL)
                     } catch {
                         // A batch-wide cancel (or cancellation of the batch call itself)
@@ -311,6 +284,7 @@ public actor PreviewGeneratorCoordinator {
                         if Self.isCancellation(error) {
                             progressHandler?(.cancelled(for: video))
                         } else {
+                            progressHandler?(.failed(for: video, error: error))
                             self.logger.error("Generation failed for: \(video.title) - \(error.localizedDescription)")
                         }
                         return PreviewGenerationResult.failure(video: video, error: error)
@@ -343,18 +317,10 @@ public actor PreviewGeneratorCoordinator {
     public func cancelGeneration(for video: VideoInput) async {
         logger.info("Cancelling preview generation for \(video.title)")
 
-        // Cancel the task
-        activeTasks[video.id]?.cancel()
-        activeTasks.removeValue(forKey: video.id)
-        activeCompositionTasks[video.id]?.cancel()
-        activeCompositionTasks.removeValue(forKey: video.id)
-
-        // Cancel in generator
-        await previewGenerator.cancel(for: video)
-
-        // Report cancellation
-        progressHandlers[video.id]?.handler(.cancelled(for: video))
-        progressHandlers.removeValue(forKey: video.id)
+        for (attemptID, sourceID) in taskSources where sourceID == video.id {
+            activeTasks[attemptID]?.cancel()
+            activeCompositionTasks[attemptID]?.cancel()
+        }
     }
 
     /// Cancel all active generations.
@@ -372,17 +338,9 @@ public actor PreviewGeneratorCoordinator {
         // Cancel all tasks
         for (_, task) in activeTasks { task.cancel() }
         for (_, task) in activeCompositionTasks { task.cancel() }
-        activeTasks.removeAll()
-        activeCompositionTasks.removeAll()
+        // Registrations remain until each attempt unwinds. Task cancellation
+        // reaches only the captured attempts, even if new work is submitted now.
 
-        // Cancel in generator
-        await previewGenerator.cancelAll()
-
-        // Report cancellations using the stored VideoInput
-        for (_, entry) in progressHandlers {
-            entry.handler(.cancelled(for: entry.video))
-        }
-        progressHandlers.removeAll()
     }
 
     /// Set the concurrency limit
@@ -399,7 +357,7 @@ public actor PreviewGeneratorCoordinator {
 
     /// Get number of active generations
     public func getActiveGenerationCount() -> Int {
-        return activeTasks.count
+        return activeTasks.count + activeCompositionTasks.count
     }
 
     // MARK: - Private Methods
@@ -416,17 +374,20 @@ public actor PreviewGeneratorCoordinator {
     private func runTrackedGeneration(
         for video: VideoInput,
         config: PreviewConfiguration,
-        batchEpoch epoch: Int? = nil
+        batchEpoch epoch: Int? = nil,
+        progressHandler: (@Sendable (PreviewGenerationProgress) -> Void)? = nil
     ) async throws -> URL {
         if let epoch, batchEpoch != epoch { throw CancellationError() }
 
+        let attemptID = UUID()
         let task = Task<URL, Error> { [previewGenerator, video, config] in
             try await self.executeWithBackgroundRetry(videoTitle: video.title, config: config) {
-                try await previewGenerator.generate(for: video, config: config)
+                try await previewGenerator.generate(for: video, config: config, progressHandler: progressHandler)
             }
         }
-        activeTasks[video.id] = task
-        defer { activeTasks.removeValue(forKey: video.id) }
+        activeTasks[attemptID] = task
+        taskSources[attemptID] = video.id
+        defer { activeTasks.removeValue(forKey: attemptID); taskSources.removeValue(forKey: attemptID) }
 
         return try await withTaskCancellationHandler {
             try await task.value
@@ -440,17 +401,20 @@ public actor PreviewGeneratorCoordinator {
     private func runTrackedCompositionGeneration(
         for video: VideoInput,
         config: PreviewConfiguration,
-        batchEpoch epoch: Int? = nil
+        batchEpoch epoch: Int? = nil,
+        progressHandler: (@Sendable (PreviewGenerationProgress) -> Void)? = nil
     ) async throws -> AVPlayerItem {
         if let epoch, batchEpoch != epoch { throw CancellationError() }
 
+        let attemptID = UUID()
         let task = Task<AVPlayerItem, Error> { [previewGenerator, video, config] in
             try await self.executeWithBackgroundRetry(videoTitle: video.title, config: config) {
-                try await previewGenerator.generateComposition(for: video, config: config)
+                try await previewGenerator.generateComposition(for: video, config: config, progressHandler: progressHandler)
             }
         }
-        activeCompositionTasks[video.id] = task
-        defer { activeCompositionTasks.removeValue(forKey: video.id) }
+        activeCompositionTasks[attemptID] = task
+        taskSources[attemptID] = video.id
+        defer { activeCompositionTasks.removeValue(forKey: attemptID); taskSources.removeValue(forKey: attemptID) }
 
         return try await withTaskCancellationHandler {
             try await task.value
@@ -506,9 +470,11 @@ public actor PreviewGeneratorCoordinator {
         while true {
             do {
                 try Task.checkCancellation()
+                #if !os(macOS)
                 if config.enableAppLifecycleMonitor {
                     await AppLifecycleMonitor.shared.waitUntilForeground()
                 }
+                #endif
                 try Task.checkCancellation()
                 return try await operation()
             } catch {
@@ -530,9 +496,11 @@ public actor PreviewGeneratorCoordinator {
                 if isStalled && attempt < maxAttempts && !Task.isCancelled {
                     logger.warning("Export stalled/interrupted for \(videoTitle) (Attempt \(attempt)/\(maxAttempts)). Retrying when foregrounded...")
                     attempt += 1
+                    #if !os(macOS)
                     if config.enableAppLifecycleMonitor {
                         await AppLifecycleMonitor.shared.waitUntilForeground()
                     }
+                    #endif
                     // A throwing sleep aborts the retry loop when the task is cancelled
                     // (`try?` would swallow the CancellationError and retry anyway).
                     try await Task.sleep(nanoseconds: 1_000_000_000)

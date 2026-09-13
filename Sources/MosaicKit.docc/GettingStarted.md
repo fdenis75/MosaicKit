@@ -129,6 +129,37 @@ rather not construct `VideoInput` values by hand:
 let videos = await scanVideos(in: URL(fileURLWithPath: "/path/to/folder"), recursive: true)
 ```
 
+For persisted queues, keep a lightweight ``VideoSource`` and inspect it when a worker starts:
+
+```swift
+let source = VideoSource(url: videoURL, title: "Camera roll")
+let input = try await source.inspect()
+```
+
+The inspection step validates that duration and dimensions are finite and positive. It also checks
+task cancellation before and after metadata extraction, so a cancelled queued job does not retain
+AVFoundation work.
+
+### Cancellation, pause, and retry
+
+Coordinator methods support cancelling one video or an entire batch. For queue-level controls,
+submit an operation to ``GenerationJobController`` and retain its ``GenerationJobID``:
+
+```swift
+let controller = GenerationJobController()
+let job = await controller.submit {
+    let input = try await VideoSource(url: videoURL).inspect()
+    return try await MetalMosaicGenerator().generate(for: input, config: .default)
+}
+
+await controller.cancel(job)
+// A paused, failed, or cancelled job can be scheduled again:
+await controller.retry(job)
+```
+
+Every retry has a new ``GenerationAttemptID``. Generated files are staged and committed atomically;
+callers therefore see either a complete output or no output from a failed/cancelled attempt.
+
 ## Understanding Density Levels
 
 Density controls how many frames are extracted from your video:
