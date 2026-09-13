@@ -59,8 +59,8 @@ jobs:
       - name: Build (incl. test targets)
         run: swift build --build-tests -v
 
-#     - name: Test
-      #  run: swift test --skip-build --parallel
+      - name: Test (including bundled media fixtures)
+        run: swift test --skip-build --parallel
 
   # ── iOS Simulator ───────────────────────────────────────────────────────────
   ios:
@@ -115,3 +115,21 @@ jobs:
       #   -derivedDataPath               share DerivedData between both steps
       #   CODE_SIGNING_ALLOWED=NO        skip signing (unnecessary on CI)
       #   SWIFT_STRICT_CONCURRENCY=complete  enforce Swift 6 actor 
+      - name: Build and test iOS package
+        run: |
+          xcodebuild build-for-testing \
+            -scheme MosaicKit \
+            -destination 'platform=iOS Simulator,name=iPhone 16' \
+            -derivedDataPath "$RUNNER_TEMP/MosaicKitDerivedData" \
+            -skipPackagePluginValidation \
+            -parallel-testing-enabled NO \
+            CODE_SIGNING_ALLOWED=NO \
+            SWIFT_STRICT_CONCURRENCY=complete
+          xcodebuild test-without-building \
+            -scheme MosaicKit \
+            -destination 'platform=iOS Simulator,name=iPhone 16' \
+            -derivedDataPath "$RUNNER_TEMP/MosaicKitDerivedData" \
+            -skipPackagePluginValidation \
+            -parallel-testing-enabled NO \
+            CODE_SIGNING_ALLOWED=NO \
+            SWIFT_STRICT_CONCURRENCY=complete
