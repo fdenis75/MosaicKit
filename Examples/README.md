@@ -6,7 +6,7 @@ This directory contains working examples demonstrating how to use MosaicKit.
 
 ### Simple Example (Start Here!)
 
-The easiest way to use MosaicKit:
+The easiest way to use MosaicKit with the current public API:
 
 ```bash
 swift run SimpleExample
@@ -76,7 +76,7 @@ let outputDir = URL(fileURLWithPath: "/path/to/output")
 The absolute simplest way to use MosaicKit. Perfect for getting started.
 
 **What it shows:**
-- High-level MosaicGenerator API
+- MetalMosaicGenerator actor API
 - One-step generation
 - Minimal configuration
 - Quick results
@@ -218,3 +218,18 @@ After running these examples:
 - Review the API documentation
 
 Happy mosaic generating! 🎬
+
+### Lifecycle control
+
+`GenerationJobController` demonstrates explicit job identity and cancellation/pause/retry for app-managed work. Use the coordinator APIs for progress-aware mosaic or preview batches.
+
+```swift
+let controller = GenerationJobController()
+let job = await controller.submit {
+    let source = try await VideoInput(from: videoURL)
+    return try await MetalMosaicGenerator().generate(for: source, config: .default)
+}
+await controller.cancel(job) // or pause(job), then retry(job)
+```
+
+`VideoSource` is the lightweight, Codable input for queues and persistence; call `inspect()` when a worker is ready to load metadata and validate the source.

@@ -7,7 +7,7 @@ This file helps AI assistants understand the MosaicKit codebase, development wor
 ## Project Overview
 
 **MosaicKit** is a Swift package that generates video mosaics (contact-sheet style image grids) and
-preview videos from video files on Apple platforms (macOS 15+, iOS 15+, macCatalyst 15+).
+preview videos from video files on Apple platforms (macOS 26+, iOS 26+, macCatalyst 26+).
 
 - **Language**: Swift 6.2
 - **Build system**: Swift Package Manager (SPM)
@@ -40,32 +40,30 @@ MosaicKit/
 
 ## Architecture
 
-### Dual-engine design
+### Metal engine design
 
-MosaicKit has two concrete generator implementations behind a shared protocol:
+MosaicKit uses one Metal generator implementation behind a shared protocol on all supported Apple
+platforms:
 
 | Class | Platform | Backend |
 |---|---|---|
-| `MetalMosaicGenerator` | macOS | Metal GPU (actor-isolated) |
-| `CoreGraphicsMosaicGenerator` | iOS / universal | Core Graphics + vImage/Accelerate |
+| `MetalMosaicGenerator` | macOS, iOS, macCatalyst | Metal GPU (actor-isolated) |
 
-`MosaicGeneratorFactory` picks the right implementation at runtime. The public convenience wrapper
-`MosaicKit.swift` / `MosaicGenerator` hides this behind `.auto`, `.preferMetal`,
-`.preferCoreGraphics` preferences.
+Construct `MetalMosaicGenerator` directly. The former `MosaicGeneratorFactory`, `MosaicGenerator`
+wrapper, and Core Graphics engine are removed.
 
 ### Key types
 
 | Type | File | Role |
 |---|---|---|
-| `MosaicGenerator` | `Sources/MosaicKit.swift` | Public entry point |
 | `MosaicGeneratorProtocol` | `Processing/MosaicGeneratorProtocol.swift` | Shared interface |
-| `MetalMosaicGenerator` | `Processing/MetalMosaicGenerator.swift` | macOS Metal engine (actor) |
-| `CoreGraphicsMosaicGenerator` | `Processing/CoreGraphicsMosaicGenerator.swift` | iOS/CPU engine |
+| `MetalMosaicGenerator` | `Processing/MetalMosaicGenerator.swift` | Metal engine on all platforms (actor) |
 | `MosaicGeneratorCoordinator` | `Processing/MosaicGeneratorCoordinator.swift` | Concurrent batch manager |
+| `GenerationJobController` | `Processing/GenerationJobs.swift` | Stable IDs and lifecycle control |
+| `VideoSource` | `Models/VideoSource.swift` | Lazy, Codable input reference |
 | `LayoutProcessor` | `Processing/LayoutProcessor.swift` | Layout calculation + caching |
 | `ThumbnailProcessor` | `Processing/ThumbnailProcessor.swift` | Frame extraction |
 | `MetalImageProcessor` | `Processing/MetalImageProcessor.swift` | Metal shader dispatch |
-| `CoreGraphicsImageProcessor` | `Processing/CoreGraphicsImageProcessor.swift` | vImage-based processing |
 | `VideoMetadataExtractor` | `Processing/VideoMetadataExtractor.swift` | AVFoundation metadata |
 | `PreviewVideoGenerator` | `Processing/Preview/PreviewVideoGenerator.swift` | Highlight reel generation |
 | `MosaicConfiguration` | `Models/MosaicConfiguration.swift` | Main config struct |
@@ -115,6 +113,10 @@ The primary configuration object. Key fields:
 
 - `MetalMosaicGenerator` is a Swift **actor** – all mutable state is actor-isolated.
 - `MosaicGeneratorCoordinator` manages concurrent batch jobs with CPU/memory-aware limits.
+- `GenerationJobController` provides stable job/attempt IDs and explicit cancel, pause, and retry
+  scheduling for application-owned queues.
+- Generation uses cancellation checkpoints and atomic staging/commit output transactions; partial
+  files must never be reported as successful outputs.
 - All public API is `async throws`.
 - Use `Task { }` for fire-and-forget; propagate `CancellationError` where appropriate.
 - Conform new types to `Sendable` when crossing actor boundaries.
@@ -193,13 +195,20 @@ swift test --parallel               # Parallel execution
 swift test --enable-code-coverage   # Generate coverage
 ```
 
-Test files live in `Tests/MosaicKitTests/`. Test assets are in `Tests/MosaicKitTests/embeddedAsset/`
-and `Media.xcassets/`.
+Test files live in `Tests/MosaicKitTests/`. The deterministic media fixture is tracked at
+`Tests/MosaicKitTests/embeddedAsset/test_video.mp4` and is packaged with the test target, so CI
+does not depend on a developer filesystem or external media volume. Batch tests can reuse that URL
+with distinct `VideoInput.withID(_:)` values without copying bytes. The developer-provided
+`scratch/testsmedia/` directory is local-only and must not be committed.
 
 CI disables extended suites with:
 ```
 MOSAICKIT_SUITE_MODE=none
 ```
+
+The standard GitHub workflow runs the bundled media suite sequentially because concurrent hardware
+decode/export jobs contend for the same runner resources. Use `swift test --parallel` locally when
+profiling code that does not touch the media fixture.
 
 When writing new tests:
 - Use `@Test` and `#expect` / `#require` (Swift Testing macros).
@@ -273,7 +282,7 @@ CI runs `swift build` then `swift test --parallel` on push/PR to `main`.
 
 ### Add a new output format
 1. Add case to `VideoFormat` in `Models/VideoFormat.swift`
-2. Handle encoding in both `MetalMosaicGenerator` and `CoreGraphicsMosaicGenerator`
+2. Handle encoding in `MetalMosaicGenerator` and the animated/preview exporters
 3. Update `README.md` format table
 
 ### Add a new configuration option

@@ -4,7 +4,7 @@ A high-performance Swift package for generating video mosaics with Metal-acceler
 
 ![Platform](https://img.shields.io/badge/platform-macOS%2026%2B%20%7C%20iOS%2026%2B-blue)
 ![Swift](https://img.shields.io/badge/Swift-6.2-orange)
-![License](https://img.shields.io/badge/license-MIT-green)
+![License](https://img.shields.io/badge/license-Apache%202.0-green)
   
 ## Features
 
@@ -16,6 +16,8 @@ A high-performance Swift package for generating video mosaics with Metal-acceler
 - 🎯 **Hardware-Accelerated Frame Extraction** - Uses VideoToolbox for optimal performance
 - 📊 **Overlay Annotations** - Per-frame labels (timestamp, index), customisable metadata headers, watermarks, and Color DNA strips
 - 🎬 **Video Preview Generation** - Create short highlight reels from any video, either exported to file or as a live `AVPlayerItem` composition
+- 🧭 **Explicit job lifecycle control** - Track work with stable job and attempt IDs, and cancel, pause, or retry individual operations
+- 🛡️ **Reliable outputs and validation** - Inputs/configurations are validated early and generated files are committed atomically
 ## New in 1.6.4
 
 - **`BackgroundProcessing` DocC article** — a how-to guide for wrapping mosaic/preview generation in iOS 26's `BGContinuedProcessingTask`, including the `PreviewConfiguration.enableAppLifecycleMonitor` gotcha (its foreground-wait gate stalls a background-task export unless disabled).
@@ -599,6 +601,29 @@ Cancellation semantics (mosaic and preview coordinators alike):
   stops the underlying work — frame extraction, Metal composition, export
   sessions (native, SJS, and ffmpeg) and animated-image encoding all observe
   cancellation.
+
+### Explicit job lifecycle
+
+For applications that persist work in a queue or need controls independent of a video URL, use
+`GenerationJobController`. Each submission receives a stable `GenerationJobID`; retries receive a
+new `GenerationAttemptID`. Pausing is a scheduling boundary: queued work is removed from execution,
+while an active encoder is allowed to finish. Resuming is done with `retry`.
+
+```swift
+let jobs = GenerationJobController()
+let jobID = await jobs.submit {
+    let source = try await VideoInput(from: videoURL)
+    return try await MetalMosaicGenerator().generate(for: source, config: .default)
+}
+
+await jobs.pause(jobID)       // queued jobs only
+await jobs.retry(jobID)       // paused, failed, or cancelled jobs
+let snapshot = await jobs.snapshot(for: jobID)
+```
+
+Use `VideoSource` when constructing durable queues. It stores only the URL and caller metadata;
+`try await source.inspect()` loads AVFoundation metadata once at worker time and validates duration,
+dimensions, and frame rate before processing.
 
 ## Video Preview Generation
 
