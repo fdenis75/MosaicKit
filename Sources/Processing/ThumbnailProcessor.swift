@@ -49,10 +49,10 @@ public final class ThumbnailProcessor: Sendable {
         signposter.emitEvent("extractThumbnails")
         let intervalState = signposter.beginInterval("extractThumbnails")
         defer { signposter.endInterval("extractThumbnails", intervalState) }
-        let source = makeFrameSource(file: file, layout: layout, asset: asset, accurate: accurate)
         var thumbnails: [(image: CGImage, timestamp: String)] = []
         thumbnails.reserveCapacity(layout.positions.count)
-        while let frame = try await source.next() {
+        let stream = makeImageStream(file: file, layout: layout, asset: asset, accurate: accurate)
+        for try await frame in stream {
             try Task.checkCancellation()
             let image = addTimestampToImage(image: frame.image, timestamp: frame.timestamp,
                                             size: layout.thumbnailSizes[frame.index])
@@ -103,12 +103,13 @@ public final class ThumbnailProcessor: Sendable {
             generator.maximumSize = CGSize(width: 960, height: 540)
         }
 
-        let source = MosaicFrameSource(decoder: MosaicImageDecoder(asset: asset, generator: generator), count: count,
-            times: { self.calculateExtractionTimes(duration: $0, count: count) },
-            timestamp: { self.formatTimestamp(seconds: $0) })
         var frames: [CGImage] = []
-        while let frame = try await source.next() {
-            frames.append(frame.image)
+        let duration = try await asset.load(.duration).seconds
+        let times = calculateExtractionTimes(duration: duration, count: count)
+        for try await result in generator.images(for: times) {
+            try Task.checkCancellation()
+            guard case .success(_, let image, _) = result else { continue }
+            frames.append(image)
         }
         try Task.checkCancellation()
         guard frames.count == count, !frames.isEmpty else { throw MosaicError.processingFailed("Missing animation frames") }
@@ -131,8 +132,7 @@ public final class ThumbnailProcessor: Sendable {
         signposter.emitEvent("extractFramesStream")
         let intervalState = signposter.beginInterval("extractFramesStream")
         defer { signposter.endInterval("extractFramesStream", intervalState) }
-        let source = makeFrameSource(file: file, layout: layout, asset: asset, accurate: accurate)
-        return AsyncThrowingStream(unfolding: { try await source.next() })
+        return makeImageStream(file: file, layout: layout, asset: asset, accurate: accurate)
     }
 
     internal func processedFramesStream(
@@ -143,24 +143,35 @@ public final class ThumbnailProcessor: Sendable {
         signposter.emitEvent("processedFramesStream")
         let intervalState = signposter.beginInterval("processedFramesStream")
         defer { signposter.endInterval("processedFramesStream", intervalState) }
-        let source = makeFrameSource(file: file, layout: layout, asset: asset, accurate: accurate)
         let (stream, continuation) = AsyncThrowingStream<(Int, CGImage), Error>.makeStream()
         let processor = self
         let sizes = layout.thumbnailSizes
+        let generator = configureGenerator(for: asset, accurate: accurate, preview: false, layout: layout)
+        let cancellation = ImageGeneratorCancellation(generator)
+        nonisolated(unsafe) let assetRef = asset
+        nonisolated(unsafe) let generatorRef = generator
         let producer = Task {
             do {
+                let duration = try await assetRef.load(.duration).seconds
+                let times = calculateExtractionTimes(duration: duration, count: layout.positions.count)
+                var index = 0
                 try await withThrowingTaskGroup(of: (Int, CGImage).self) { group in
                     var pending = 0
-                    while let frame = try await source.next() {
+                    for try await result in generatorRef.images(for: times) {
                         try Task.checkCancellation()
+                        guard case .success(_, let image, let actualTime) = result else {
+                            throw MosaicError.processingFailed("Frame extraction failed")
+                        }
+                        let frameIndex = index
+                        index += 1
                         group.addTask {
-                            await collectColor?(frame.index, frame.image)
+                            await collectColor?(frameIndex, image)
                             let image = processor.addTimestampToImage(
-                                image: frame.image, timestamp: frame.timestamp,
-                                frameIndex: frame.index, size: sizes[frame.index], labelConfig: labelConfig
+                                image: image, timestamp: processor.formatTimestamp(seconds: actualTime.seconds),
+                                frameIndex: frameIndex, size: sizes[frameIndex], labelConfig: labelConfig
                             )
                             try Task.checkCancellation()
-                            return (frame.index, image)
+                            return (frameIndex, image)
                         }
                         pending += 1
                         if pending >= 8, let result = try await group.next() {
@@ -177,7 +188,45 @@ public final class ThumbnailProcessor: Sendable {
                 continuation.finish(throwing: error)
             }
         }
-        continuation.onTermination = { _ in producer.cancel() }
+        continuation.onTermination = { _ in
+            producer.cancel()
+            cancellation.cancel()
+        }
+        return stream
+    }
+
+    private func makeImageStream(
+        file: URL, layout: MosaicLayout, asset: AVAsset, accurate: Bool
+    ) -> AsyncThrowingStream<(index: Int, image: CGImage, timestamp: String), Error> {
+        let generator = configureGenerator(for: asset, accurate: accurate, preview: false, layout: layout)
+        let cancellation = ImageGeneratorCancellation(generator)
+        nonisolated(unsafe) let assetRef = asset
+        nonisolated(unsafe) let generatorRef = generator
+        let (stream, continuation) = AsyncThrowingStream<(index: Int, image: CGImage, timestamp: String), Error>.makeStream()
+        let producer = Task {
+            do {
+                let duration = try await assetRef.load(.duration).seconds
+                let times = calculateExtractionTimes(duration: duration, count: layout.positions.count)
+                var index = 0
+                for try await result in generatorRef.images(for: times) {
+                    try Task.checkCancellation()
+                    switch result {
+                    case .success(_, let image, let actualTime):
+                        continuation.yield((index, image, formatTimestamp(seconds: actualTime.seconds)))
+                    case .failure(_, let error):
+                        throw MosaicError.processingFailed("Frame extraction failed: \(error.localizedDescription)")
+                    }
+                    index += 1
+                }
+                continuation.finish()
+            } catch {
+                continuation.finish(throwing: error)
+            }
+        }
+        continuation.onTermination = { _ in
+            producer.cancel()
+            cancellation.cancel()
+        }
         return stream
     }
 
@@ -1665,4 +1714,12 @@ public final class ThumbnailProcessor: Sendable {
         
         return finalImage
     }
-} 
+}
+
+/// Sendable cancellation handle for AVAssetImageGenerator, whose cancellation
+/// API is explicitly safe to call while an asynchronous image request is pending.
+private final class ImageGeneratorCancellation: @unchecked Sendable {
+    private let generator: AVAssetImageGenerator
+    init(_ generator: AVAssetImageGenerator) { self.generator = generator }
+    func cancel() { generator.cancelAllCGImageGeneration() }
+}
