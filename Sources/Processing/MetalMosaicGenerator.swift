@@ -13,22 +13,30 @@ import UIKit
 
 /// Thread-safe accumulator for per-frame average colours used by the Color DNA strip.
 private actor FrameColorCollector {
+    private let signposter = OSSignposter(subsystem: "com.mosaicKit", category: "frame-color-collector")
     private var colors: [Int: CGColor] = [:]
 
     func store(_ color: CGColor, at index: Int) {
+        signposter.emitEvent("store")
+        let intervalState = signposter.beginInterval("store")
+        defer { signposter.endInterval("store", intervalState) }
         colors[index] = color
     }
 
     /// Returns colours sorted by frame index (temporal order), up to `count` entries.
     func orderedColors(count: Int) -> [CGColor] {
-        (0..<count).compactMap { colors[$0] }
+        signposter.emitEvent("orderedColors")
+        let intervalState = signposter.beginInterval("orderedColors")
+        defer { signposter.endInterval("orderedColors", intervalState) }
+        return (0..<count).compactMap { colors[$0] }
     }
 }
 
 /// A Metal-accelerated implementation of the MosaicGeneratorProtocol
 public actor MetalMosaicGenerator: MosaicGeneratorProtocol {
     // MARK: - Properties
-    
+
+    private static let staticSignposter = OSSignposter(subsystem: "com.mosaicKit", category: "metal-mosaic-generator")
     private let logger = Logger(subsystem: "com.mosaicKit", category: "metal-mosaic-generator")
     private let metalProcessor: MetalImageProcessor
     private let layoutProcessor: LayoutProcessor
@@ -50,6 +58,9 @@ public actor MetalMosaicGenerator: MosaicGeneratorProtocol {
     /// Initialize a new Metal-accelerated mosaic generator
     /// - Parameter layoutProcessor: The layout processor to use
     public init(layoutProcessor: LayoutProcessor = LayoutProcessor()) throws {
+        Self.staticSignposter.emitEvent("init")
+        let intervalState = Self.staticSignposter.beginInterval("init")
+        defer { Self.staticSignposter.endInterval("init", intervalState) }
         self.layoutProcessor = layoutProcessor
         self.thumbnailProcessor = ThumbnailProcessor(config: .default)
         do {
@@ -60,6 +71,9 @@ public actor MetalMosaicGenerator: MosaicGeneratorProtocol {
     }
     
     public func generateallcombinations(for video: VideoInput, config: MosaicConfiguration) async throws -> [URL] {
+        signposter.emitEvent("generateallcombinations")
+        let intervalState = signposter.beginInterval("generateallcombinations")
+        defer { signposter.endInterval("generateallcombinations", intervalState) }
         let sizes = [2000,5000,10000]
         let densities: [DensityConfig] = DensityConfig.allCases
         
@@ -85,6 +99,9 @@ public actor MetalMosaicGenerator: MosaicGeneratorProtocol {
     ///   - config: The configuration for mosaic generation
     /// - Returns: The URL of the generated mosaic image
     public func generate(for video: VideoInput, config: MosaicConfiguration, forIphone: Bool = false) async throws -> URL {
+        signposter.emitEvent("generate")
+        let intervalState = signposter.beginInterval("generate")
+        defer { signposter.endInterval("generate", intervalState) }
         let videoID = video.id
 
         if let existingTask = generationTasks[videoID] {
@@ -384,6 +401,9 @@ public actor MetalMosaicGenerator: MosaicGeneratorProtocol {
     ///   - forIphone: Whether to use iPhone-optimized layout
     /// - Returns: The generated mosaic as a CGImage
     public func generateMosaicImage(for video: VideoInput, config: MosaicConfiguration, forIphone: Bool = false) async throws -> CGImage {
+        signposter.emitEvent("generateMosaicImage")
+        let intervalState = signposter.beginInterval("generateMosaicImage")
+        defer { signposter.endInterval("generateMosaicImage", intervalState) }
         let videoID = video.id
         layoutProcessor.mosaicAspectRatio = config.layout.aspectRatio.ratio
 
@@ -412,6 +432,9 @@ public actor MetalMosaicGenerator: MosaicGeneratorProtocol {
 
     /// Body of `generateMosaicImage(for:config:forIphone:)` — runs inside the tracked task.
     private func performMosaicImageGeneration(for video: VideoInput, config: MosaicConfiguration, forIphone: Bool) async throws -> CGImage {
+        signposter.emitEvent("performMosaicImageGeneration")
+        let intervalState = signposter.beginInterval("performMosaicImageGeneration")
+        defer { signposter.endInterval("performMosaicImageGeneration", intervalState) }
         let videoID = video.id
 
         do {
@@ -573,6 +596,9 @@ public actor MetalMosaicGenerator: MosaicGeneratorProtocol {
     /// Cancel mosaic generation for a specific video
     /// - Parameter video: The video to cancel mosaic generation for
     public func cancel(for video: VideoInput) {
+        signposter.emitEvent("cancel")
+        let intervalState = signposter.beginInterval("cancel")
+        defer { signposter.endInterval("cancel", intervalState) }
         generationTasks[video.id]?.cancel()
         generationTasks[video.id] = nil
         imageGenerationTasks[video.id]?.cancel()
@@ -582,6 +608,9 @@ public actor MetalMosaicGenerator: MosaicGeneratorProtocol {
 
     /// Cancel all ongoing mosaic generation operations
     public func cancelAll() {
+        signposter.emitEvent("cancelAll")
+        let intervalState = signposter.beginInterval("cancelAll")
+        defer { signposter.endInterval("cancelAll", intervalState) }
         generationTasks.values.forEach { $0.cancel() }
         generationTasks.removeAll()
         imageGenerationTasks.values.forEach { $0.cancel() }
@@ -594,6 +623,9 @@ public actor MetalMosaicGenerator: MosaicGeneratorProtocol {
     ///   - video: The video to set the progress handler for
     ///   - handler: The progress handler
     public func setProgressHandler(for video: VideoInput, handler: @escaping @Sendable (MosaicGenerationProgress) -> Void) {
+             signposter.emitEvent("setProgressHandler")
+             let intervalState = signposter.beginInterval("setProgressHandler")
+             defer { signposter.endInterval("setProgressHandler", intervalState) }
              progressHandlers[video.id] = handler
         }
     
@@ -601,6 +633,9 @@ public actor MetalMosaicGenerator: MosaicGeneratorProtocol {
     /// Get performance metrics for the Metal mosaic generator
     /// - Returns: A dictionary of performance metrics
     public func getPerformanceMetrics() -> [String: Any] {
+        signposter.emitEvent("getPerformanceMetrics")
+        let intervalState = signposter.beginInterval("getPerformanceMetrics")
+        defer { signposter.endInterval("getPerformanceMetrics", intervalState) }
         var metrics: [String: Any] = [
             "averageGenerationTime": generationCount > 0 ? totalGenerationTime / Double(generationCount) : 0,
             "totalGenerationTime": totalGenerationTime,
@@ -630,6 +665,7 @@ public actor MetalMosaicGenerator: MosaicGeneratorProtocol {
         count: Int,
         accurate: Bool
     ) async throws -> [(image: CGImage, timestamp: String)] {
+        signposter.emitEvent("extractFramesWithVideoToolbox")
         let state = signposter.beginInterval("Extract Frames VideoToolbox")
         defer { signposter.endInterval("Extract Frames VideoToolbox", state) }
 
@@ -673,6 +709,9 @@ public actor MetalMosaicGenerator: MosaicGeneratorProtocol {
     ///   - count: The number of frames to extract
     /// - Returns: Array of CMTime values for frame extraction
     private func calculateExtractionTimes(duration: Double, count: Int) -> [CMTime] {
+        signposter.emitEvent("calculateExtractionTimes")
+        let intervalState = signposter.beginInterval("calculateExtractionTimes")
+        defer { signposter.endInterval("calculateExtractionTimes", intervalState) }
         let startPoint = duration * 0.05
         let endPoint = duration * 0.95
         let effectiveDuration = endPoint - startPoint
@@ -707,6 +746,9 @@ public actor MetalMosaicGenerator: MosaicGeneratorProtocol {
     /// - Parameter seconds: The timestamp in seconds
     /// - Returns: A formatted timestamp string (HH:MM:SS)
     private func formatTimestamp(seconds: Double) -> String {
+        signposter.emitEvent("formatTimestamp")
+        let intervalState = signposter.beginInterval("formatTimestamp")
+        defer { signposter.endInterval("formatTimestamp", intervalState) }
         let hours = Int(seconds) / 3600
         let minutes = (Int(seconds) % 3600) / 60
         let seconds = Int(seconds) % 60
@@ -717,6 +759,9 @@ public actor MetalMosaicGenerator: MosaicGeneratorProtocol {
     /// - Parameter asset: The video asset
     /// - Returns: The aspect ratio (width / height)
     private func calculateAspectRatio(from asset: AVAsset) async throws -> CGFloat {
+        signposter.emitEvent("calculateAspectRatio")
+        let intervalState = signposter.beginInterval("calculateAspectRatio")
+        defer { signposter.endInterval("calculateAspectRatio", intervalState) }
         let track = try await asset.loadTracks(withMediaType: .video).first
         let size = try await track?.load(.naturalSize) ?? CGSize(width: 16, height: 9)
         let transform = try await track?.load(.preferredTransform) ?? .identity
@@ -848,6 +893,9 @@ public actor MetalMosaicGenerator: MosaicGeneratorProtocol {
     /// Track performance metrics
     /// - Parameter startTime: The start time of the operation
     private func trackPerformance(startTime: CFAbsoluteTime) {
+        signposter.emitEvent("trackPerformance")
+        let intervalState = signposter.beginInterval("trackPerformance")
+        defer { signposter.endInterval("trackPerformance", intervalState) }
         let executionTime = CFAbsoluteTimeGetCurrent() - startTime
         lastGenerationTime = executionTime
         totalGenerationTime += executionTime
