@@ -128,15 +128,41 @@ public final class ThumbnailProcessor: Sendable {
         collectColor: (@Sendable (Int, CGImage) async -> Void)? = nil
     ) -> AsyncThrowingStream<(Int, CGImage), Error> {
         let source = makeFrameSource(file: file, layout: layout, asset: asset, accurate: accurate)
-        return AsyncThrowingStream(unfolding: {
-            guard let frame = try await source.next() else { return nil }
-            try Task.checkCancellation()
-            await collectColor?(frame.index, frame.image)
-            let image = self.addTimestampToImage(image: frame.image, timestamp: frame.timestamp,
-                frameIndex: frame.index, size: layout.thumbnailSizes[frame.index], labelConfig: labelConfig)
-            try Task.checkCancellation()
-            return (frame.index, image)
-        })
+        let (stream, continuation) = AsyncThrowingStream<(Int, CGImage), Error>.makeStream()
+        let processor = self
+        let sizes = layout.thumbnailSizes
+        let producer = Task {
+            do {
+                try await withThrowingTaskGroup(of: (Int, CGImage).self) { group in
+                    var pending = 0
+                    while let frame = try await source.next() {
+                        try Task.checkCancellation()
+                        group.addTask {
+                            await collectColor?(frame.index, frame.image)
+                            let image = processor.addTimestampToImage(
+                                image: frame.image, timestamp: frame.timestamp,
+                                frameIndex: frame.index, size: sizes[frame.index], labelConfig: labelConfig
+                            )
+                            try Task.checkCancellation()
+                            return (frame.index, image)
+                        }
+                        pending += 1
+                        if pending >= 8, let result = try await group.next() {
+                            continuation.yield(result)
+                            pending -= 1
+                        }
+                    }
+                    while let result = try await group.next() {
+                        continuation.yield(result)
+                    }
+                }
+                continuation.finish()
+            } catch {
+                continuation.finish(throwing: error)
+            }
+        }
+        continuation.onTermination = { _ in producer.cancel() }
+        return stream
     }
 
     private func makeFrameSource(file: URL, layout: MosaicLayout, asset: AVAsset, accurate: Bool) -> MosaicFrameSource {
