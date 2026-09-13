@@ -65,6 +65,32 @@ public struct VideoInput: Codable, Hashable, Sendable {
 
     // MARK: - Initialization
 
+    /// Creates a canonical input from already inspected metadata without performing I/O.
+    public init(
+        canonicalID: UUID = UUID(), url: URL, title: String? = nil,
+        duration: TimeInterval? = nil, width: Double? = nil, height: Double? = nil,
+        frameRate: Double? = nil, fileSize: Int64? = nil,
+        metadata: VideoMetadata = VideoMetadata(), postID: String? = nil
+    ) {
+        self.id = canonicalID
+        self.url = url
+        self.title = title ?? url.deletingPathExtension().lastPathComponent
+        self.duration = duration
+        self.width = width
+        self.height = height
+        self.frameRate = frameRate
+        self.fileSize = fileSize
+        self.metadata = metadata
+        self.postID = postID
+    }
+
+    /// Copies inspected metadata with a new execution identity, without reading the source.
+    public func withID(_ id: UUID) -> VideoInput {
+        VideoInput(canonicalID: id, url: url, title: title, duration: duration,
+                   width: width, height: height, frameRate: frameRate, fileSize: fileSize,
+                   metadata: metadata, postID: postID)
+    }
+
     /// Initializes a new video input with explicit values and automatically extracts metadata from the file.
     ///
     /// - Parameters:
@@ -90,54 +116,18 @@ public struct VideoInput: Codable, Hashable, Sendable {
         metadata: VideoMetadata = VideoMetadata(),
         postID: String? = nil
     ) async {
-        do {
-            let extractor = VideoMetadataExtractor()
-            let videodata = try await extractor.extractMetadataValues(from: url)
-            self.id = id
-            self.url = url
-            self.title = title ?? url.deletingPathExtension().lastPathComponent
-            self.duration = videodata.duration
-            self.width = videodata.width
-            self.height = videodata.height
-            self.frameRate = videodata.frameRate
-            self.fileSize = videodata.fileSize
-            self.metadata = VideoMetadata(codec: videodata.videoCodec, bitrate: videodata.bitrate)
-            self.postID = postID
-        } catch {
-            self.id = id
-            self.url = url
-            self.title = title ?? url.deletingPathExtension().lastPathComponent
-            self.duration = 0
-            self.width = 0
-            self.height = 0
-            self.frameRate = 0
-            self.fileSize = 0
-            self.metadata = VideoMetadata(codec: "unknown", bitrate: 0)
-            self.postID = postID
-        }
+        let supplied = VideoInput(canonicalID: id, url: url, title: title,
+                                  duration: duration, width: width, height: height,
+                                  frameRate: frameRate, fileSize: fileSize,
+                                  metadata: metadata, postID: postID)
+        // Preserve the legacy nonthrowing entry point. New callers should use inspect().
+        self = (try? await VideoSource(url: url, title: title, postID: postID)
+            .inspect(preserving: supplied)) ?? supplied
     }
 
-    /// Initializes a new video input from a URL, acquiring security-scoped access before extracting metadata.
-    ///
-    /// - Parameters:
-    ///   - url: The file URL of the video.
-    ///   - postID: An optional post ID.
-    /// - Throws: A `MosaicError.invalidVideo` if the security-scoped resource cannot be accessed.
+    /// Inspects a URL once. Security-scoped access is balanced when available;
+    /// ordinary readable file URLs do not require a security-scope grant.
     public init(from url: URL, postID: String? = nil) async throws {
-        guard url.startAccessingSecurityScopedResource() else {
-            throw MosaicError.invalidVideo("Failed to access security-scoped resource")
-        }
-        let extractor = VideoMetadataExtractor()
-        let videodata = try await extractor.extractMetadataValues(from: url)
-        await self.init(
-            url: url,
-            duration: videodata.duration,
-            width: videodata.width,
-            height: videodata.height,
-            frameRate: videodata.frameRate,
-            fileSize: videodata.fileSize,
-            metadata: VideoMetadata(codec: videodata.videoCodec, bitrate: videodata.bitrate),
-            postID: postID
-        )
+        self = try await VideoSource(url: url, postID: postID).inspect()
     }
 }

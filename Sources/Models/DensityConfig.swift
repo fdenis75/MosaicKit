@@ -20,24 +20,29 @@ public struct DensityConfig: Equatable, Hashable, Codable, Sendable {
 
     // MARK: - Codable
     private enum CodingKeys: String, CodingKey {
-        case factor
+        case factor, name, extractsMultiplier, thumbnailCountDescription
     }
 
     public func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(factor, forKey: .factor)
+        try container.encode(name, forKey: .name)
+        try container.encode(extractsMultiplier, forKey: .extractsMultiplier)
+        try container.encode(thumbnailCountDescription, forKey: .thumbnailCountDescription)
     }
 
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         let factor = try container.decode(Double.self, forKey: .factor)
-
-        // Find the matching case based on factor
-        if let config = DensityConfig.allCases.first(where: { $0.factor == factor }) {
-            self = config
-        } else {
-            // Default to .m if no match found
-            self = .m
+        let known = DensityConfig.allCases.first { $0.factor == factor }
+        self.init(
+            name: try container.decodeIfPresent(String.self, forKey: .name) ?? known?.name ?? "Custom",
+            factor: factor,
+            extractsMultiplier: try container.decodeIfPresent(Double.self, forKey: .extractsMultiplier) ?? known?.extractsMultiplier ?? factor,
+            thumbnailCountDescription: try container.decodeIfPresent(String.self, forKey: .thumbnailCountDescription) ?? known?.thumbnailCountDescription ?? "custom"
+        )
+        do { try validate() } catch {
+            throw DecodingError.dataCorruptedError(forKey: .factor, in: container, debugDescription: "Density must have finite positive factors")
         }
     }
 

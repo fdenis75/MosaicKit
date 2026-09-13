@@ -39,6 +39,26 @@ final class ExportProgressTracker: Sendable {
     }
 }
 
+/// Serializes callback delivery and prevents late exporter events after completion.
+internal final class PreviewProgressDelivery: Sendable {
+    private let terminal = Mutex<Bool>(false)
+    private let handler: (@Sendable (PreviewGenerationProgress) -> Void)?
+
+    internal init(handler: (@Sendable (PreviewGenerationProgress) -> Void)?) {
+        self.handler = handler
+    }
+
+    internal func send(_ progress: PreviewGenerationProgress) {
+        terminal.withLock { finished in
+            guard !finished else { return }
+            if !progress.status.isActive { finished = true }
+            handler?(progress)
+        }
+    }
+
+    internal func finish() { terminal.withLock { $0 = true } }
+}
+
 /// Actor responsible for generating preview videos from source videos
 // @available(macOS 26, iOS 26, *)
 public actor PreviewVideoGenerator {
@@ -47,7 +67,7 @@ public actor PreviewVideoGenerator {
 
     private let logger = Logger(subsystem: "com.mosaickit", category: "PreviewVideoGenerator")
     private var progressHandlers: [UUID: @Sendable (PreviewGenerationProgress) -> Void] = [:]
-    private var cancellationTokens: [UUID: CancellationToken] = [:]
+    private var cancellationTokens: [UUID: (sourceID: UUID, token: CancellationToken)] = [:]
 
     // MARK: - Initialization
 
@@ -62,8 +82,15 @@ public actor PreviewVideoGenerator {
     /// - Returns: URL of the generated preview
     public func generate(
         for video: VideoInput,
-        config: PreviewConfiguration
+        config: PreviewConfiguration,
+        progressHandler: (@Sendable (PreviewGenerationProgress) -> Void)? = nil
     ) async throws -> URL {
+        let registeredHandler = progressHandlers.removeValue(forKey: video.id)
+        let delivery = PreviewProgressDelivery(handler: progressHandler ?? registeredHandler)
+        let handler: (@Sendable (PreviewGenerationProgress) -> Void)? = { delivery.send($0) }
+        defer { delivery.finish() }
+        try config.validate()
+        try Task.checkCancellation()
         logger.info("Starting preview generation for \(video.title)")
 
         // Early-exit: if the resolved output already exists and `overwrite` is
@@ -74,21 +101,22 @@ public actor PreviewVideoGenerator {
             let existingURL = outputDir.appendingPathComponent(filename)
             if FileManager.default.fileExists(atPath: existingURL.path) {
                 logger.info("Preview already exists, skipping generation: \(existingURL.path)")
-                reportProgress(for: video, progress: 1.0, status: .completed, outputURL: existingURL)
+                handler?(PreviewGenerationProgress(video: video, progress: 1, status: .completed, outputURL: existingURL))
                 return existingURL
             }
         }
 
         // Create cancellation token
         let token = CancellationToken()
-        cancellationTokens[video.id] = token
+        let attemptID = UUID()
+        cancellationTokens[attemptID] = (video.id, token)
 
         defer {
-            cancellationTokens.removeValue(forKey: video.id)
+            cancellationTokens.removeValue(forKey: attemptID)
         }
 
         // Report analyzing status
-        reportProgress(for: video, progress: 0.0, status: .analyzing)
+        handler?(PreviewGenerationProgress(video: video, progress: 0, status: .analyzing))
 
         // Bridge structured Task cancellation into the token: cancelling the
         // surrounding task (coordinator wrapper or batch group child) flips the
@@ -101,10 +129,9 @@ public actor PreviewVideoGenerator {
                 let outputURL = try await PreviewGenerationLogic.generate(
                     for: video,
                     config: config,
-                    progressHandler: { [weak self] progress, status, url, message in
-                        Task { [weak self] in
-                            await self?.reportProgress(for: video, progress: progress, status: status, outputURL: url, message: message)
-                        }
+                    progressHandler: { progress, status, url, message in
+                        guard status != .completed else { return }
+                        handler?(PreviewGenerationProgress(video: video, progress: progress, status: status, outputURL: url, message: message))
                     },
                     cancellationCheck: { [token] in
                         token.isCancelled
@@ -112,7 +139,7 @@ public actor PreviewVideoGenerator {
                 )
 
                 // Report completion
-                reportProgress(for: video, progress: 1.0, status: .completed,outputURL: outputURL)
+                handler?(PreviewGenerationProgress(video: video, progress: 1, status: .completed, outputURL: outputURL))
                 logger.info("Preview generation completed: \(outputURL.lastPathComponent)")
 
                 return outputURL
@@ -138,7 +165,7 @@ public actor PreviewVideoGenerator {
     /// Cancel generation for a specific video
     public func cancel(for video: VideoInput) {
         logger.info("Cancelling preview generation for \(video.title)")
-        cancellationTokens[video.id]?.cancel()
+        for entry in cancellationTokens.values where entry.sourceID == video.id { entry.token.cancel() }
     }
 
     /// Generate a preview composition without exporting to file (for video player playback)
@@ -148,20 +175,28 @@ public actor PreviewVideoGenerator {
     /// - Returns: AVPlayerItem configured with the preview composition
     public func generateComposition(
         for video: VideoInput,
-        config: PreviewConfiguration
+        config: PreviewConfiguration,
+        progressHandler: (@Sendable (PreviewGenerationProgress) -> Void)? = nil
     ) async throws -> AVPlayerItem {
+        let registeredHandler = progressHandlers.removeValue(forKey: video.id)
+        let delivery = PreviewProgressDelivery(handler: progressHandler ?? registeredHandler)
+        let handler: (@Sendable (PreviewGenerationProgress) -> Void)? = { delivery.send($0) }
+        defer { delivery.finish() }
+        try config.validate()
+        try Task.checkCancellation()
         logger.info("Starting preview composition generation for \(video.title)")
 
         // Create cancellation token
         let token = CancellationToken()
-        cancellationTokens[video.id] = token
+        let attemptID = UUID()
+        cancellationTokens[attemptID] = (video.id, token)
 
         defer {
-            cancellationTokens.removeValue(forKey: video.id)
+            cancellationTokens.removeValue(forKey: attemptID)
         }
 
         // Report analyzing status
-        reportProgress(for: video, progress: 0.0, status: .analyzing)
+        handler?(PreviewGenerationProgress(video: video, progress: 0, status: .analyzing))
 
         // Bridge structured Task cancellation into the token (see generate(for:config:)).
         return try await withTaskCancellationHandler {
@@ -171,10 +206,9 @@ public actor PreviewVideoGenerator {
                 let playerItem = try await PreviewGenerationLogic.generateComposition(
                     for: video,
                     config: config,
-                    progressHandler: { [weak self] progress, status, url, message in
-                        Task { [weak self] in
-                            await self?.reportProgress(for: video, progress: progress, status: status, outputURL: url, message: message)
-                        }
+                    progressHandler: { progress, status, url, message in
+                        guard status != .completed else { return }
+                        handler?(PreviewGenerationProgress(video: video, progress: progress, status: status, outputURL: url, message: message))
                     },
                     cancellationCheck: { [token] in
                         token.isCancelled
@@ -182,7 +216,7 @@ public actor PreviewVideoGenerator {
                 )
 
                 // Report completion
-                reportProgress(for: video, progress: 1.0, status: .completed)
+                handler?(PreviewGenerationProgress(video: video, progress: 1, status: .completed))
                 logger.info("Preview composition generated successfully")
 
                 return playerItem
@@ -200,103 +234,15 @@ public actor PreviewVideoGenerator {
     /// Cancel all active generations
     public func cancelAll() {
         logger.info("Cancelling all preview generations")
-        for token in cancellationTokens.values {
-            token.cancel()
+        for entry in cancellationTokens.values {
+            entry.token.cancel()
         }
     }
 
-    // MARK: - Private Methods
-
-    private func reportProgress(
-        for video: VideoInput,
-        progress: Double,
-        status: PreviewGenerationStatus,
-        outputURL: URL? = nil,
-        message: String? = nil
-    ) {
-        let progressInfo = PreviewGenerationProgress(
-            video: video,
-            progress: progress,
-            status: status,
-            outputURL: outputURL,
-            message: message
-        )
-        progressHandlers[video.id]?(progressInfo)
-    }
 }
-
-// MARK: - macOS background-focus monitor
-
-/// Polls `NSWorkspace` every 500 ms and emits an OSLog warning (visible in Console.app)
-/// plus a stdout line whenever another app steals focus from the export process.
-///
-/// This makes it straightforward to correlate a stall in the test output with a
-/// "process went to background" event:
-///
-/// ```
-/// [FOCUS ⬅️]  DJI_0080  backgrounded at 14:03:27.451  frontmost: Safari
-/// ...
-/// [FOCUS ▶️]  DJI_0080  foreground restored at 14:03:41.218  (14.8 s in background)
-/// ```
-///
-/// Read the logs live with:
-/// ```bash
-/// log stream --predicate 'subsystem == "com.mosaickit"' --level debug
-/// ```
-#if os(macOS)
-enum PreviewFocusMonitor {
-
-    private static let timeFormatter: DateFormatter = {
-        let f = DateFormatter()
-        f.locale = Locale(identifier: "en_US_POSIX")
-        f.dateFormat = "HH:mm:ss.SSS"
-        return f
-    }()
-
-    /// Starts the monitor and returns the background `Task` that drives it.
-    /// Call `task.cancel()` (or let a `defer` do it) to stop monitoring.
-    static func start(videoTitle: String, logger: Logger) -> Task<Void, Never> {
-        Task { @MainActor in
-            let ourPID    = ProcessInfo.processInfo.processIdentifier
-            var lastPID   = NSWorkspace.shared.frontmostApplication?.processIdentifier
-            var bgStart   = Date?.none
-
-            while !Task.isCancelled {
-                try? await Task.sleep(nanoseconds: 500_000_000)
-
-                let frontPID  = NSWorkspace.shared.frontmostApplication?.processIdentifier
-                guard frontPID != lastPID else { continue }
-                lastPID = frontPID
-
-                let ts = timeFormatter.string(from: Date())
-
-                if frontPID != ourPID {
-                    // Went to background
-                    bgStart = Date()
-                    let appName = NSWorkspace.shared.frontmostApplication?.localizedName ?? "?"
-                    let msg = "backgrounded at \(ts)  frontmost: \(appName)"
-                    logger.warning("[FOCUS ⬅️] \(videoTitle, privacy: .public)  \(msg, privacy: .public)")
-                    print("[FOCUS ⬅️]  \(videoTitle)  \(msg)")
-                    fflush(stdout)
-                } else {
-                    // Returned to foreground
-                    let elapsed = bgStart.map { String(format: "%.1f s in background", Date().timeIntervalSince($0)) } ?? ""
-                    let msg = "foreground restored at \(ts)  \(elapsed)"
-                    logger.info("[FOCUS ▶️] \(videoTitle, privacy: .public)  \(msg, privacy: .public)")
-                    print("[FOCUS ▶️]  \(videoTitle)  \(msg)")
-                    fflush(stdout)
-                    bgStart = nil
-                }
-            }
-        }
-    }
-}
-#endif
 
 // MARK: - Generation logic
 
-/// Logic for preview generation, isolated to MainActor to ensure AVFoundation safety
-// @available(macOS 26, iOS 26, *)
 struct PreviewGenerationLogic {
     private static let logger = Logger(subsystem: "com.mosaickit", category: "PreviewGenerationLogic")
 
@@ -327,35 +273,9 @@ struct PreviewGenerationLogic {
         )
         defer { ProcessInfo.processInfo.endActivity(exportActivity) }
 
-        // Background-focus monitor: logs to OSLog (Console.app) and stdout whenever
-        // another app steals focus from the exporting process. Useful for correlating
-        // export stalls with "went to background" events.
-        let focusMonitor = PreviewFocusMonitor.start(videoTitle: video.title, logger: logger)
-        defer { focusMonitor.cancel() }
         #endif
 
-        #if os(iOS)
-        // Request background execution time on iOS using key-value coding to remain 100% safe inside App Extensions
-        let backgroundTaskID = Mutex<UIBackgroundTaskIdentifier>(.invalid)
-        if let sharedApp = NSClassFromString("UIApplication")?.value(forKeyPath: "sharedApplication") as? UIApplication {
-            let taskID = sharedApp.beginBackgroundTask(withName: "com.mosaickit.preview-export-\(video.id.uuidString)") {
-                let id = backgroundTaskID.withLock { $0 }
-                if id != .invalid {
-                    sharedApp.endBackgroundTask(id)
-                    backgroundTaskID.withLock { $0 = .invalid }
-                }
-            }
-            backgroundTaskID.withLock { $0 = taskID }
-        }
-        defer {
-            let id = backgroundTaskID.withLock { $0 }
-            if id != .invalid,
-               let sharedApp = NSClassFromString("UIApplication")?.value(forKeyPath: "sharedApplication") as? UIApplication {
-                sharedApp.endBackgroundTask(id)
-                backgroundTaskID.withLock { $0 = .invalid }
-            }
-        }
-        #endif
+
 
         if cancellationCheck() { throw PreviewError.cancelled }
 
@@ -572,6 +492,10 @@ struct PreviewGenerationLogic {
         let durationSeconds = CMTimeGetSeconds(duration)
         logger.info("⏱️  Video duration: \(durationSeconds)s")
         
+        guard durationSeconds.isFinite, durationSeconds > 0 else {
+            throw PreviewError.invalidConfiguration("Source duration must be finite and positive")
+        }
+
         // Minimum required duration: at least enough for the minimum extract duration
         let (extractDuration, playbackSpeed) = config.calculateExtractParameters(forVideoDuration: durationSeconds)
         let extractCount = config.extractCount(forVideoDuration: durationSeconds)
@@ -689,7 +613,11 @@ struct PreviewGenerationLogic {
         // Get asset duration for validation
         let assetDuration = try await asset.load(.duration)
         let assetDurationSeconds = CMTimeGetSeconds(assetDuration)
-        
+        guard assetDurationSeconds.isFinite, assetDurationSeconds > 0, !timestamps.isEmpty,
+              playbackSpeed.isFinite, playbackSpeed > 0 else {
+            throw PreviewError.invalidConfiguration("Invalid composition timing")
+        }
+
         // Load source tracks ONCE before the loop
         let videoTracks = try await asset.loadTracks(withMediaType: .video)
         guard let videoTrack = videoTracks.first else {
@@ -726,7 +654,6 @@ struct PreviewGenerationLogic {
         // Insert segments
         var insertTime = CMTime.zero
         let progressStep = 0.05 / Double(timestamps.count)
-        var skippedSegments = 0
         var overlayCues: [PreviewOverlayCue] = []
         
         for (index, timestamp) in timestamps.enumerated() {
@@ -738,11 +665,10 @@ struct PreviewGenerationLogic {
             let timeRange = CMTimeRange(start: timestamp.start, duration: timestamp.duration)
             let endTime = CMTimeAdd(timestamp.start, timestamp.duration)
             
-            // Validate time range is within asset bounds — skip if out of range
-            if CMTimeCompare(endTime, assetDuration) > 0 {
-                logger.warning("Segment \(index + 1) exceeds asset duration (\(CMTimeGetSeconds(endTime))s > \(assetDurationSeconds)s), skipping")
-                skippedSegments += 1
-                continue
+            guard timestamp.start.seconds.isFinite, timestamp.start.seconds >= 0,
+                  timestamp.duration.seconds.isFinite, timestamp.duration.seconds > 0,
+                  CMTimeCompare(endTime, assetDuration) <= 0 else {
+                throw PreviewError.compositionFailed("Segment \(index + 1) is outside the source time range", nil)
             }
             
             do {
@@ -759,7 +685,7 @@ struct PreviewGenerationLogic {
                 let segmentOutputDuration: CMTime
                 if playbackSpeed != 1.0 {
                     let scaledDuration = CMTime(
-                        seconds: extractDuration / playbackSpeed,
+                        seconds: CMTimeGetSeconds(timestamp.duration) / playbackSpeed,
                         preferredTimescale: 600
                     )
                     let scaleRange = CMTimeRange(start: insertTime, duration: timestamp.duration)
@@ -786,18 +712,8 @@ struct PreviewGenerationLogic {
                 progressHandler(progress, .composing, nil, "Composing segment \(index + 1)/\(timestamps.count)")
                 
             } catch let error as NSError {
-                logger.warning("Failed to insert segment \(index + 1)/\(timestamps.count): \(error.localizedDescription), skipping")
-                skippedSegments += 1
+                throw PreviewError.compositionFailed("Failed to insert segment \(index + 1); composition discarded", error)
             }
-        }
-        
-        // Ensure we have at least some segments
-        if skippedSegments > 0 {
-            logger.info("Skipped \(skippedSegments)/\(timestamps.count) segments")
-        }
-        let insertedCount = timestamps.count - skippedSegments
-        guard insertedCount > 0 else {
-            throw PreviewError.compositionFailed("All \(timestamps.count) segments failed to insert", nil)
         }
         
         let finalDuration = CMTimeGetSeconds(insertTime)
@@ -808,14 +724,14 @@ struct PreviewGenerationLogic {
             do {
                 try compositionVideoTrack.validateSegments(videoSegments)
             } catch {
-                logger.warning("Video track segments failed validation: \(error.localizedDescription)")
+                throw PreviewError.compositionFailed("Invalid video segments", error)
             }
         }
         if let compAudioTrack = compositionAudioTrack, let audioSegments = compAudioTrack.segments {
             do {
                 try compAudioTrack.validateSegments(audioSegments)
             } catch {
-                logger.warning("Audio track segments failed validation: \(error.localizedDescription)")
+                throw PreviewError.compositionFailed("Invalid audio segments", error)
             }
         }
         
@@ -854,13 +770,17 @@ struct PreviewGenerationLogic {
         overlayCues: [PreviewOverlayCue],
         maxResolutionRaw: String?,
         customTargetSize: CGSize? = nil
-    ) async throws -> AVVideoComposition {
+    ) async throws -> AVVideoComposition? {
         let naturalSize = try await sourceVideoTrack.load(.naturalSize)
         let preferredTransform = try await sourceVideoTrack.load(.preferredTransform)
         let nominalFrameRate = try await sourceVideoTrack.load(.nominalFrameRate)
         let transformedSize = naturalSize.applying(preferredTransform)
         let sourceWidth = abs(transformedSize.width)
         let sourceHeight = abs(transformedSize.height)
+        guard sourceWidth.isFinite, sourceHeight.isFinite, sourceWidth > 0, sourceHeight > 0,
+              sourceWidth <= 32_768, sourceHeight <= 32_768 else {
+            throw PreviewError.invalidConfiguration("Source video dimensions are invalid or exceed supported limits")
+        }
 
         var renderSize = CGSize(width: sourceWidth, height: sourceHeight)
         var finalTransform = preferredTransform
@@ -905,6 +825,11 @@ struct PreviewGenerationLogic {
             logger.info("Scaling composition from \(Int(sourceWidth))x\(Int(sourceHeight)) to \(Int(renderSize.width))x\(Int(renderSize.height))")
         }
 
+        // Identity geometry needs no render pass; the composition carries timing.
+        guard !overlayCues.isEmpty || finalTransform != .identity || renderSize != naturalSize else {
+            return nil
+        }
+
         // Intentionally always uses the legacy (deprecated) construction path:
         // AVVideoComposition.Configuration(for:prototypeInstruction:) auto-derives
         // per-segment layer instructions from the composition's own track geometry,
@@ -920,6 +845,10 @@ struct PreviewGenerationLogic {
             renderSize: renderSize,
             nominalFrameRate: nominalFrameRate
         )
+    }
+
+    internal static func frameDuration(for nominalFrameRate: Float) -> CMTime {
+        CMTime(seconds: 1.0 / Double(nominalFrameRate.isFinite && nominalFrameRate > 0 ? nominalFrameRate : 30), preferredTimescale: 600_000)
     }
 
     private static func buildLegacyVideoComposition(
@@ -940,10 +869,7 @@ struct PreviewGenerationLogic {
         let videoComposition = AVMutableVideoComposition()
         videoComposition.instructions = [instruction]
         videoComposition.renderSize = renderSize
-        videoComposition.frameDuration = CMTime(
-            value: 1,
-            timescale: CMTimeScale(nominalFrameRate > 0 ? nominalFrameRate : 30)
-        )
+        videoComposition.frameDuration = frameDuration(for: nominalFrameRate)
 
         if !overlayCues.isEmpty {
             videoComposition.animationTool = makeOverlayAnimationTool(
@@ -1195,7 +1121,10 @@ struct PreviewGenerationLogic {
         let originalHeight = Int(naturalSize.height)
         
         // Prepare output URL
-        let outputURL = try prepareOutputURL(config: config, video: video)
+        let finalURL = try prepareOutputURL(config: config, video: video)
+        let transaction = try OutputTransaction(finalURL: finalURL, overwrite: config.overwrite)
+        defer { transaction.discard() }
+        let outputURL = transaction.stagingURL
         
         let didStartAccessing = outputURL.startAccessingSecurityScopedResource()
         defer {
@@ -1286,6 +1215,7 @@ struct PreviewGenerationLogic {
             // Safe: composition is created and fully configured on this actor before the cast;
             // SJSAssetExportSession only reads the asset during the export call below.
             nonisolated(unsafe) let compositionAsset = composition as AVAsset
+            nonisolated(unsafe) let exportAudioMix = audioMix as AVAudioMix?
 
             let exportTask: Task<Void, Error>
             if let vc = videoComposition {
@@ -1294,6 +1224,7 @@ struct PreviewGenerationLogic {
                     try await exporter.export(
                         asset: compositionAsset,
                         audioOutputSettings: AudioOutputSettings.default.settingsDictionary,
+                        mix: exportAudioMix,
                         videoOutputSettings: videoConfig.settingsDictionary,
                         composition: vc,
                         to: outputURL,
@@ -1305,6 +1236,7 @@ struct PreviewGenerationLogic {
                     try await exporter.export(
                         asset: compositionAsset,
                         audio: .default,
+                        mix: exportAudioMix,
                         video: videoConfig,
                         to: outputURL,
                         as: config.format.avFileType
@@ -1326,6 +1258,7 @@ struct PreviewGenerationLogic {
                         stallDetected.cancel()
                         exportTask.cancel()
                         progressTask.cancel()
+                        await progressTask.value
                         break
                     }
                     try? await Task.sleep(nanoseconds: 1_000_000_000) // check every 1s
@@ -1341,6 +1274,7 @@ struct PreviewGenerationLogic {
                 }
 
                 progressTask.cancel()
+                await progressTask.value
 
                 if stallDetected.isCancelled {
                     try? FileManager.default.removeItem(at: outputURL)
@@ -1360,11 +1294,13 @@ struct PreviewGenerationLogic {
                 let fileSize = (try? FileManager.default.attributesOfItem(atPath: outputURL.path)[.size] as? Int64) ?? 0
                 logger.info("SJS export completed: \(outputURL.lastPathComponent) (\(String(format: "%.2f", Double(fileSize) / 1_048_576.0)) MB)")
                 
-                progressHandler(1.0, .completed, outputURL, "Export saved")
-                return outputURL
+                if cancellationCheck() { throw PreviewError.cancelled }
+                try transaction.commit()
+                return finalURL
                 
             } catch {
                 progressTask.cancel()
+                await progressTask.value
                 // Clean up partial output file on failure
                 try? FileManager.default.removeItem(at: outputURL)
                 if stallDetected.isCancelled {
@@ -1518,17 +1454,13 @@ struct PreviewGenerationLogic {
     ) async throws -> URL {
         logger.info("Starting native export for \(video.title)")
 
-        #if os(iOS)
-        do {
-            try AVAudioSession.sharedInstance().setCategory(.playback)
-            try AVAudioSession.sharedInstance().setActive(true)
-        } catch {
-            logger.warning("Failed to configure audio session: \(error.localizedDescription)")
-        }
-        #endif
+
 
         // Prepare output URL
-        let outputURL = try prepareOutputURL(config: config, video: video)
+        let finalURL = try prepareOutputURL(config: config, video: video)
+        let transaction = try OutputTransaction(finalURL: finalURL, overwrite: config.overwrite)
+        defer { transaction.discard() }
+        let outputURL = transaction.stagingURL
 
         let didStartAccessingFile = outputURL.startAccessingSecurityScopedResource()
         defer {
@@ -1660,7 +1592,11 @@ struct PreviewGenerationLogic {
         let fileSize = (try? FileManager.default.attributesOfItem(atPath: outputURL.path)[.size] as? Int64) ?? 0
         logger.info("Native export completed: \(outputURL.lastPathComponent) (\(String(format: "%.2f", Double(fileSize) / 1_048_576.0)) MB)")
 
-        return outputURL
+        progressMonitor.cancel()
+        await progressMonitor.value
+        if cancellationCheck() { throw PreviewError.cancelled }
+        try transaction.commit()
+        return finalURL
     }
 
 }

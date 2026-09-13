@@ -1,5 +1,6 @@
 import Foundation
 import CoreGraphics
+import Synchronization
 
 /// Injected implementation of WebP encoding, provided by the separate
 /// `MosaicKitWebP` product.
@@ -23,7 +24,13 @@ public protocol MosaicKitWebPEncoding: Sendable {
 /// Registration point for the injected WebP encoder. Set by
 /// `MosaicKitWebP.register()`; `nil` until then.
 public enum MosaicKitWebPSupport {
-    public nonisolated(unsafe) static var encoder: (any MosaicKitWebPEncoding)?
+    private static let storage = Mutex<(any MosaicKitWebPEncoding)?>(nil)
+
+    /// Retrieves a stable encoder snapshot. Encoding runs outside the registry lock.
+    public static var encoder: (any MosaicKitWebPEncoding)? {
+        get { storage.withLock { $0 } }
+        set { storage.withLock { $0 = newValue } }
+    }
 }
 
 public enum MosaicKitWebPError: Error, LocalizedError {

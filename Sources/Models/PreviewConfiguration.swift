@@ -423,7 +423,7 @@ public struct PreviewConfiguration: Codable, Sendable, Hashable {
         case "XXS": return 48
         default:
             // For custom densities, calculate based on factor (base 16)
-            return max(1, Int(16.0 * density.factor))
+            return Self.safeInteger(16.0 * density.factor, fallback: 1)
         }
     }
     
@@ -450,16 +450,18 @@ public struct PreviewConfiguration: Codable, Sendable, Hashable {
     /// - Parameter videoDuration: Duration of the input video in seconds
     /// - Returns: Total extract count (base count + duration-based adjustment)
     public func extractCount(forVideoDuration videoDuration: TimeInterval) -> Int {
+        guard videoDuration.isFinite, videoDuration > 0 else { return 1 }
         let durationAdjustment = ((videoDuration > 1800.00) ? 8.0 : 4.0) * log(videoDuration)
         let totalCount = Double(baseExtractCount) + durationAdjustment
         Self.logger.debug("extractCount(forVideoDuration:) -> \(totalCount)")
-        return max(1, Int(totalCount.rounded()))
+        return Self.safeInteger(totalCount.rounded(), fallback: 1)
     }
     public static func extractCountExt(forVideoDuration videoDuration: TimeInterval, density: String, targetDuration: TimeInterval) -> Int {
+        guard videoDuration.isFinite, videoDuration > 0 else { return 1 }
         let durationAdjustment = ((videoDuration > 1800.00) ? 8.0 : 4.0) * log(videoDuration)
         let totalCount = Double(self.exterEtractCount(density: density)) + durationAdjustment
         Self.logger.debug("extractCount(forVideoDuration:) -> \(totalCount)")
-        return max(1, Int(totalCount.rounded()))
+        return Self.safeInteger(totalCount.rounded(), fallback: 1)
     }
     
 
@@ -467,6 +469,8 @@ public struct PreviewConfiguration: Codable, Sendable, Hashable {
     /// - Parameter videoDuration: Duration of the input video in seconds
     /// - Returns: Tuple of (extractDuration, playbackSpeed)
     public func calculateExtractParameters(forVideoDuration videoDuration: TimeInterval) -> (extractDuration: TimeInterval, playbackSpeed: Double) {
+        guard videoDuration.isFinite, videoDuration > 0,
+              targetDuration.isFinite, targetDuration > 0 else { return (0, 1) }
         let count = extractCount(forVideoDuration: videoDuration)
         let baseExtractDuration = targetDuration / Double(count)
         guard let minimumExtractDuration = normalizedMinimumExtractDuration else {
@@ -484,7 +488,7 @@ public struct PreviewConfiguration: Codable, Sendable, Hashable {
 
             // Calculate actual extract duration based on capped speed
             let actualExtractDuration = targetDuration * cappedSpeed / Double(count)
-
+            guard actualExtractDuration.isFinite, cappedSpeed.isFinite else { return (baseExtractDuration, 1) }
             return (actualExtractDuration, cappedSpeed)
         }
     }
@@ -674,7 +678,7 @@ public struct PreviewConfiguration: Codable, Sendable, Hashable {
 
     /// Format duration for filename (e.g., "30s", "1m", "2m30s")
     private func formatDuration(_ duration: TimeInterval) -> String {
-        let totalSeconds = Int(duration)
+        let totalSeconds = Self.safeInteger(duration, fallback: 0)
         let minutes = totalSeconds / 60
         let seconds = totalSeconds % 60
 
@@ -762,7 +766,7 @@ extension PreviewConfiguration {
 
     /// Get display label for a duration
     public static func durationLabel(for duration: TimeInterval) -> String {
-        let totalSeconds = Int(duration)
+        let totalSeconds = Self.safeInteger(duration, fallback: 0)
         let minutes = totalSeconds / 60
         let seconds = totalSeconds % 60
 
@@ -800,5 +804,16 @@ extension String {
     func replacingNonAlphanumerics(with replacement: String = "_") -> String {
         let allowed = CharacterSet.alphanumerics
         return self.unicodeScalars.map { allowed.contains($0) ? String($0) : replacement }.joined()
+    }
+}
+
+
+extension PreviewConfiguration {
+    /// A nontrapping fallback for legacy formatting and calculation helpers.
+    /// Invalid values return the fallback; positive values are bounded below Int.max.
+    private static func safeInteger(_ value: Double, fallback: Int) -> Int {
+        guard value.isFinite, value >= Double(fallback) else { return fallback }
+        guard value < Double(Int.max) else { return Int.max - 1 }
+        return Int(value)
     }
 }

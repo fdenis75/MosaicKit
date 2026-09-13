@@ -28,10 +28,18 @@ actor VideoMetadataExtractor {
     /// Extract comprehensive metadata from a video file (returns Sendable values)
     /// Optimized for performance with parallel property loading
     func extractMetadataValues(from url: URL) async throws -> VideoMetadataValues {
+        try Task.checkCancellation()
         let asset = AVURLAsset(url: url)
 
         // Load multiple properties at once for better performance
         let (tracks, duration) = try await asset.load(.tracks, .duration)
+        try Task.checkCancellation()
+        guard duration.seconds.isFinite, duration.seconds > 0 else {
+            throw MosaicError.invalidVideo("Video duration must be finite and positive")
+        }
+        guard tracks.contains(where: { $0.mediaType == .video }) else {
+            throw MosaicError.invalidVideo("Source contains no video track")
+        }
        
         var resolution: String?
         var frameRate: Double?
@@ -47,10 +55,17 @@ actor VideoMetadataExtractor {
             // Load multiple track properties at once for better performance
             let (size, fps, formats) = try await videoTrack.load(.naturalSize, .nominalFrameRate, .formatDescriptions)
 
+            try Task.checkCancellation()
+            guard size.width.isFinite, size.height.isFinite,
+                  size.width > 0, size.height > 0,
+                  size.width < CGFloat(Int.max), size.height < CGFloat(Int.max),
+                  fps.isFinite, fps >= 0 else {
+                throw MosaicError.invalidVideo("Video geometry or frame rate is invalid")
+            }
             resolution = "\(Int(size.width))×\(Int(size.height))"
             width = Double(size.width)
             height = Double(size.height)
-            frameRate = Double(fps)
+            frameRate = fps > 0 ? Double(fps) : nil
 
             if let formatDescription = formats.first {
                 let codecType = CMFormatDescriptionGetMediaSubType(formatDescription)
@@ -77,6 +92,7 @@ actor VideoMetadataExtractor {
         // Extract file creation date
         let fileCreationDate = extractFileCreationDate(from: url)
 
+        try Task.checkCancellation()
         return VideoMetadataValues(
             duration: duration.seconds,
             resolution: resolution,
@@ -102,7 +118,7 @@ actor VideoMetadataExtractor {
 
     /// Calculate bitrate from file size and duration
     private func calculateBitrate(for url: URL, duration: TimeInterval) -> Int64? {
-        guard duration > 0 else { return nil }
+        guard duration.isFinite, duration > 0 else { return nil }
 
         guard let fileSize = try? FileManager.default.attributesOfItem(atPath: url.path)[.size] as? Int64,
               fileSize > 0 else {
@@ -110,7 +126,9 @@ actor VideoMetadataExtractor {
         }
 
         // Convert to bits per second
-        return Int64((Double(fileSize) * 8) / duration)
+        let bitrate = (Double(fileSize) * 8) / duration
+        guard bitrate.isFinite, bitrate >= 0, bitrate < Double(Int64.max) else { return nil }
+        return Int64(bitrate)
     }
 
 

@@ -12,7 +12,12 @@ import UIKit
 public final class LayoutProcessor {
     private let logger = Logger(subsystem: "com.mosaicKit", category: "layout-processing")
     private let signposter = OSSignposter(subsystem: "com.mosaicKit", category: "layout-processor")
-    public var mosaicAspectRatio: CGFloat
+    private let stateLock = NSRecursiveLock()
+    private var storedAspectRatio: CGFloat
+    public var mosaicAspectRatio: CGFloat {
+        get { stateLock.withLock { storedAspectRatio } }
+        set { stateLock.withLock { storedAspectRatio = newValue.isFinite && newValue > 0 ? newValue : 16.0 / 9.0 } }
+    }
     private var layoutCache: [String: MosaicLayout] = [:]
     
     /// Get the screen size for the main screen
@@ -59,7 +64,7 @@ public final class LayoutProcessor {
         let state = signposter.beginInterval("Initialize Layout Processor")
         defer { signposter.endInterval("Initialize Layout Processor", state) }
         
-        self.mosaicAspectRatio = aspectRatio
+        self.storedAspectRatio = aspectRatio.isFinite && aspectRatio > 0 ? aspectRatio : 16.0 / 9.0
     }
     
     /// Update the mosaic aspect ratio
@@ -69,7 +74,7 @@ public final class LayoutProcessor {
         defer { signposter.endInterval("Update Aspect Ratio", state) }
         
         self.mosaicAspectRatio = ratio
-        layoutCache.removeAll()
+        stateLock.withLock { layoutCache.removeAll() }
     }
     
     /// Calculate optimal mosaic layout
@@ -88,11 +93,19 @@ public final class LayoutProcessor {
         density: DensityConfig,
         layoutType: LayoutType
     ) -> MosaicLayout {
+        stateLock.lock()
+        defer { stateLock.unlock() }
+        guard originalAspectRatio.isFinite, originalAspectRatio >= 0.01, originalAspectRatio <= 100,
+              thumbnailCount > 0, thumbnailCount <= 100_000, mosaicWidth > 0, mosaicWidth <= 16_384 else {
+            return MosaicLayout(rows: 0, cols: 0, thumbnailSize: .zero, positions: [], thumbCount: 0,
+                                thumbnailSizes: [], mosaicSize: .zero)
+        }
+        storedAspectRatio = mosaicAspectRatio.ratio
         logger.debug("🎯 Starting layout calculation - AR: \(originalAspectRatio), Count: \(thumbnailCount), Width: \(mosaicWidth), target AR: \(self.mosaicAspectRatio)")
         logger.debug("⚙️ Layout mode: \(layoutType.rawValue), Density: \(density.name)")
 
-        let cacheKey = "\(originalAspectRatio)-\(thumbnailCount)-\(mosaicWidth)-\(density.name)-\(layoutType.rawValue)"
-        if let cached = layoutCache[cacheKey] { return cached }
+        let cacheKey = "\(mosaicAspectRatio.rawValue)-\(originalAspectRatio)-\(thumbnailCount)-\(mosaicWidth)-\(density.name)-\(layoutType.rawValue)"
+        if layoutType != .auto, let cached = layoutCache[cacheKey] { return cached }
 
         let layout: MosaicLayout
 
@@ -131,7 +144,8 @@ public final class LayoutProcessor {
             )
         }
 
-        layoutCache[cacheKey] = layout
+        if layoutCache.count >= 64 { layoutCache.removeAll(keepingCapacity: true) }
+        if layoutType != .auto { layoutCache[cacheKey] = layout }
         return layout
     }
 
@@ -637,6 +651,7 @@ public final class LayoutProcessor {
     ) -> Int {
         logger.debug("🔢 Calculating thumbnail count - Duration: \(duration)s, Width: \(width)")
         
+        guard duration.isFinite, duration > 0, width > 0, width <= 16_384, videoAR.isFinite, videoAR >= 0.01, videoAR <= 100 else { return 0 }
         if duration < 5 { return 4 }
         
         if layoutType == .auto {
@@ -651,7 +666,7 @@ public final class LayoutProcessor {
             let base = Double(width) / 200.0
             let k = 10.0
             let rawCount = base + k * log(duration)
-            let totalCount = min(Int(rawCount * density.factor), 800)
+            let totalCount = Int(min(max(rawCount * density.factor, 4), 800))
             logger.debug("📊 Calculated count: \(totalCount) (raw: \(rawCount))")
             return totalCount
         }
