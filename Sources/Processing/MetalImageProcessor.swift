@@ -7,6 +7,12 @@ import OSLog
 import Synchronization
 import DominantColors
 
+private final class CommandBufferErrorState: @unchecked Sendable {
+    private let state = Mutex<String?>(nil)
+    func record(_ message: String) { state.withLock { if $0 == nil { $0 = message } } }
+    var message: String? { state.withLock { $0 } }
+}
+
 #if canImport(AppKit)
 import AppKit
 #elseif canImport(UIKit)
@@ -941,7 +947,11 @@ public final class MetalImageProcessor: @unchecked Sendable {
             throw MetalProcessorError.commandBufferExecutionFailed(context: "Mosaic setup",
                 underlying: setupBuffer.error?.localizedDescription ?? "GPU did not complete")
         }
-        let batchSize = 8
+        // Keep enough work in each command buffer to amortize command-buffer
+        // overhead. The previous 8-frame size multiplied submissions by ~2.5x
+        // for dense mosaics compared with the 20-frame pipeline.
+        let batchSize = 20
+        let gpuError = CommandBufferErrorState()
         var batch = sample
         sample.removeAll(keepingCapacity: false)
         var rendered = Set<Int>()
@@ -957,9 +967,10 @@ public final class MetalImageProcessor: @unchecked Sendable {
                     throw MosaicError.processingFailed("Duplicate or out-of-range mosaic frame")
                 }
             }
-            try await processBatch(batch, into: mosaicTexture, layout: layout,
+            try processBatch(batch, into: mosaicTexture, layout: layout,
                 visual: config.layout.visual, spacing: config.layout.spacing,
-                hasMetadata: hasMetadata, metadataHeight: CGFloat(metadataHeight), batchIndex: batchIndex)
+                hasMetadata: hasMetadata, metadataHeight: CGFloat(metadataHeight), batchIndex: batchIndex,
+                gpuError: gpuError)
             batch.removeAll(keepingCapacity: true)
             batchIndex += 1
             progressHandler?(0.25 + 0.7 * Double(rendered.count) / Double(layout.positions.count))
@@ -969,6 +980,9 @@ public final class MetalImageProcessor: @unchecked Sendable {
             throw MosaicError.processingFailed("Missing mosaic frames: received \(rendered.count) of \(layout.positions.count)")
         }
         try await synchronizeGPU(context: "generateMosaicStream")
+        if let reason = gpuError.message {
+            throw MetalProcessorError.commandBufferExecutionFailed(context: "Mosaic batch", underlying: reason)
+        }
         try Task.checkCancellation()
 
         // Create CGImage from the final mosaic texture
@@ -990,8 +1004,9 @@ public final class MetalImageProcessor: @unchecked Sendable {
         spacing: CGFloat,
         hasMetadata: Bool,
         metadataHeight: CGFloat,
-        batchIndex: Int
-    ) async throws {
+        batchIndex: Int,
+        gpuError: CommandBufferErrorState
+    ) throws {
         signposter.emitEvent("processBatch")
         let intervalState = signposter.beginInterval("processBatch")
         defer { signposter.endInterval("processBatch", intervalState) }
@@ -1020,13 +1035,14 @@ public final class MetalImageProcessor: @unchecked Sendable {
             renderedCount += 1
         }
 
-        batchCommandBuffer.commit()
-        await batchCommandBuffer.completed()
-        guard batchCommandBuffer.status == .completed else {
-            throw MetalProcessorError.commandBufferExecutionFailed(context: "Mosaic batch \(batchIndex)",
-                underlying: batchCommandBuffer.error?.localizedDescription ?? "GPU did not complete")
+        let logger = self.logger
+        batchCommandBuffer.addCompletedHandler { buffer in
+            guard buffer.status == .error else { return }
+            let reason = buffer.error?.localizedDescription ?? "GPU did not complete"
+            gpuError.record(reason)
+            logger.error("❌ Mosaic batch \(batchIndex) GPU execution failed: \(reason)")
         }
-        try Task.checkCancellation()
+        batchCommandBuffer.commit()
     }
 
     /// Blocks until every command buffer previously committed to `commandQueue` has finished
