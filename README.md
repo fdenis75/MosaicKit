@@ -18,6 +18,24 @@ A high-performance Swift package for generating video mosaics with Metal-acceler
 - 🎬 **Video Preview Generation** - Create short highlight reels from any video, either exported to file or as a live `AVPlayerItem` composition
 - 🧭 **Explicit job lifecycle control** - Track work with stable job and attempt IDs, and cancel, pause, or retry individual operations
 - 🛡️ **Reliable outputs and validation** - Inputs/configurations are validated early and generated files are committed atomically
+
+## New in 1.7.0
+
+- **Explicit generation lifecycle** — `GenerationJobController` provides stable job and attempt IDs,
+  snapshots, cancellation, queue pause, and retry for application-managed work.
+- **Reliable cancellation and retries** — mosaic, preview, animated-image, and FFmpeg pipelines now
+  observe cancellation at extraction, GPU, encoding, and cleanup boundaries; failed attempts cannot
+  be reported with partial output files.
+- **Bounded and faster mosaic processing** — frame extraction uses a pull-based bounded stream,
+  layout caching includes all relevant inputs, and GPU failures are propagated with diagnostics.
+- **Safer preview exports** — staged output commits, ordered batch progress, bounded FFmpeg
+  termination diagnostics, audio-mix forwarding, fractional frame rates, and correct portrait
+  resolution caps.
+- **Validated input and configuration models** — `VideoSource` supports lightweight Codable queue
+  entries and explicit `inspect()` metadata loading; invalid geometry, timing, density, compression,
+  and encoder combinations fail before processing begins.
+- **Reproducible media tests** — CI uses a tracked 87-second H.264/AAC fixture packaged with the
+  test target, and runs hardware-intensive media tests sequentially for stable results.
 ## New in 1.6.4
 
 - **`BackgroundProcessing` DocC article** — a how-to guide for wrapping mosaic/preview generation in iOS 26's `BGContinuedProcessingTask`, including the `PreviewConfiguration.enableAppLifecycleMonitor` gotcha (its foreground-wait gate stalls a background-task export unless disabled).
