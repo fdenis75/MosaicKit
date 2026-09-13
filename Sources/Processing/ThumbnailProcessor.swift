@@ -14,6 +14,7 @@ import UIKit
 /// A processor for extracting and managing video thumbnails
 // @available(macOS 26, iOS 26, *)
 public final class ThumbnailProcessor: Sendable {
+    private static let staticSignposter = OSSignposter(subsystem: "com.mosaicKit", category: "thumbnail-processor")
     private let logger = Logger(subsystem: "com.mosaicKit", category: "thumbnail-processor")
     private let config: MosaicConfiguration
     private let decodeQualityScale: CGFloat
@@ -22,6 +23,9 @@ public final class ThumbnailProcessor: Sendable {
     /// Initialize a new thumbnail processor
     /// - Parameter config: Configuration for thumbnail processing
     public init(config: MosaicConfiguration, decodeQualityScale: CGFloat = 1) {
+        Self.staticSignposter.emitEvent("init")
+        let intervalState = Self.staticSignposter.beginInterval("init")
+        defer { Self.staticSignposter.endInterval("init", intervalState) }
         self.config = config
         self.decodeQualityScale = decodeQualityScale.isFinite ? min(max(decodeQualityScale, 1), 4) : 1
     }
@@ -42,6 +46,9 @@ public final class ThumbnailProcessor: Sendable {
         accurate: Bool = false,
         progressHandler: ((Double) -> Void)? = nil
     ) async throws -> [(image: CGImage, timestamp: String)] {
+        signposter.emitEvent("extractThumbnails")
+        let intervalState = signposter.beginInterval("extractThumbnails")
+        defer { signposter.endInterval("extractThumbnails", intervalState) }
         let source = makeFrameSource(file: file, layout: layout, asset: asset, accurate: accurate)
         var thumbnails: [(image: CGImage, timestamp: String)] = []
         thumbnails.reserveCapacity(layout.positions.count)
@@ -72,6 +79,9 @@ public final class ThumbnailProcessor: Sendable {
         gifSize: GifSize,
         accurate: Bool = false
     ) async throws -> [CGImage] {
+        signposter.emitEvent("extractFramesForGif")
+        let intervalState = signposter.beginInterval("extractFramesForGif")
+        defer { signposter.endInterval("extractFramesForGif", intervalState) }
         try Task.checkCancellation()
         let generator = AVAssetImageGenerator(asset: asset)
         generator.appliesPreferredTrackTransform = true
@@ -118,6 +128,9 @@ public final class ThumbnailProcessor: Sendable {
         asset: AVAsset,
         accurate: Bool = false
     ) -> AsyncThrowingStream<(index: Int, image: CGImage, timestamp: String), Error> {
+        signposter.emitEvent("extractFramesStream")
+        let intervalState = signposter.beginInterval("extractFramesStream")
+        defer { signposter.endInterval("extractFramesStream", intervalState) }
         let source = makeFrameSource(file: file, layout: layout, asset: asset, accurate: accurate)
         return AsyncThrowingStream(unfolding: { try await source.next() })
     }
@@ -127,6 +140,9 @@ public final class ThumbnailProcessor: Sendable {
         labelConfig: FrameLabelConfig,
         collectColor: (@Sendable (Int, CGImage) async -> Void)? = nil
     ) -> AsyncThrowingStream<(Int, CGImage), Error> {
+        signposter.emitEvent("processedFramesStream")
+        let intervalState = signposter.beginInterval("processedFramesStream")
+        defer { signposter.endInterval("processedFramesStream", intervalState) }
         let source = makeFrameSource(file: file, layout: layout, asset: asset, accurate: accurate)
         let (stream, continuation) = AsyncThrowingStream<(Int, CGImage), Error>.makeStream()
         let processor = self
@@ -166,6 +182,9 @@ public final class ThumbnailProcessor: Sendable {
     }
 
     private func makeFrameSource(file: URL, layout: MosaicLayout, asset: AVAsset, accurate: Bool) -> MosaicFrameSource {
+        signposter.emitEvent("makeFrameSource")
+        let intervalState = signposter.beginInterval("makeFrameSource")
+        defer { signposter.endInterval("makeFrameSource", intervalState) }
         let generator = configureGenerator(for: asset, accurate: accurate, preview: false, layout: layout)
         return MosaicFrameSource(decoder: MosaicImageDecoder(asset: asset, generator: generator), count: layout.positions.count,
             times: { self.calculateExtractionTimes(duration: $0, count: layout.positions.count) },
@@ -187,6 +206,9 @@ public final class ThumbnailProcessor: Sendable {
         asset: AVAsset,
         accurate: Bool = true
     ) async throws -> [(image: CGImage, timestamp: String)] {
+        signposter.emitEvent("extractThumbnailsUI")
+        let intervalState = signposter.beginInterval("extractThumbnailsUI")
+        defer { signposter.endInterval("extractThumbnailsUI", intervalState) }
         try Task.checkCancellation()
         let duration = try await asset.load(.duration).seconds
         guard duration.isFinite, duration > 0 else { throw MosaicError.invalidVideo("Invalid duration") }
@@ -237,6 +259,9 @@ public final class ThumbnailProcessor: Sendable {
         metadataHeader: CGImage? = nil,
         progressHandler: (@Sendable (Double) -> Void)? = nil
     ) async throws -> CGImage {
+        signposter.emitEvent("generateMosaic")
+        let intervalState = signposter.beginInterval("generateMosaic")
+        defer { signposter.endInterval("generateMosaic", intervalState) }
         let startTime = CFAbsoluteTimeGetCurrent()
         defer { trackPerformance(startTime: startTime) }
         
@@ -395,6 +420,9 @@ public final class ThumbnailProcessor: Sendable {
     /// Track performance metrics
     /// - Parameter startTime: The start time of the operation
     private func trackPerformance(startTime: CFAbsoluteTime) {
+        signposter.emitEvent("trackPerformance")
+        let intervalState = signposter.beginInterval("trackPerformance")
+        defer { signposter.endInterval("trackPerformance", intervalState) }
         let executionTime = CFAbsoluteTimeGetCurrent() - startTime
         logger.debug("⏱️ Operation completed in \(executionTime) seconds")
     }
@@ -405,6 +433,9 @@ public final class ThumbnailProcessor: Sendable {
         preview: Bool,
         layout: MosaicLayout
     ) -> AVAssetImageGenerator {
+        signposter.emitEvent("configureGenerator")
+        let intervalState = signposter.beginInterval("configureGenerator")
+        defer { signposter.endInterval("configureGenerator", intervalState) }
         let generator = AVAssetImageGenerator(asset: asset)
         generator.appliesPreferredTrackTransform = true
         
@@ -429,6 +460,9 @@ public final class ThumbnailProcessor: Sendable {
     }
     
     private func calculateExtractionTimes(duration: Double, count: Int) -> [CMTime] {
+        signposter.emitEvent("calculateExtractionTimes")
+        let intervalState = signposter.beginInterval("calculateExtractionTimes")
+        defer { signposter.endInterval("calculateExtractionTimes", intervalState) }
         guard duration.isFinite, duration > 0, count > 0, count <= 100_000 else { return [] }
         let startPoint = duration * 0.05
         let endPoint = duration * 0.95
@@ -461,6 +495,9 @@ public final class ThumbnailProcessor: Sendable {
     }
     
     private func formatTimestamp(seconds: Double, accurate: Bool = false) -> String {
+        signposter.emitEvent("formatTimestamp")
+        let intervalState = signposter.beginInterval("formatTimestamp")
+        defer { signposter.endInterval("formatTimestamp", intervalState) }
         let hours = Int(seconds) / 3600
         let minutes = (Int(seconds) % 3600) / 60
         let seconds = Int(seconds) % 60
@@ -468,6 +505,9 @@ public final class ThumbnailProcessor: Sendable {
     }
     
     private func createBlankImage(size: CGSize) -> CGImage? {
+        signposter.emitEvent("createBlankImage")
+        let intervalState = signposter.beginInterval("createBlankImage")
+        defer { signposter.endInterval("createBlankImage", intervalState) }
         // Use standard RGB color space for blank images
         let colorSpace = CGColorSpaceCreateDeviceRGB()
         let context = CGContext(
@@ -492,6 +532,9 @@ public final class ThumbnailProcessor: Sendable {
     
     /// Deep copies a CGImage to decouple it from AVAssetImageGenerator's buffer pool
     private func createDeepCopy(of image: CGImage) -> CGImage? {
+        signposter.emitEvent("createDeepCopy")
+        let intervalState = signposter.beginInterval("createDeepCopy")
+        defer { signposter.endInterval("createDeepCopy", intervalState) }
         let width = image.width
         let height = image.height
         guard width > 0 && height > 0 else { return nil }
@@ -518,6 +561,9 @@ public final class ThumbnailProcessor: Sendable {
     /// Minimum header height as a fraction of the thumbnail height, scaling with
     /// density: 0.3 for low densities (factor <= 1.0) up to 1.0 for XXS (factor 4.0).
     static func minimumHeaderHeightFraction(for density: DensityConfig) -> CGFloat {
+        staticSignposter.emitEvent("minimumHeaderHeightFraction")
+        let intervalState = staticSignposter.beginInterval("minimumHeaderHeightFraction")
+        defer { staticSignposter.endInterval("minimumHeaderHeightFraction", intervalState) }
         let lowFactor = DensityConfig.m.factor
         let highFactor = DensityConfig.xxs.factor
         let progress = (density.factor - lowFactor) / (highFactor - lowFactor)
@@ -544,6 +590,9 @@ public final class ThumbnailProcessor: Sendable {
         headerConfig: HeaderConfig = .default,
         swatchColors: [CGColor] = []
     ) -> CGImage? {
+        signposter.emitEvent("createMetadataHeaderVideo")
+        let intervalState = signposter.beginInterval("createMetadataHeaderVideo")
+        defer { signposter.endInterval("createMetadataHeaderVideo", intervalState) }
         logger.debug("🏷️ Creating metadata header - Width: \(width)")
 
         // Background colour: config override → caller override → platform default
@@ -756,6 +805,9 @@ public final class ThumbnailProcessor: Sendable {
 
     /// Format a single `MetadataField` to a display string using `VideoInput` data.
     private func formatHeaderField(_ field: MetadataField, video: VideoInput) -> String? {
+        signposter.emitEvent("formatHeaderField")
+        let intervalState = signposter.beginInterval("formatHeaderField")
+        defer { signposter.endInterval("formatHeaderField", intervalState) }
         switch field {
         case .title:
             return "Title: \(video.title)"
@@ -797,6 +849,9 @@ public final class ThumbnailProcessor: Sendable {
         height: Int? = nil,
         backgroundColor: CGColor? = nil
     ) -> CGImage? {
+        signposter.emitEvent("createMetadataHeaderLegacy")
+        let intervalState = signposter.beginInterval("createMetadataHeaderLegacy")
+        defer { signposter.endInterval("createMetadataHeaderLegacy", intervalState) }
         // Set default background color based on platform
         #if canImport(AppKit)
         let bgColor = backgroundColor ?? NSColor(white: 0.1, alpha: 0.25).cgColor
@@ -898,6 +953,9 @@ public final class ThumbnailProcessor: Sendable {
         height: Int,
         headerHeight: Int? = nil
     ) {
+        signposter.emitEvent("drawMetadata")
+        let intervalState = signposter.beginInterval("drawMetadata")
+        defer { signposter.endInterval("drawMetadata", intervalState) }
         // Use the provided height or calculate a reasonable size for the header
         let metadataHeight = headerHeight ?? Int(round(Double(height) * 0.2))  // Use 1/5 of total height by default
                                                                               // This will be overridden by the thumbnailHeight in the main method
@@ -994,6 +1052,9 @@ public final class ThumbnailProcessor: Sendable {
     }()
 
     private func formatBitrate(_ bitrate: Int64?) -> String {
+        signposter.emitEvent("formatBitrate")
+        let intervalState = signposter.beginInterval("formatBitrate")
+        defer { signposter.endInterval("formatBitrate", intervalState) }
         guard let bitrate = bitrate else { return "Unknown" }
         return ThumbnailProcessor.bitrateFormatter.string(fromByteCount: bitrate) + "/s"
     }
@@ -1013,6 +1074,9 @@ public final class ThumbnailProcessor: Sendable {
         size: CGSize,
         labelConfig: FrameLabelConfig = .default
     ) -> CGImage {
+        signposter.emitEvent("addTimestampToImage")
+        let intervalState = signposter.beginInterval("addTimestampToImage")
+        defer { signposter.endInterval("addTimestampToImage", intervalState) }
         // Create a context for the image with appropriate scale
         let scale = max(1.0, min(1.2,Double(image.width) / size.width)) // Handle high-resolution images
         // Preserve source color space for accurate color representation
@@ -1303,6 +1367,9 @@ public final class ThumbnailProcessor: Sendable {
     
     /// Helper method to draw timestamp text
     private func drawTimestampText(in context: CGContext, text: String, attributes: [NSAttributedString.Key: Any], rect: CGRect) {
+        signposter.emitEvent("drawTimestampText")
+        let intervalState = signposter.beginInterval("drawTimestampText")
+        defer { signposter.endInterval("drawTimestampText", intervalState) }
         let nsString = NSString(string: text)
         let stringSize = nsString.size(withAttributes: attributes)
         
@@ -1321,6 +1388,9 @@ public final class ThumbnailProcessor: Sendable {
     
     /// Helper method to draw pill background
     private func drawPillBackground(in context: CGContext, rect: CGRect, radius: CGFloat) {
+        signposter.emitEvent("drawPillBackground")
+        let intervalState = signposter.beginInterval("drawPillBackground")
+        defer { signposter.endInterval("drawPillBackground", intervalState) }
         let minX = rect.minX, minY = rect.minY
         let maxX = rect.maxX, maxY = rect.maxY
         
@@ -1355,6 +1425,9 @@ public final class ThumbnailProcessor: Sendable {
     }
 
     private func drawRoundedHeaderBackground(in context: CGContext, width: CGFloat, height: CGFloat, color: CGColor) {
+        signposter.emitEvent("drawRoundedHeaderBackground")
+        let intervalState = signposter.beginInterval("drawRoundedHeaderBackground")
+        defer { signposter.endInterval("drawRoundedHeaderBackground", intervalState) }
         let inset = max(1.0, min(6.0, height * 0.04))
         let backgroundRect = CGRect(
             x: inset,
@@ -1401,6 +1474,9 @@ public final class ThumbnailProcessor: Sendable {
     }
 
     private func overlayFontSize(for size: CGSize) -> CGFloat {
+        signposter.emitEvent("overlayFontSize")
+        let intervalState = signposter.beginInterval("overlayFontSize")
+        defer { signposter.endInterval("overlayFontSize", intervalState) }
         let referenceDimension = size.width >= size.height ? size.width : size.height
         return max(10.0, min(24.0, referenceDimension * 0.08)) * 1.5
     }
@@ -1412,6 +1488,9 @@ public final class ThumbnailProcessor: Sendable {
         baseFontSize: CGFloat,
         maxWidth: CGFloat
     ) -> HeaderRowLayout {
+        signposter.emitEvent("makeHeaderRowLayout")
+        let intervalState = signposter.beginInterval("makeHeaderRowLayout")
+        defer { signposter.endInterval("makeHeaderRowLayout", intervalState) }
         let minimumFontSize = max(6.0, baseFontSize * spec.minimumScale)
         var currentFontSize = max(minimumFontSize, baseFontSize * spec.preferredScale)
         var line = makeHeaderLine(
@@ -1442,6 +1521,9 @@ public final class ThumbnailProcessor: Sendable {
         paragraphStyle: NSParagraphStyle,
         fontSize: CGFloat
     ) -> CTLine {
+        signposter.emitEvent("makeHeaderLine")
+        let intervalState = signposter.beginInterval("makeHeaderLine")
+        defer { signposter.endInterval("makeHeaderLine", intervalState) }
         let font = CTFontCreateWithName("Helvetica-Bold" as CFString, fontSize, nil)
         let attributes: [NSAttributedString.Key: Any] = [
             .font: font,
@@ -1452,6 +1534,9 @@ public final class ThumbnailProcessor: Sendable {
     }
 
     private func textLayoutMetrics(for line: CTLine) -> TextLineMetrics {
+        signposter.emitEvent("textLayoutMetrics")
+        let intervalState = signposter.beginInterval("textLayoutMetrics")
+        defer { signposter.endInterval("textLayoutMetrics", intervalState) }
         var ascent: CGFloat = 0
         var descent: CGFloat = 0
         var leading: CGFloat = 0
@@ -1469,6 +1554,9 @@ public final class ThumbnailProcessor: Sendable {
     }
 
     private func mosaicOuterPadding(for layout: MosaicLayout) -> CGFloat {
+        signposter.emitEvent("mosaicOuterPadding")
+        let intervalState = signposter.beginInterval("mosaicOuterPadding")
+        defer { signposter.endInterval("mosaicOuterPadding", intervalState) }
         let smallestThumbnailDimension = layout.thumbnailSizes
             .map { min($0.width, $0.height) }
             .filter { $0 > 0 }
@@ -1479,6 +1567,9 @@ public final class ThumbnailProcessor: Sendable {
     
     /// Fallback method for adding timestamp to image
     private func addTimestampToBaseImage(image: CGImage, timestamp: String, size: CGSize, context: CGContext, rect: CGRect) -> CGImage {
+        signposter.emitEvent("addTimestampToBaseImage")
+        let intervalState = signposter.beginInterval("addTimestampToBaseImage")
+        defer { signposter.endInterval("addTimestampToBaseImage", intervalState) }
         // Start fresh with a properly configured context
         let scale = max(1.0, Double(image.width) / size.width)
         // Preserve source color space for accurate color representation
