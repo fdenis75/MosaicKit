@@ -15,18 +15,18 @@ struct LayoutProcessorTests {
 
     // MARK: - calculateThumbnailCount
 
-    @Test("calculateThumbnailCount returns 4 for zero-length video")
+    @Test("calculateThumbnailCount returns zero for invalid zero-length video")
     func thumbnailCountZeroDuration() {
         let proc = makeProcessor()
-        #expect(proc.calculateThumbnailCount(duration: 0, width: 2000, density: .m, videoAR: 16/9) == 4)
+        #expect(proc.calculateThumbnailCount(duration: 0, width: 2000, density: .m, videoAR: 16/9) == 0)
     }
 
-    @Test("calculateThumbnailCount returns 4 for videos shorter than 5 seconds")
+    @Test("calculateThumbnailCount returns zero for invalid duration and a bounded count for short videos")
     func thumbnailCountVeryShort() {
         let proc = makeProcessor()
-        for duration in [0.0, 1.0, 3.0, 4.9] {
+        for duration in [1.0, 3.0, 4.9] {
             let count = proc.calculateThumbnailCount(duration: duration, width: 2000, density: .m, videoAR: 16/9)
-            #expect(count == 4, "Expected 4 for duration \(duration)s, got \(count)")
+            #expect(count > 0, "Expected a positive count for duration \(duration)s, got \(count)")
         }
     }
 

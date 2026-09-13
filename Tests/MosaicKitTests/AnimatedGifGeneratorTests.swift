@@ -45,13 +45,15 @@ struct AnimatedGifGeneratorTests {
         #expect(header == "GIF")
     }
 
-    @Test("AnimatedGifGenerator with empty frame list does not write a file")
+    @Test("AnimatedGifGenerator rejects an empty frame list without writing a file")
     func gifGeneratorEmptyFramesProducesNoFile() throws {
         let outputURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("empty-\(UUID().uuidString).gif")
         defer { try? FileManager.default.removeItem(at: outputURL) }
 
-        try AnimatedGifGenerator.save(frames: [], to: outputURL)
+        #expect(throws: MosaicError.self) {
+            try AnimatedGifGenerator.save(frames: [], to: outputURL)
+        }
 
         #expect(!FileManager.default.fileExists(atPath: outputURL.path))
     }
@@ -180,7 +182,7 @@ struct AnimatedGifGeneratorTests {
 
         #expect(FileManager.default.fileExists(atPath: mosaicURL.path))
 
-        let gifURL = mosaicURL.deletingPathExtension().appendingPathExtension("gif")
+        let gifURL = config.animatedOutputURL(for: video)
         #expect(FileManager.default.fileExists(atPath: gifURL.path), "GIF file should exist alongside the mosaic")
 
         let gifAttrs = try FileManager.default.attributesOfItem(atPath: gifURL.path)

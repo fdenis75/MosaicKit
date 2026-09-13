@@ -60,7 +60,7 @@ jobs:
         run: swift build --build-tests -v
 
       - name: Test (including bundled media fixtures)
-        run: swift test --skip-build --parallel
+        run: swift test --skip-build
 
   # ── iOS Simulator ───────────────────────────────────────────────────────────
   ios:
