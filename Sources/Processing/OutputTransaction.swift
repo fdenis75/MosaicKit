@@ -35,17 +35,28 @@ internal struct OutputTransaction: Sendable {
                 throw MosaicError.processingFailed("Atomic output publication failed (errno \(errno))")
             }
         } else {
-            // link is atomic and fails if another attempt has already published the path.
-            let result = stagingURL.withUnsafeFileSystemRepresentation { source in
-                finalURL.withUnsafeFileSystemRepresentation { destination in
-                    Darwin.link(source, destination)
-                }
+            // O_CREAT | O_EXCL atomically claims the final path and fails if another
+            // attempt has already published it. Unlike link(2), this is supported by
+            // network filesystems such as SMB (link(2) returns ENOTSUP there).
+            // fopen's C11 "x" mode maps to O_EXCL; Darwin.open is unavailable to Swift
+            // (its variadic mode parameter can't be called), so this is the accessible
+            // equivalent for an exclusive create.
+            let file = finalURL.withUnsafeFileSystemRepresentation { destination in
+                Darwin.fopen(destination, "wx")
             }
-            guard result == 0 else {
+            guard let file else {
                 if errno == EEXIST { throw MosaicError.fileExists(finalURL) }
                 throw MosaicError.processingFailed("Output publication failed (errno \(errno))")
             }
-            discard()
+            Darwin.fclose(file)
+            let result = stagingURL.withUnsafeFileSystemRepresentation { source in
+                finalURL.withUnsafeFileSystemRepresentation { destination in
+                    Darwin.rename(source, destination)
+                }
+            }
+            guard result == 0 else {
+                throw MosaicError.processingFailed("Atomic output publication failed (errno \(errno))")
+            }
         }
     }
 }
