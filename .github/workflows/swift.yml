@@ -46,7 +46,7 @@ jobs:
         run: swift --version
 
       - name: Cache SwiftPM
-        uses: actions/cache@v4
+        uses: actions/cache@v5.1.0
         with:
           path: |
             .build
@@ -100,7 +100,7 @@ jobs:
         run: xcodebuild -list 2>&1 || true
 
       - name: Cache SwiftPM (iOS DerivedData)
-        uses: actions/cache@v4
+        uses: actions/cache@v5.1.0
         with:
           path: ~/Library/Caches/org.swift.swiftpm
           key: ios-spm-${{ hashFiles('Package.swift', 'Package.resolved') }}
