@@ -19,6 +19,10 @@ A high-performance Swift package for generating video mosaics with Metal-acceler
 - 🧭 **Explicit job lifecycle control** - Track work with stable job and attempt IDs, and cancel, pause, or retry individual operations
 - 🛡️ **Reliable outputs and validation** - Inputs/configurations are validated early and generated files are committed atomically
 
+## Unreleased (since 1.7.0)
+
+- **Mosaic frame extraction reverted to the batched pipeline** — the pull-based, bounded frame source introduced in 1.7.0 made mosaic generation 30–45 % slower, so extraction is back to batched `AVAssetImageGenerator` requests feeding pipelined 20-frame Metal command buffers (#28, #29). The 1.7.0 "pull-based bounded stream" bullet below no longer describes the current implementation.
+
 ## New in 1.7.0
 
 - **Explicit generation lifecycle** — `GenerationJobController` provides stable job and attempt IDs,
