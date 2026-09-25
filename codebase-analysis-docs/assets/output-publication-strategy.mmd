@@ -1,0 +1,16 @@
+%% MosaicKit – proposed destination-aware publication strategy (future feature; see CODEBASE_KNOWLEDGE.md F12 design note)
+graph TD
+  A[Resolve final URL] --> B{URLResourceValues}
+  B -->|isUbiquitousItem| C[Stage in local temp dir]
+  C --> C2[NSFileCoordinator write .forReplacing → replaceItemAt / moveItem]
+  B -->|volumeIsLocal == false| D[Encode into local temp dir]
+  D --> D2[Sequential copy → hidden staging in destination dir]
+  D2 --> D3{overwrite?}
+  D3 -->|yes| D4[rename - server-side atomic]
+  D3 -->|no| D5[exclusive claim + rename; delete placeholder on failure; documented non-atomic]
+  B -->|local volume| E[Stage in destination dir]
+  E --> E2{overwrite?}
+  E2 -->|yes| E3[rename / replaceItemAt]
+  E2 -->|no| E4{volumeSupportsExclusiveRenaming}
+  E4 -->|yes| E5[renamex_np RENAME_EXCL - atomic, no placeholder]
+  E4 -->|no| E6[link fallback or placeholder path]
