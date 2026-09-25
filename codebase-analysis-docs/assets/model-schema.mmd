@@ -1,0 +1,21 @@
+%% MosaicKit – Codable model graph (the persisted "schema"); enum-typed fields omitted. See CODEBASE_KNOWLEDGE.md §5.3
+classDiagram
+  MosaicConfiguration --> DensityConfig
+  MosaicConfiguration --> LayoutConfiguration
+  MosaicConfiguration --> OverlayConfiguration
+  MosaicConfiguration --> MosaicColor : backgroundColor
+  LayoutConfiguration --> VisualSettings
+  VisualSettings --> ShadowSettings
+  OverlayConfiguration --> FrameLabelConfig
+  OverlayConfiguration --> HeaderConfig
+  OverlayConfiguration --> WatermarkConfig
+  OverlayConfiguration --> ColorDNAConfig
+  HeaderConfig --> MetadataField
+  FrameLabelConfig --> MosaicColor
+  PreviewConfiguration --> DensityConfig
+  PreviewConfiguration --> FFmpegEncodingOptions
+  VideoSource ..> VideoInput : inspect()
+  VideoInput --> VideoMetadata
+  MosaicLayout --> Position
+  GenerationJobSnapshot --> GenerationJobID
+  GenerationJobSnapshot --> GenerationAttemptID

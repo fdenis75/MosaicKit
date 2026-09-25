@@ -4,9 +4,9 @@
 > another engineer or LLM can use to implement features, fix bugs, and refactor safely without
 > first re-reading the whole codebase.
 >
-> **Build status of this document:** Phases 1–4 of 6 complete (Initial Context Scan, System
-> Architecture, Feature-by-Feature Analysis, Things You Must Know). Sections for Phases 5–6 are
-> stubbed and will be filled in by later passes.
+> **Build status of this document:** Phases 1–5 of 6 complete (Initial Context Scan, System
+> Architecture, Feature-by-Feature Analysis, Things You Must Know, Technical Reference). Phase 6
+> (final assembly) remains.
 >
 > **Snapshot:** branch `claude/codebase-analysis-docs-ppz2yf`, based on `main` @ `8f0c82f`
 > ("Update swift.yml"). README advertises release line **1.7.0**.
@@ -53,7 +53,8 @@
 4. [Part 4 — Things You Must Know Before Changing Code (Phase 4)](#part-4--things-you-must-know-before-changing-code-phase-4)
    - [4.1 Rules card](#41-the-rules-card-read-this-first) · [4.2 Issue register](#42-verified-issue-register) · [4.3 Performance](#43-performance-hotspots--budgets) · [4.4 Security](#44-security-implications) · [4.5 Business rules](#45-hard-coded-business-rules--constants)
    - [4.6 Design decisions](#46-non-obvious-design-decisions--likely-rationale) · [4.7 Tricky code](#47-tricky-code-explained) · [4.8 Checklists](#48-change-checklists) · [4.9 iOS/macOS 27 roadmap](#49-platform-roadmap-ios--macos-27-apis-relevant-to-mosaickit) · [4.10 Wrap-up](#410-phase-4-wrap-up)
-5. [Part 5 — Technical Reference & Glossary (Phase 5, pending)](#part-5--technical-reference--glossary-phase-5-pending)
+5. [Part 5 — Technical Reference & Glossary (Phase 5)](#part-5--technical-reference--glossary-phase-5)
+   - [5.1 Glossary](#51-glossary) · [5.2 Public API](#52-public-api-reference) · [5.3 Model schema](#53-model-relationship-diagram-the-persisted-schema) · [5.4 Status reference](#54-progress--status-reference) · [5.5 Error catalog](#55-error-catalog) · [5.6 Cookbook](#56-usage-cookbook) · [5.7 Output naming](#57-output-artifact-naming-reference) · [5.8 Docs map](#58-documentation-map) · [5.9 Wrap-up](#59-phase-5-wrap-up)
 6. [Appendix A — File Index](#appendix-a--file-index)
 7. [Appendix B — Assumptions](#appendix-b--assumptions)
 8. [Appendix C — State Block](#appendix-c--state-block)
@@ -1902,10 +1903,420 @@ def dynamic(n,W,ar):
 </details>
 
 
-## Part 5 — Technical Reference & Glossary (Phase 5, pending)
+## Part 5 — Technical Reference & Glossary (Phase 5)
 
-_To be filled: glossary, key type/function reference, model relationship (ER-style) diagram,
-API examples._
+> Quick-lookup reference: terms, every public type, the model "schema" (there is no database;
+> the persisted schema is the `Codable` model graph), status and error catalogs, and
+> copy-pasteable usage. Defaults are the values produced by the primary initializers unless
+> noted otherwise.
+
+### 5.1 Glossary
+
+| Term | Meaning in MosaicKit | Where |
+|---|---|---|
+| **Mosaic / contact sheet** | One still image containing a grid of frames sampled across a video | F3 |
+| **Preview / highlight reel** | A short video stitched from evenly distributed clips ("extracts") of the source | F8 |
+| **Extract / clip** | One source time range inserted into a preview composition | `PreviewGenerationLogic` |
+| **Density** | Named multiplier (`XXL` 0.25 … `M` 1.0 … `XXS` 4.0) that scales frame count (mosaic) and clip count (preview) | `DensityConfig` |
+| **Layout type** | Frame-arrangement algorithm: `custom` (three-zone), `classic`, `auto`, `dynamic`, `iphone` | `LayoutType`, `LayoutProcessor` |
+| **Three-zone layout** | The `custom` algorithm: rows of small cells on top and bottom, larger centered cells in the middle | `calculateCustomLayout` |
+| **Aspect ratio (target)** | Requested mosaic shape (`16:9`, `4:3`, `1:1`, `21:9`, `9:16`). The generator re-normalizes it to the nearest preset after layout | `AspectRatio` |
+| **Cell / thumbnail** | One frame's slot in the layout (`positions[i]`, `thumbnailSizes[i]`) | `MosaicLayout` |
+| **Visual treatment** | Rounded corners (8 %) + vignette applied to every frame before compositing | `addTimestampToImage` |
+| **Frame label** | Timestamp or "Frame N" drawn on a frame | `FrameLabelConfig` |
+| **Metadata header** | Band above the grid with title, duration, size, codec, … | `HeaderConfig`, `createMetadataHeader` |
+| **Color DNA** | Strip where each column is the average color of one frame ("movie barcode") | `ColorDNAConfig`, `OverlayProcessor` |
+| **Smart background** | Blurred gradient built from dominant colors of the first frames | `processImagesToMTLTexture` |
+| **Animated export** | GIF / HEICS / animated WebP made from the mosaic's frame times | `GifCreationMode`, `AnimatedGifGenerator` |
+| **Configuration hash** | `"<width>_<density>_<W-H>_<layout>"`, the default mosaic sub-folder and filename suffix | `MosaicConfiguration.configurationHash` |
+| **Skip-if-exists** | With `overwrite == false`, return the existing output URL without generating | generators |
+| **Staging file / publication** | Hidden `.mosaickit-<UUID>.<ext>` written first, then renamed onto the final path | `OutputTransaction` |
+| **Placeholder claim** | Zero-byte final file created with `fopen("wx")` before the rename (no-overwrite path) | `OutputTransaction.commit` |
+| **Export mode** | Preview encoder: `.native` (AVAssetExportSession), `.sjs` (SJSAssetExportSession / AVAssetWriter), `.ffmpeg` (passthrough + external ffmpeg) | `PreviewExportMode` |
+| **Passthrough** | Export without re-encoding. It cannot apply a video composition or audio mix | presets, ffmpeg stage 1 |
+| **Effective export preset** | `exportPresetName ?? format.exportPreset(quality:)` | `PreviewConfiguration.effectiveExportPreset` |
+| **Export description** | Mode-agnostic "what will this export produce" summary for UIs | `PreviewExportDescription` |
+| **Stall** | No export progress for 120 s (macOS) / 60 s (iOS). Triggers cancel and `exportStalled` | exporter watchdogs |
+| **Foreground gate** | iOS-only wait for the app to return to the foreground before (re)trying an export | `AppLifecycleMonitor`, coordinator |
+| **Tracked task** | Unstructured `Task` stored in a dictionary so `cancel(for:)` can reach it | generators, coordinators |
+| **Attempt** | One execution of a job. Retries get a new attempt ID | `GenerationAttemptID` |
+| **Batch epoch** | Counter bumped by `cancelAllGenerations()` so running batch loops stop dequeuing | coordinators |
+| **Cancellation token** | Mutex-backed flag the preview pipeline polls; bridged from Task cancellation | `CancellationToken` |
+| **Terminal latch** | Drops progress events that arrive after completed/failed/cancelled | `PreviewProgressDelivery` |
+| **Barrier command buffer** | Empty Metal command buffer awaited to prove all earlier GPU work finished | `synchronizeGPU` |
+| **Decode quality scale** | Multiplier on the decoded frame size relative to the cell size (1…4, default 1) | `ThumbnailProcessor.init` |
+| **Suite mode** | `MOSAICKIT_SUITE_MODE` = `none` / `single` / `folder`; gates media-dependent tests | tests, CI |
+
+### 5.2 Public API reference
+
+#### 5.2.1 Entry points (actors & free functions)
+
+| Symbol | Kind | Key members (all `async` unless noted) |
+|---|---|---|
+| `MetalMosaicGenerator` | `actor`, `MosaicGeneratorProtocol` | `init(layoutProcessor: LayoutProcessor = LayoutProcessor()) throws` (throws `MetalProcessorError` without Metal) · `generate(for:config:forIphone:) throws -> URL` · `generateMosaicImage(for:config:forIphone:) throws -> CGImage` · `generateallcombinations(for:config:) throws -> [URL]` · `cancel(for:)` · `cancelAll()` · `setProgressHandler(for:handler:)` (one-shot per generation) · `getPerformanceMetrics() -> [String: Any]` |
+| `MosaicGeneratorProtocol` | `protocol …: Actor` | Same seven requirements as above (`forIphone` has no default at the protocol level) |
+| `MosaicGeneratorCoordinator<Generator: MosaicGeneratorProtocol>` | generic `actor` | `init(mosaicGenerator:concurrencyLimit: = 0)` · `setConcurrencyLimit(_:)` · `generateMosaic(for:config:forIphone:progressHandler:) throws -> MosaicGenerationResult` · `generateMosaicImage(…) throws -> MosaicGenerationImage` · `generateMosaicsforbatch(videos:config:forIphone:progressHandler:) throws -> [MosaicGenerationResult]` · `generateMosaicsForFiles(_:config:forIphone:progressHandler:) throws -> [MosaicGenerationResult]` · `cancelGeneration(for:)` · `cancelAllGenerations()`. Public stored: `logger`, `signposter`, `mosaicGenerator`, `concurrencyLimit`, `activeTasks` |
+| `createDefaultMosaicCoordinator(concurrencyLimit: = 0) throws` / `createMosaicCoordinatorWithMetal(…)` | free funcs | Return `MosaicGeneratorCoordinator<MetalMosaicGenerator>` |
+| `PreviewVideoGenerator` | `actor` | `init()` · `generate(for:config:progressHandler:) throws -> URL` · `generateComposition(for:config:progressHandler:) throws -> AVPlayerItem` · `setProgressHandler(for:handler:)` · `cancel(for:)` · `cancelAll()` |
+| `PreviewGeneratorCoordinator` | `actor` | `init(concurrencyLimit: = 0)` · `generatePreview(for:config:progressHandler:) throws -> URL` · `generatePreviewComposition(…) throws -> AVPlayerItem` · `generatePreviewsForBatch(videos:config:progressHandler:) throws -> [PreviewGenerationResult]` · `generatePreviewCompositionsForBatch(…) throws -> [PreviewCompositionResult]` · `cancelGeneration(for:)` · `cancelAllGenerations()` · `setConcurrencyLimit(_:)` · `getConcurrencyLimit()` · `getActiveGenerationCount()` · `getPerformanceMetrics()` |
+| `GenerationJobController` | `actor` | `submit(operation:) -> GenerationJobID` (sync) · `value(for:) throws -> URL` (starts the work) · `snapshot(for:) -> GenerationJobSnapshot?` · `cancel(_:)` · `cancelAll()` · `pause(_:)` (queued only) · `retry(_:)` (paused / failed / cancelled) |
+| `AppLifecycleMonitor` | `actor`, singleton `.shared` | `isInBackground` · `waitUntilForeground()` (cancellation-aware) |
+| `scanVideos(in:recursive:) -> [VideoInput]` | free func (non-throwing, legacy) | See F1 |
+| `discoverVideoSources(in:recursive:) throws -> [VideoSource]` | free func | No metadata I/O |
+| `discoverVideos(in:recursive:metadataConcurrency: = 2) throws -> [VideoInput]` | free func | Inspects up to 1…64 files at a time. The first failure aborts the whole scan |
+| `MosaicKitWebP.register()` | static func (product `MosaicKitWebP`) | Installs `DefaultMosaicKitWebPEncoder` into `MosaicKitWebPSupport.encoder` |
+
+#### 5.2.2 Lower-level public components (usable directly, less stable)
+
+| Symbol | Notes |
+|---|---|
+| `LayoutProcessor` (`final class`) | `init(aspectRatio:)`, `mosaicAspectRatio`, `updateAspectRatio(_:)`, `calculateLayout(originalAspectRatio:mosaicAspectRatio:thumbnailCount:mosaicWidth:density:layoutType:) -> MosaicLayout`, `calculateThumbnailCount(duration:width:density:layoutType:videoAR:) -> Int` |
+| `ThumbnailProcessor` (`final class: Sendable`) | `init(config:decodeQualityScale:)`, `extractThumbnails(…)`, `extractFramesForGif(…)`, `extractFramesStream(…)`, `extractThumbnailsUI(…)`, `generateMosaic(…)` (CG fallback), `createMetadataHeader(for:width:height:thumbnailHeight:backgroundColor:forIphone:headerConfig:swatchColors:)`, legacy `createMetadataHeader(metadata:…)` |
+| `MetalImageProcessor` (`final class: @unchecked Sendable`) | `init() throws`, texture helpers (`createTexture(from: CVPixelBuffer / CGImage)`, `createCGImage(from:)`, `scaleTexture`, `compositeTexture`, `createFilledTexture`, `addBorder`), `generateMosaic(from:…)` (array), `generateMosaicStream(stream:…)`, `getPerformanceMetrics()` |
+| `OverlayProcessor` (`enum`) | `averageColor(of:)`, `applyColorDNA(to:frameColors:config:) -> CGImage?`, `applyWatermark(to:config:) -> CGImage?` |
+| `AnimatedGifGenerator` (`struct`) | `static save(frames:to:format: = .gif, frameDelay: = 0.1, overwrite: = true) throws` |
+| `MosaicKitWebPEncoding` / `MosaicKitWebPSupport` | Injection point for WebP encoding (`encodeStillWebP`, `encodeAnimatedWebP`) |
+
+#### 5.2.3 Configuration models
+
+**`MosaicConfiguration`** (struct, `Codable`, `Sendable`). Main init defaults:
+
+| Property | Type | Default | Notes |
+|---|---|---|---|
+| `width` | `Int` | 5120 | 1…16384 enforced in generation |
+| `density` | `DensityConfig` | `.m` | |
+| `format` | `OutputFormat` | `.heif` | `.jpeg` `.png` `.heif` `.webp` |
+| `layout` | `LayoutConfiguration` | `.default` (16:9, spacing 4, `.custom`, border off, shadow on) | |
+| `includeMetadata` | `Bool` | `true` | header on/off |
+| `useAccurateTimestamps` | `Bool` | `false` | 0 vs ±1 s decode tolerance |
+| `compressionQuality` | `Double` | 0.4 | 0…1; JPEG/HEIF/WebP still |
+| `outputdirectory` | `URL?` | `nil` → video's folder | |
+| `fullPathInName` | `Bool` | `false` | |
+| `useMovieColorsForBg` / `backgroundColor` | `Bool` / `MosaicColor` | `true` / gray 0.5 | |
+| `overlay` | `OverlayConfiguration` | `.default` | |
+| `gifMode` / `gifSize` / `animatedFormat` / `gifFps` | enums / `Double` | `.disabled` / `.nochange` / `.webp` / 10 | see F6 |
+| `overwrite` | `Bool` | `false` | skip-if-exists |
+| `createOutputSubdirectory` | `Bool` | `true` | |
+| `outputDirectoryTemplate` / `filenameTemplate` | `String?` | `nil` | token lists in F12 |
+
+Computed and methods: `configurationHash`, `validate()`, `generateOutputDirectory(rootDirectory:videoInput:referenceDate:)`, `generateFilename(originalFilename:videoInput:)`, `animatedOutputURL(for:referenceDate:)`, `updateAspectRatio(new:)`, `static default`.
+
+Other initializers and their deviations from the main init:
+- the overlay init without `gifMode`: `gifSize .small`;
+- the density-only init: width 2500, q 0.3, movie-color background off;
+- the deprecated `forIphone:` init: `animatedFormat .gif`;
+- `.default`: width 4000, density `.xl`.
+
+**`PreviewConfiguration`** (struct, `Codable`, `Sendable`, `Hashable`):
+
+| Property | Type | Default (`init`) | Notes |
+|---|---|---|---|
+| `targetDuration` | `TimeInterval` | 60 | `standardDurations` = 30…300 s in 30 s steps |
+| `minimumExtractDuration` / `maximumPlaybackSpeed` | `TimeInterval?` / `Double?` | `nil` / `nil` | enable speed-up to honour a minimum clip length |
+| `density` | `DensityConfig` | `.m` | |
+| `format` | `VideoFormat` | `.mp4` | `.mp4` `.mov` `.m4v` |
+| `includeAudio` | `Bool` | `true` | |
+| `outputDirectory` / `fullPathInName` | `URL?` / `Bool` | `nil` / `false` | |
+| `compressionQuality` | `Double` | 0.8 (clamped 0…1) | |
+| `exportMode` | `PreviewExportMode` | `.native` | `useNativeExport` is a deprecated alias |
+| `exportPresetName` | `nativeExportPreset?` | **`.AVAssetExportPresetHEVC1920x1080`** (decoded configs without the key: `nil`) | |
+| `sJSExportPresetName` | `SjSExportPreset?` | `.hevc` (also on decode) | |
+| `exportMaxResolution` | `ExportMaxResolution?` (stored as a raw string) | `"1080p"` | README says 4K (I-13) |
+| `ffmpegBinaryPath` / `ffmpegTempFolder` / `ffmpegEncodingOptions` | `String?` / `URL?` / `FFmpegEncodingOptions?` | `nil` | |
+| `overwrite` | `Bool` | `false` | |
+| `enableAppLifecycleMonitor` / `enableExportRetry` | `Bool` | `true` / `true` | set both `false` for daemons / CLIs |
+| `showTimestampOverlay` | `Bool` | `false` | native / SJS only |
+| `outputDirectoryTemplate` / `filenameTemplate` | `String?` | `nil` | |
+
+Computed and methods: `effectiveExportPreset`, `exportDescription`, `baseExtractCount`, `extractCount(forVideoDuration:)`, `calculateExtractParameters(forVideoDuration:)`, `generateOutputDirectory(for:)`, `generateFilename(for:)`, `validate()`, statics `exterEtractCount(density:)`, `extractCountExt(…)`, `durationLabel(for:)`.
+
+**`FFmpegEncodingOptions`**:
+
+| Property | Default |
+|---|---|
+| `videoCodec` | `.hevc` (libx265); also `.h264`, `.copy`, `.hevcVideoToolbox`, `.h264VideoToolbox` |
+| `crf` | 22 |
+| `videoBitrate` | `nil` |
+| `speedPreset` | `.medium` |
+| `maxResolution` | `._1080p` |
+| `audioCodec` | `.aac` |
+| `audioBitrate` | `"128k"` |
+| `extraArgs` | `[]` |
+
+Factories: `from(quality:format:)` and `forPreview(quality:)` (see F9).
+
+**Other enums** (raw values are persisted):
+
+| Enum | Cases (raw values) |
+|---|---|
+| `DensityConfig` (struct presets) | `xxl`(0.25, ×0.125) `xl`(0.5, ×0.25) `l`(0.75, ×0.5) `m`(1.0, ×1.0) `s`(2.0, ×2.0) `xs`(3.0, ×4.0) `xxs`(4.0, ×8.0). Format: factor, extractsMultiplier |
+| `LayoutType` | `auto` `custom` `dynamic` `classic` `iphone` |
+| `AspectRatio` | `16:9` `4:3` `1:1` `21:9` `9:16` |
+| `BorderColor` | `white` `black` `gray` |
+| `OutputFormat` | `jpeg`(jpg) `png` `heif`(heic) `webp` |
+| `AnimatedFormat` | `gif` `heic`(heics) `webp` |
+| `GifCreationMode` | `disabled` `withMosaic` `gifOnly` |
+| `GifSize` | `nochange` `large`(≤ 1280×720) `small`(≤ 960×540) |
+| `FrameLabelFormat` / `FrameLabelPosition` / `FrameLabelBackground` | `timestamp` `frameIndex` `none` / `topLeft` `topRight` `bottomLeft` `bottomRight` `center` / `pill` `none` `fullWidth` |
+| `WatermarkPosition` | `topLeft` `topRight` `bottomLeft` `bottomRight` `center` |
+| `ColorDNAPosition` / `ColorDNAStyle` | `top` `bottom` / `barcode` `gradient` |
+| `PreviewExportMode` | `native` `sjs` `ffmpeg` |
+| `VideoFormat` | `mp4` `mov` `m4v` |
+| `nativeExportPreset` | `AVAssetExportPresetPassthrough` `…HEVCHighestQuality` `…HEVC1920x1080` `…HighestQuality` `…MediumQuality` `…LowQuality` `…960x540` |
+| `SjSExportPreset` | `hevc`("HEVC") `h264_HighAutoLevel`("HEVC High" ⚠ H.264) `h264_lowAutoLevel`("H264 LOW") |
+| `ExportMaxResolution` | `1080p` `4K` `720p` `SD`(640×480) |
+| `FFmpegEncodingOptions.SpeedPreset` | `ultrafast` … `veryslow` (→ VideoToolbox `-q:v` 40…90) |
+
+#### 5.2.4 Input, output, progress & job types
+
+| Type | Fields |
+|---|---|
+| `VideoSource` | `url`, `title?`, `postID?`. `inspect(id:)`, `inspect(preserving:)` |
+| `VideoInput` | `id: UUID`, `url`, `title` (defaults to the filename), `duration?`, `width?`, `height?`, `frameRate?`, `fileSize?`, `metadata: VideoMetadata`, `postID?`. Computed `resolution`, `aspectRatio`. `validate()`, `withID(_:)` |
+| `VideoMetadata` | `codec?`, `bitrate?` (bits/s, computed from file size), `custom: [String: String]` |
+| `MosaicLayout` / `Position` | `rows`, `cols`, `thumbnailSize`, `positions: [Position(x, y)]`, `thumbCount`, `thumbnailSizes`, `mosaicSize`. `description()`, `drawMosaicASCIIArt()` |
+| `MosaicGenerationProgress` | `video`, `progress` (0…1), `status: MosaicGenerationStatus`, `outputURL?`, `error?` |
+| `MosaicGenerationResult` / `MosaicGenerationImage` | `video`, `outputURL?` / `image?`, `error?`, `isSuccess` |
+| `PreviewGenerationProgress` | `video`, `progress`, `status: PreviewGenerationStatus`, `outputURL?`, `error?`, `message?`. Statics `.queued/.completed/.failed/.cancelled(for:)` |
+| `PreviewGenerationResult` / `PreviewCompositionResult` | `video`, `outputURL?` / `playerItem?`, `error?`, `isSuccess`, statics `.success/.failure` |
+| `PreviewExportDescription` | `exportMode`, `presetName`, `videoCodec?`, `videoProfile?`, `videoLevel?`, `maxResolution?`, `resolutionDescription`, `audioCodec?`, `audioBitrate?`, `additionalDetail?` |
+| `GenerationJobID` / `GenerationAttemptID` | `rawValue: UUID` |
+| `GenerationJobState` | `queued` `running` `pausing`* `paused` `retryScheduled`* `cancelling` `succeeded` `failed` `cancelled` (\* never entered) |
+| `GenerationJobSnapshot` | `id`, `attempt`, `state`, `progress` (0 or 1), `outputURL?`, `errorDescription?` |
+
+### 5.3 Model relationship diagram (the persisted "schema")
+
+```mermaid
+classDiagram
+  class MosaicConfiguration
+  class PreviewConfiguration
+  class DensityConfig
+  class LayoutConfiguration
+  class VisualSettings
+  class ShadowSettings
+  class OverlayConfiguration
+  class FrameLabelConfig
+  class HeaderConfig
+  class MetadataField
+  class WatermarkConfig
+  class ColorDNAConfig
+  class MosaicColor
+  class FFmpegEncodingOptions
+  class VideoSource
+  class VideoInput
+  class VideoMetadata
+  class MosaicLayout
+  class Position
+  MosaicConfiguration --> DensityConfig
+  MosaicConfiguration --> LayoutConfiguration
+  MosaicConfiguration --> OverlayConfiguration
+  MosaicConfiguration --> MosaicColor : backgroundColor
+  LayoutConfiguration --> VisualSettings
+  VisualSettings --> ShadowSettings
+  OverlayConfiguration --> FrameLabelConfig
+  OverlayConfiguration --> HeaderConfig
+  OverlayConfiguration --> WatermarkConfig
+  OverlayConfiguration --> ColorDNAConfig
+  HeaderConfig --> MetadataField
+  FrameLabelConfig --> MosaicColor
+  PreviewConfiguration --> DensityConfig
+  PreviewConfiguration --> FFmpegEncodingOptions
+  VideoSource ..> VideoInput : inspect()
+  VideoInput --> VideoMetadata
+  MosaicLayout --> Position
+```
+
+Enum-typed fields are omitted for readability (see §5.2.3). The source is
+`codebase-analysis-docs/assets/model-schema.mmd`.
+
+**Codable behavior per type** (what breaks persisted configs):
+
+| Type | Decoder | Missing key → | Notes |
+|---|---|---|---|
+| `MosaicConfiguration` | custom | **throws** for everything except `outputdirectory`, `createOutputSubdirectory` (→ `true`), and the two templates | Rule 2 in §4.1 |
+| `PreviewConfiguration` | custom, tolerant | defaults (`exportMode` falls back to legacy `useNativeExport`, then `.native`; `sJSExportPresetName` → `.hevc`; resolution → `"1080p"`; flags → defaults) | Required: `targetDuration`, `density`, `format`, `includeAudio`, `fullPathInName`, `compressionQuality` |
+| `DensityConfig` | custom | only `factor` is required; the other fields come from the matching preset or `"Custom"` | Validates on decode |
+| `LayoutConfiguration`, `VisualSettings`, `ShadowSettings`, `FrameLabelConfig`, `HeaderConfig`, `WatermarkConfig`, `ColorDNAConfig`, `OverlayConfiguration`, `FFmpegEncodingOptions`, `VideoInput`, `VideoSource`, `VideoMetadata`, `MosaicColor` | synthesized | non-optional keys are **required**; optionals may be absent | Synthesized decoding **bypasses init clamps** (`WatermarkConfig` opacity/scale, `ColorDNAConfig` min height 8) |
+| `HeaderHeight`, `MetadataField`, `WatermarkContent` | custom, tagged by `"type"` | unknown `HeaderHeight` type → `.auto`; unknown `MetadataField`/`WatermarkContent` type → `.custom` / `.text` | see JSON below |
+| `MosaicLayout` | custom | required | positions encode as `{x, y}` |
+| String-raw enums | synthesized | **unknown raw value throws** | never rename raw values |
+
+**Example JSON** (JSONEncoder; `URL`s encode as strings, and `CGSize` encodes as `[w, h]`):
+
+```json
+{
+  "width": 5120,
+  "density": { "factor": 1, "name": "M", "extractsMultiplier": 1, "thumbnailCountDescription": "high" },
+  "format": "heif",
+  "layout": { "aspectRatio": "16:9", "spacing": 4, "layoutType": "custom",
+              "visual": { "addBorder": false, "borderColor": "white", "borderWidth": 1, "addShadow": true,
+                          "shadowSettings": { "opacity": 0.5, "radius": 4, "offset": [0, -2] } } },
+  "includeMetadata": true, "useAccurateTimestamps": false, "compressionQuality": 0.4,
+  "fullPathInName": false, "useMovieColorsForBg": true,
+  "backgroundColor": { "red": 0.5, "green": 0.5, "blue": 0.5, "alpha": 1 },
+  "overlay": {
+    "frameLabel": { "show": true, "format": "timestamp", "position": "bottomRight",
+                    "textColor": { "red": 1, "green": 1, "blue": 1, "alpha": 1 }, "backgroundStyle": "pill" },
+    "header": { "fields": [ { "type": "title" }, { "type": "colorPalette", "swatchCount": 8 },
+                            { "type": "custom", "label": "Director", "value": "Jane Doe" } ],
+                "height": { "type": "fixed", "value": 80 } },
+    "watermark": { "content": { "type": "text", "text": "© Studio" }, "position": "bottomRight",
+                   "opacity": 0.35, "scale": 0.12 },
+    "colorDNA": { "show": false, "height": 24, "position": "bottom", "style": "barcode" }
+  },
+  "gifMode": "disabled", "gifSize": "nochange", "animatedFormat": "webp", "gifFps": 10,
+  "overwrite": false, "createOutputSubdirectory": true
+}
+```
+
+### 5.4 Progress & status reference
+
+| Status | Emitted by | Progress value | Notes |
+|---|---|---|---|
+| `MosaicGenerationStatus.queued` | coordinator (single & batch) | 0 | |
+| `.inProgress` | coordinator (single) | 0 | |
+| `.countingThumbnails`, `.computingLayout` | generator | 0 | |
+| `.extractingThumbnails` | **never** (only inside commented-out code) | — | |
+| `.creatingMosaic` | generator (GPU callback) | 0.745 → ~0.999 | |
+| `.savingMosaic` | generator | 0.9, then 0.999 | |
+| `.completed` | coordinator; `generateMosaicImage` | 1.0 | `generate` itself doesn't emit `.completed` |
+| `.failed` / `.cancelled` | coordinator | 0 | `.cancelled` for `CancellationError`, `MetalProcessorError.cancelled`, `VideoError.cancelled` |
+| `PreviewGenerationStatus.queued` | coordinator batch; native `.pending`/`.waiting` states | 0 | |
+| `.analyzing` | logic | 0 → 0.05 | |
+| `.extracting`, `.saving` | **never** | — | declared for UI completeness |
+| `.composing` | logic | 0.05 → 0.10 (composition path: 0.20) | |
+| `.encoding` | exporters | 0.10 → 1.0 (ffmpeg: passthrough 0.10–0.30, transcode 0.30–1.0) | |
+| `.completed` / `.failed` / `.cancelled` | generator / coordinator | 1 / – / – | the terminal latch drops later events |
+
+`displayLabel` strings: "Queued", "Analyzing video...", "Extracting segments...",
+"Composing preview...", "Encoding video...", "Saving...", "Completed", "Failed",
+"Cancelled".
+
+### 5.5 Error catalog
+
+| Error | Case → `errorDescription` | Thrown when |
+|---|---|---|
+| `MosaicError` | `invalidVideo(msg)` → "Invalid video: msg" | inspection failed; duration < 5 s ("video too short"); invalid dimensions |
+| | `invalidConfiguration(msg)` → "Invalid mosaic configuration: msg" | `validate()`, layout/texture limits, WebP timing |
+| | `processingFailed(msg)` → "Processing failed: msg" | frame extraction failed; missing/duplicate frames; "Empty mosaic layout"; missing animation frames; empty encoder output; publish errno |
+| | `saveFailed(url, err)` → "Failed to save mosaic image at …" | `CGImageDestination` creation/finalize failed |
+| | `fileExists(url)` → "File already exists at …" | no-overwrite publish lost the race |
+| | `layoutCreationFailed`, `imageGenerationFailed`, `invalidDimensions`, `generationFailed`, `contextCreationFailed`, `imageCreationFailed`, `metalNotSupported` | declared; rarely or never thrown |
+| `MetalProcessorError` (not `LocalizedError`) | `deviceNotAvailable`, `commandQueueCreationFailed`, `libraryCreationFailed`, `textureCacheCreationFailed`, `functionNotFound`, `pipelineCreationFailed`, `textureCreationFailed`, `contextCreationFailed`, `commandBufferCreationFailed`, `dataProviderCreationFailed`, `cgImageCreationFailed`, `cancelled`, `commandBufferExecutionFailed(context:underlying:)` | generator `init`; GPU work |
+| `MosaicKitWebPError` | `encoderNotRegistered` → "WebP output requires linking the MosaicKitWebP product and calling MosaicKitWebP.register() at startup." | validation / save without registration |
+| `PreviewError` (`LocalizedError` with reason + suggestion) | `invalidConfiguration(msg)` | `validate()`, ffmpeg path missing, invalid timing / geometry |
+| | `videoLoadFailed(url, err)` | declared |
+| | `insufficientVideoDuration(required:actual:)` → "Video too short: requires at least Ns, but video is only Ms" | source shorter than count × extract duration |
+| | `noVideoTracks` | no video track |
+| | `compositionFailed(msg, err?)` | segment insertion/validation failed |
+| | `encodingFailed(msg, err?)` | exporter error; missing output file |
+| | `exportStalled(elapsedSeconds:)` → "Export stalled: no progress for N seconds" | watchdog; triggers coordinator retry |
+| | `ffmpegNotFound(path:)` | preflight |
+| | `ffmpegEncodingFailed(exitCode:output:)` → "FFmpeg exited with code N: <last 8 KB stderr>" | non-zero exit |
+| | `outputDirectoryCreationFailed(url, err)` | `prepareOutputURL` |
+| | `cancelled` → "Preview generation was cancelled" | token or task cancelled |
+| | `extractionFailed`, `saveFailed`, `audioProcessingFailed` | declared; rarely or never thrown |
+| `VideoError`, `LibraryError` | full `LocalizedError` implementations | **never thrown** (legacy) |
+| `DecodingError` | — | invalid persisted `DensityConfig` / enums / missing keys |
+| `CancellationError` | — | cooperative cancellation; batch cancelled via epoch |
+
+### 5.6 Usage cookbook
+
+These snippets are validated against the current signatures in `Sources/` (they match
+`Examples/*.swift`).
+
+```swift
+import MosaicKit
+
+// 1) One mosaic, default look
+let video = try await VideoInput(from: url)                 // throws on unreadable input
+var cfg = MosaicConfiguration(width: 5120, density: .m, format: .heif)
+cfg.outputdirectory = outDir
+let mosaicURL = try await MetalMosaicGenerator().generate(for: video, config: cfg)
+
+// 2) Annotated mosaic + animated WebP teaser (WebP needs the MosaicKitWebP product)
+MosaicKitWebP.register()
+cfg.overlay = OverlayConfiguration(
+    frameLabel: FrameLabelConfig(format: .timestamp, position: .bottomRight),
+    header: HeaderConfig(fields: [.title, .duration, .resolution, .codec]),
+    watermark: WatermarkConfig(content: .text("© Studio"), position: .bottomRight),
+    colorDNA: ColorDNAConfig(show: true, style: .gradient))
+cfg.gifMode = .withMosaic; cfg.animatedFormat = .webp; cfg.gifSize = .small
+_ = try await MetalMosaicGenerator().generate(for: video, config: cfg)
+
+// 3) Library batch with progress, then cancel everything
+let inputs = try await discoverVideos(in: folder, recursive: true)
+let coordinator = try createDefaultMosaicCoordinator()      // 0 = auto concurrency
+let results = try await coordinator.generateMosaicsforbatch(videos: inputs, config: cfg) { p in
+    print(p.video.title, p.status, p.progress)
+}
+// elsewhere: await coordinator.cancelAllGenerations()      // batch call throws CancellationError
+
+// 4) Preview: instant playback, then file export
+let pcfg = PreviewConfiguration(targetDuration: 60, density: .m, includeAudio: true,
+                                outputDirectory: outDir)    // native HEVC 1920x1080 by default
+let item = try await PreviewVideoGenerator().generateComposition(for: video, config: pcfg)
+let previewURL = try await PreviewGeneratorCoordinator().generatePreview(for: video, config: pcfg) { p in
+    print(p.status.displayLabel, p.progress)
+}
+
+// 5) ffmpeg export (macOS) for a daemon/CLI
+var fcfg = PreviewConfiguration(exportMode: .ffmpeg, ffmpegBinaryPath: "/opt/homebrew/bin/ffmpeg",
+                                enableAppLifecycleMonitor: false, enableExportRetry: false)
+fcfg.ffmpegEncodingOptions = FFmpegEncodingOptions(videoCodec: .hevcVideoToolbox, crf: nil,
+                                                   speedPreset: .fast, maxResolution: ._1080p)
+
+// 6) Explicit job lifecycle for a persisted queue
+let jobs = GenerationJobController()
+let source = VideoSource(url: url)                         // Codable; no I/O
+let frozen = cfg                                            // capture a let: the operation is @Sendable
+let id = await jobs.submit { try await MetalMosaicGenerator().generate(for: try await source.inspect(), config: frozen) }
+let out = try await jobs.value(for: id)                    // starts the work
+```
+
+### 5.7 Output artifact naming reference
+
+| Artifact | Default path (no templates) | Example |
+|---|---|---|
+| Mosaic | `<outputdirectory or video folder>/<configurationHash>/<[postID_]name>_<configurationHash>.<ext>` | `…/5120_M_16-9_custom/holiday_5120_M_16-9_custom.heic` |
+| Mosaic (`createOutputSubdirectory = false`) | `<root>/<name>_<hash>.<ext>` | `…/holiday_5120_M_16-9_custom.heic` |
+| Animation | same directory: `"<gifSize> -<mosaic base name>.<gif|heics|webp>"` | `…/small -holiday_5120_M_16-9_custom.webp` |
+| Preview | `<outputDirectory or video folder>/_preview_<name>_<dur>_<density>_<fmt>_<audio>_<export>_<res>[_<timing>]_<yyyy-MM-dd_HH-mm-ss>_.<ext>` | `…/_preview_holiday_1m_M_mp4_audio_HEVC_High_nat_1080p_2026-09-25_20-15-00_.mp4` |
+| Preview (`fullPathInName`) | `<dir>/<sanitized path>_<name>_preview_<config>.<ext>` (no run timestamp, so skip-if-exists works) | |
+| Staging (transient) | `<final dir>/.mosaickit-<UUID>.<ext>` | |
+| ffmpeg intermediate (transient) | `<ffmpegTempFolder or $TMPDIR/MosaicKitFFmpeg/<UUID>>/<UUID>_passthrough.mov` | |
+
+### 5.8 Documentation map
+
+| Need | Go to |
+|---|---|
+| First use | `README.md` Quick Start; DocC `GettingStarted.md`, `QuickStart.md` |
+| Layout details | DocC `LayoutAlgorithms.md` + §F4 (with the `.dynamic`/`.auto` caveats, I-8/I-9) |
+| Architecture | §Part 2 (authoritative); DocC `Architecture.md` (accurate, but shows the array-based path) |
+| Performance | §4.3; DocC `PerformanceGuide.md` (benchmarks unverified) |
+| Preview export modes & stalls | §F8/F9; DocC `PreviewExporting.md` |
+| Background execution (iOS) | DocC `BackgroundProcessing.md`; §4.9 (resumable export) |
+| History / rationale | §4.6; `spec.md` (design intent, partly implemented) |
+| Don't use | `MosaicKit-DeepDive.md` (describes the removed dual-engine architecture) |
+
+### 5.9 Phase 5 wrap-up
+
+**Decisions / findings**
+- **Correction:** the preview init defaults are `exportPresetName = .AVAssetExportPresetHEVC1920x1080`
+  and `sJSExportPresetName = .hevc`. The exact-float quality mappings (I-5, I-6, I-7) therefore
+  only affect `nil` presets. I-5 matters for configs decoded without the key; I-6 and I-7 only
+  when a caller sets `nil` explicitly. Severities were downgraded, and §2.12, F9, and §4 were
+  corrected.
+- `PreviewConfiguration` decoding is tolerant, while `MosaicConfiguration` decoding is strict.
+  Synthesized decoders bypass init clamps. Unknown enum raw values throw.
+- **Unused status cases:** preview `.extracting` and `.saving`, and mosaic `.extractingThumbnails`.
+- The examples in `Examples/` match the current API.
+
+**Open questions (unchanged):** Q11, Q13, Q14, Q16, Q17 (see the state block).
+
+**Next step (Phase 6):** final assembly. Cross-check terminology and links, refresh the file
+index hashes if sources changed, add an executive summary, and do a final consistency pass.
+
 
 ---
 
@@ -1982,33 +2393,26 @@ non-existent `.xcodeproj`), `tasks/TASKS.md` (empty backlog).
 ## Appendix C — State Block
 
 ```
-INDEX_VERSION: 4 (Phases 1–4 complete)
-SNAPSHOT: main@8f0c82f → branch claude/codebase-analysis-docs-ppz2yf (source files unchanged; Appendix A hashes valid)
-RELATED PRs: #31 and #33 both fix the iOS CI scheme + iOS test compile (duplicates; both blocked on the 10-bit fixture, I-22); I-16 ffmpeg watchdog fix proposed on #32 (not opened)
+INDEX_VERSION: 5 (Phases 1–5 complete; Phase 6 = final assembly pending)
+SNAPSHOT: main@8f0c82f → branch claude/codebase-analysis-docs-ppz2yf (Sources/ unchanged on this branch; Appendix A hashes valid)
+RELATED PRs: #33 iOS CI (scheme + iOS test compile + 8-bit fixture), #34 ffmpeg watchdog (I-16); #31 closed as duplicate of #33
 
 FILE_MAP_SUMMARY: see Appendix A (49 files indexed; P0 = 8, P1 = 15)
 
-ISSUE REGISTER: §4.2 (I-1 … I-22). High: I-1, I-2. Medium: I-3 I-4 I-8 I-12 I-16 I-20 I-22 (I-5/I-6/I-7 downgraded in Phase 5).
+ISSUE REGISTER: §4.2 (I-1 … I-22). High: I-1, I-2. Medium: I-3 I-4 I-8 I-12 I-16 I-20 I-22. (I-5/I-6/I-7 downgraded in Phase 5)
 
 OPEN_QUESTIONS:
   Q11 Measure actor-serialization impact on MetalMosaicGenerator
-  Q13 Runtime checks: ffmpeg -pix_fmt p010le with libx265 (I-3); SJS writer vs renderSize (I-7)
+  Q13 Runtime checks: ffmpeg -pix_fmt p010le with libx265 (I-3)
   Q14 iCloud Drive behaviour with same-directory staging / placeholders
-  Q16 Which export configurations configureForResumableExport() accepts (composition, animationTool, audioMix, presets)
-  Q17 AVIF writability (still + sequence) on iOS 27 / macOS 27 via CGImageDestinationCopyTypeIdentifiers
-  (Answered in Phase 4: Q12 rotated sources = confirmed I-1; Q15 no pause primitive in either coordinator)
+  Q16 Which export configurations configureForResumableExport() accepts
+  Q17 AVIF writability (still + sequence) on iOS 27 / macOS 27
 
-KNOWN_RISKS: consolidated into the §4.2 issue register
+GLOSSARY: §5.1 (complete)
 
-GLOSSARY_DELTA (Phase 4):
-  ResumptionState / ResumptionFailureReason; directoryForTemporaryFiles; constant quality factor;
-  barrier command buffer; terminal latch (PreviewProgressDelivery); handler revision; batch epoch race closure
-
-NEXT_READ_QUEUE (Phase 5 – reference & glossary):
-  1 Sources/Processing/ProcessingError.swift#1-97#9896b38f (messages, recovery text)
-  2 Sources/Processing/Preview/PreviewError.swift#1-143#03e8936f
-  3 Sources/Models/PreviewGenerationProgress.swift#1-201#0318e5ee (status enum, labels)
-  4 Sources/Models/MosaicLayout.swift#1-171#d3f83de1
-  5 Sources/MosaicKit.docc/* (to cross-link articles)
-  6 Examples/*.swift (usage snippets to validate against current API)
+NEXT (Phase 6 – final assembly):
+  1 Executive summary at the top (1 screen)
+  2 Consistency pass: feature IDs, issue IDs, section cross-refs, anchors
+  3 Re-verify Appendix A hashes against main (after #33/#34 merge if applicable)
+  4 Fold PR #33/#34 outcomes into §2.11 / I-16 / I-21 / I-22 status
 ```
