@@ -69,6 +69,9 @@ jobs:
     timeout-minutes: 40
     env:
       MOSAICKIT_SUITE_MODE: none
+      # xcodebuild only forwards TEST_RUNNER_-prefixed variables (prefix
+      # stripped) into the simulator test process.
+      TEST_RUNNER_MOSAICKIT_SUITE_MODE: none
 
     steps:
       - uses: actions/checkout@v4
@@ -115,10 +118,16 @@ jobs:
       #   -derivedDataPath               share DerivedData between both steps
       #   CODE_SIGNING_ALLOWED=NO        skip signing (unnecessary on CI)
       #   SWIFT_STRICT_CONCURRENCY=complete  enforce Swift 6 actor 
+      #
+      # Scheme: with two library products (MosaicKit, MosaicKitWebP), Xcode
+      # generates one scheme per product plus "MosaicKit-Package". Only the
+      # -Package scheme includes the MosaicKitTests test target; the per-product
+      # "MosaicKit" scheme fails test-without-building with "Scheme MosaicKit is
+      # not currently configured for the test-without-building action".
       - name: Build and test iOS package
         run: |
           xcodebuild build-for-testing \
-            -scheme MosaicKit \
+            -scheme MosaicKit-Package \
             -destination 'platform=iOS Simulator,name=iPhone 17 Pro' \
             -derivedDataPath "$RUNNER_TEMP/MosaicKitDerivedData" \
             -skipPackagePluginValidation \
@@ -126,7 +135,7 @@ jobs:
             CODE_SIGNING_ALLOWED=NO \
             SWIFT_STRICT_CONCURRENCY=complete
           xcodebuild test-without-building \
-            -scheme MosaicKit \
+            -scheme MosaicKit-Package \
             -destination 'platform=iOS Simulator,name=iPhone 17 Pro' \
             -derivedDataPath "$RUNNER_TEMP/MosaicKitDerivedData" \
             -skipPackagePluginValidation \
