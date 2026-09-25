@@ -1,0 +1,17 @@
+%% MosaicKit – mosaic pipeline as implemented in MetalMosaicGenerator.generate(for:config:forIphone:)
+graph TD
+  A[config.validate] --> B{overwrite == false<br/>and output exists?}
+  B -- yes --> Z[return existing URL<br/>maybe backfill animation]
+  B -- no --> C[duration + aspect ratio<br/>reject < 5 s]
+  C --> D[LayoutProcessor.calculateThumbnailCount]
+  D --> E[LayoutProcessor.calculateLayout - cached]
+  E --> F{gifMode == .gifOnly?}
+  F -- yes --> G[extractFramesForGif -> AnimatedGifGenerator.save]
+  F -- no --> H[createMetadataHeader optional]
+  H --> I[ThumbnailProcessor.processedFramesStream<br/>labels + Color DNA sampling]
+  I --> J[MetalImageProcessor.generateMosaicStream<br/>DominantColors bg + Metal kernels]
+  J --> K[OverlayProcessor.applyColorDNA / applyWatermark]
+  K --> L[saveMosaic via OutputTransaction]
+  L --> M{gifMode == .withMosaic?}
+  M -- yes --> G
+  M -- no --> N[return mosaic URL]
