@@ -34,7 +34,7 @@ A high-performance Swift package for generating video mosaics with Metal-acceler
 - **Validated input and configuration models** — `VideoSource` supports lightweight Codable queue
   entries and explicit `inspect()` metadata loading; invalid geometry, timing, density, compression,
   and encoder combinations fail before processing begins.
-- **Reproducible media tests** — CI uses a tracked 87-second H.264/AAC fixture packaged with the
+- **Reproducible media tests** — CI uses a tracked 87-second 8-bit H.264 (High, 720p, video-only) fixture packaged with the
   test target, and runs hardware-intensive media tests sequentially for stable results.
 ## New in 1.6.4
 
