@@ -1607,8 +1607,9 @@ none.
 13. **Preview quality → preset mapping uses exact floats** (native and SJS). Only the documented
     values do what their names suggest (§4.2 I-5, I-6).
 14. **CI:** macOS runs `swift test` in parallel with `MOSAICKIT_SUITE_MODE=none`. Media-dependent
-    suites self-skip. iOS runs `xcodebuild` on the `MosaicKit-Package` scheme (PR #33). No
-    preview export runs end-to-end in CI.
+    suites self-skip. iOS runs `xcodebuild` on the `MosaicKit-Package` scheme (PR #31 / #33).
+    The embedded fixture is 10-bit H.264, which iOS can't decode (I-22). No preview export runs
+    end-to-end in CI.
 15. **Docs drift:** `MosaicKit-DeepDive.md` is stale, and parts of `CLAUDE.md`/`AGENTS.md`/README
     are wrong (§1.9). Update them when you touch the corresponding area.
 
@@ -1640,7 +1641,8 @@ robustness, performance, or cosmetic.
 | I-18 | F5 | ColorDNA height decoded as 0 (bypassing the init clamp) → strip **silently skipped**. Watermark image load failure → **silently omitted**. | Confirmed (static) | Low | `OverlayProcessor` returns `nil`; the generator keeps the un-annotated image | Validate DNA height ≥ 8. Surface overlay failures (log at least, or throw in strict mode). |
 | I-19 | F2 | `VideoInput(url:)` (legacy) swallows inspection errors and returns metadata-less inputs. `generateMosaicsForFiles` uses it. | Confirmed (static) | Low | `VideoInput.init(url:…) async` | Prefer `VideoInput(from:)` or `VideoSource.inspect()` in new code. |
 | I-20 | F6 | Animated export with `.nochange` holds all full-resolution frames in memory (e.g. 4K × up to 800 frames). | Confirmed (static) | Medium (memory) | `extractFramesForGif` returns `[CGImage]` | Stream frames into `CGImageDestination` / the WebP encoder incrementally, or cap `.nochange` by frame count. |
-| I-21 | CI | iOS job used a scheme with no test action; the tests never compiled for iOS. | Confirmed; **fixed in PR #33** | — | CI logs | PR #33 |
+| I-21 | CI | iOS job used a scheme with no test action; the tests never compiled for iOS. | Confirmed; fixed by **PR #31** (earlier) / **PR #33** (duplicate) | — | CI logs | Scheme `MosaicKit-Package` + `URL.homeDirectory` in `CombinationTests` |
+| I-22 | F2/F3/F6/F8 + CI | **10-bit H.264 ("High 10") sources cannot be decoded on iOS.** Mosaic and animation jobs fail entirely because extraction is strict. The embedded test fixture is itself High 10, so the 10 embedded-media tests fail on the iOS Simulator (178 run, 10 fail). | Confirmed (fixture `avcC`: `profile_idc 110`, 10-bit luma/chroma; CI: VideoToolbox `err=-8969` on every frame) | Medium (iOS) | CI run on PR #33 @ 85c6d5e; local `avcC` parse | CI: re-encode the fixture to 8-bit H.264 High (proposed on PR #31). Product: detect unsupported codec/bit depth at inspection (`formatDescriptions`) and fail fast with a clear `VideoError`/`MosaicError`, or fall back to a software path. |
 
 ### 4.3 Performance: hotspots & budgets
 
@@ -1829,10 +1831,10 @@ The package's minimum deployment target is **26**, so everything below must be g
 ### 4.10 Phase 4 wrap-up
 
 **Decisions / findings**
-- 21 issues registered. **Confirmed High:**
+- 22 issues registered. **Confirmed High:**
   - I-1 rotated sources are stretched;
   - I-2 the ffmpeg scale filter distorts non-16:9 and portrait video.
-- **Confirmed Medium:** I-3, I-4, I-5, I-6, I-8, I-12, I-16, I-20.
+- **Confirmed Medium:** I-3, I-4, I-5, I-6, I-8, I-12, I-16, I-20, I-22.
 - **Q15 answered.** `MosaicCancellationTests` documents that `setConcurrencyLimit(0)` mid-batch is
   a no-op for the mosaic coordinator (not a pause). For the preview coordinator, 0 means *auto*
   (≤ 2), so there is no pause there either. **There is no pause primitive in either
@@ -1961,11 +1963,11 @@ non-existent `.xcodeproj`), `tasks/TASKS.md` (empty backlog).
 ```
 INDEX_VERSION: 4 (Phases 1–4 complete)
 SNAPSHOT: main@8f0c82f → branch claude/codebase-analysis-docs-ppz2yf (source files unchanged; Appendix A hashes valid)
-RELATED PRs: #33 iOS CI scheme + iOS test compile fix (open); I-16 ffmpeg watchdog fix proposed on #32 (not opened)
+RELATED PRs: #31 and #33 both fix the iOS CI scheme + iOS test compile (duplicates; both blocked on the 10-bit fixture, I-22); I-16 ffmpeg watchdog fix proposed on #32 (not opened)
 
 FILE_MAP_SUMMARY: see Appendix A (49 files indexed; P0 = 8, P1 = 15)
 
-ISSUE REGISTER: §4.2 (I-1 … I-21). High: I-1, I-2. Medium: I-3 I-4 I-5 I-6 I-7 I-8 I-12 I-16 I-20.
+ISSUE REGISTER: §4.2 (I-1 … I-22). High: I-1, I-2. Medium: I-3 I-4 I-5 I-6 I-7 I-8 I-12 I-16 I-20 I-22.
 
 OPEN_QUESTIONS:
   Q11 Measure actor-serialization impact on MetalMosaicGenerator
