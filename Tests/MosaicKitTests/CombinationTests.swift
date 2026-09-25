@@ -539,7 +539,7 @@ struct CombinationTests {
 
     private static var targetFolder: URL {
         let base = ProcessInfo.processInfo.environment["MOSAIC_TARGET_FOLDER"]
-            ?? FileManager.default.homeDirectoryForCurrentUser
+            ?? URL.homeDirectory
                    .appendingPathComponent("Desktop/MosaicCombinations").path
         return URL(fileURLWithPath: base).appendingPathComponent("TARGET_Folder")
     }
