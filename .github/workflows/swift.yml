@@ -119,7 +119,7 @@ jobs:
         run: |
           xcodebuild build-for-testing \
             -scheme MosaicKit \
-            -destination 'platform=iOS Simulator,name=iPhone 16' \
+            -destination 'platform=iOS Simulator,name=iPhone 17 Pro' \
             -derivedDataPath "$RUNNER_TEMP/MosaicKitDerivedData" \
             -skipPackagePluginValidation \
             -parallel-testing-enabled NO \
@@ -127,7 +127,7 @@ jobs:
             SWIFT_STRICT_CONCURRENCY=complete
           xcodebuild test-without-building \
             -scheme MosaicKit \
-            -destination 'platform=iOS Simulator,name=iPhone 16' \
+            -destination 'platform=iOS Simulator,name=iPhone 17 Pro' \
             -derivedDataPath "$RUNNER_TEMP/MosaicKitDerivedData" \
             -skipPackagePluginValidation \
             -parallel-testing-enabled NO \
