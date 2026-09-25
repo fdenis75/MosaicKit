@@ -129,9 +129,10 @@ the `MosaicConfiguration.filenameTemplate` doc comment.
 **Tooling:**
 - SwiftPM is the real build system: `swift build` and `swift test`.
 - `Makefile` + `scripts/*.sh` are an **agent/xcodebuild scaffold** (`xcbuild.sh`, `task.sh`,
-  simulator runners). They reference `MosaicKit.xcodeproj`, which **does not exist** in the
-  repo, and `scripts/xcbuild.sh`, which is also missing. Treat the Makefile as non-functional
-  here. (`CLAUDE.md` also claims "There is no Makefile", which is out of date as well.)
+  simulator runners). `scripts/xcbuild.sh` exists and the Makefile uses it as `XCBUILD`, but
+  every target builds `MosaicKit.xcodeproj` / `-scheme MosaicKit`, and **no `.xcodeproj` exists**
+  in the repo. Treat the Makefile as unusable as configured. (`CLAUDE.md` also claims "There is
+  no Makefile", which is out of date as well.)
 - `.spi.yml` builds DocC for the Swift Package Index (macOS + iOS, Swift 6.2).
 - `MosaicKitTests.xctestplan` is an Xcode test plan.
 
@@ -244,7 +245,7 @@ Each feature has a stable ID (F1…F13) that later phases reuse.
 | **F9** | **Preview export backends** | Trade speed, quality, and control: `.native` = simplest (Apple presets), `.sjs` = codec/bitrate/resolution control, `.ffmpeg` = best compression/codec choice on macOS. | `PreviewExportMode`; `exportWithNativeSession`, `exportWithSJSSession`, `exportWithFFmpeg` → `FFmpegEncoder` (passthrough `.mov` then `ffmpeg` transcode). Supporting types: `nativeExportPreset`, `SjSExportPreset`, `ExportMaxResolution`, `FFmpegEncodingOptions`, `PreviewExportDescription`. |
 | **F10** | **Batch coordination** | Process many videos quickly without exhausting CPU, RAM, or hardware encoders, with per-video progress and correct cancellation. | `MosaicGeneratorCoordinator<Generator>`: dynamic limit = min(cores/2, RAM / (width·density/2000 GB)), minimum 2. `PreviewGeneratorCoordinator`: dynamic limit capped at **2** because of VideoToolbox encoder channels, plus a foreground-wait/stall retry up to 3×. Both use a `batchEpoch` so a cancelled batch stops. |
 | **F11** | **Explicit job lifecycle** | Let apps with persisted queues track *jobs* (stable ID) and *attempts* (new ID per retry), and pause, retry, or cancel them independently of the video URL. | `GenerationJobController` actor, `GenerationJobID`, `GenerationAttemptID`, `GenerationJobState`, `GenerationJobSnapshot`. It wraps any `() async throws -> URL` closure; work starts only when `value(for:)` is awaited. |
-| **F12** | **Output paths & atomic commit** | Predictable, idempotent output locations (skip work already done) and no half-written files, even on SMB shares. | `MosaicConfiguration.generateOutputDirectory` / `generateFilename` / `animatedOutputURL` / `configurationHash`, `createOutputSubdirectory`, `outputDirectoryTemplate` and `filenameTemplate` tokens, `overwrite`. `OutputTransaction` (hidden `.mosaickit-<UUID>.<ext>` staging file → `rename(2)`, or with `overwrite == false` an exclusive `fopen("wx")` claim followed by rename). The preview side has its own equivalents in `PreviewConfiguration`. |
+| **F12** | **Output paths & atomic commit** | Predictable, idempotent output locations (skip work already done), and encoders never write directly to the final path. With `overwrite == false` there is a brief zero-byte placeholder window; see §2.9. | `MosaicConfiguration.generateOutputDirectory` / `generateFilename` / `animatedOutputURL` / `configurationHash`, `createOutputSubdirectory`, `outputDirectoryTemplate` and `filenameTemplate` tokens, `overwrite`. `OutputTransaction` (hidden `.mosaickit-<UUID>.<ext>` staging file → `rename(2)`, or with `overwrite == false` an exclusive `fopen("wx")` claim followed by rename). The preview side has its own equivalents in `PreviewConfiguration`. |
 | **F13** | **Up-front validation & typed errors** | Fail fast with actionable messages before spending GPU, decoder, or encoder time. | `DensityConfig.validate`, `MosaicConfiguration.validate`, `PreviewConfiguration.validate`, `VideoInput.validate`; error enums `MosaicError`, `LibraryError`, `VideoError`, `PreviewError`, `MetalProcessorError`, `MosaicKitWebPError`. |
 
 **Cross-cutting capabilities** (these are not features themselves; Phase 2 covers them):
@@ -296,9 +297,11 @@ is in `codebase-analysis-docs/assets/mosaic-pipeline.mmd`.)
 **How they fit together:**
 
 - The mosaic path and the preview path **share `VideoInput` and `DensityConfig`** (both use the
-  same seven density names). They share **nothing else at runtime**: they have separate configs,
-  generators, coordinators, error enums, and path-templating code. A mosaic and a preview of the
-  same video are independent jobs.
+  same seven density names). They also share **`OutputTransaction`**: the mosaic save, the
+  animated export, and all three preview exporters publish through it. A change to that type
+  affects both product lines. Otherwise they are separate: configs, generators, coordinators,
+  error enums, and path-templating code. A mosaic and a preview of the same video are
+  independent jobs.
 - **F6 depends on F3's layout.** The animation reuses `layout.thumbCount` and the mosaic's output
   directory and filename (`animatedOutputURL` = `"<gifSize> -" + mosaic base name + ext`).
   `.gifOnly` still runs layout calculation but skips compositing. In the `overwrite == false`
@@ -752,7 +755,9 @@ graph LR
   - `PreviewVideoGenerator.cancel(for:)` cancels **every attempt** for that source ID.
 - **Partial output:** every exporter writes only to a staging file, and `defer
   transaction.discard()` removes it on any exit. A cancelled or failed job therefore never leaves
-  a partial file at the final path, and never deletes a pre-existing valid output.
+  partially *encoded* data at the final path, and never deletes a pre-existing valid output. The
+  exception is the `overwrite == false` zero-byte placeholder described in §2.9 (a race window,
+  and it is leaked if `rename` fails).
 
 ### 2.8 Error model
 
@@ -790,9 +795,15 @@ graph LR
   - Staging name: `.mosaickit-<UUID>.<ext>` in the destination directory.
   - Commit rejects empty files.
   - `overwrite == true`: `rename(2)`, which atomically replaces.
-  - `overwrite == false`: `fopen(final, "wx")` claims the name exclusively (works on SMB, unlike
-    `link(2)`), then `rename`.
-  - Hidden staging files can be left behind only on process crash.
+  - `overwrite == false`: `fopen(final, "wx")` creates the final name exclusively (works on SMB,
+    unlike `link(2)`), then closes it and `rename`s the staging file over it. **This is not fully
+    atomic:**
+    - Between the exclusive create and the rename, a **zero-byte file exists at the final
+      path**. Any concurrent skip-if-exists check (`FileManager.fileExists`) in another
+      generation will see it and return that URL as an already-finished output.
+    - If the `rename` fails, the zero-byte placeholder is **left behind**. `discard()` removes
+      only the staging file, so later `overwrite == false` runs will skip that output forever.
+  - Hidden staging files can be left behind on process crash; so can the placeholder above.
 - *Process execution:* `.ffmpeg` runs whatever binary `ffmpegBinaryPath` points to. **Treat that
   path as trusted configuration.** Arguments are passed as an array (no shell), so there is no
   argument injection through filenames.
@@ -892,6 +903,10 @@ graph LR
       so the frames arrive portrait while the layout cells are landscape. `scaleTexture` then
       stretches them to fit.
     - Verify with a rotated fixture in Phase 4.
+11. **`OutputTransaction` with `overwrite == false` is not fully atomic.**
+    - There is a zero-byte placeholder window during which other generations' skip-if-exists
+      checks treat the output as done.
+    - The placeholder is leaked if the final `rename` fails (§2.9).
 
 **Answered open questions:** Q1 (GPU batching/errors), Q2 (live path = `processedFramesStream`,
 strict), Q4 (compose; all exporters use `OutputTransaction`), Q5 (ffmpeg lifecycle), Q6 (retry =
@@ -998,7 +1013,7 @@ non-existent `.xcodeproj`), `tasks/TASKS.md` (empty backlog).
 |---|---|---|---|
 | A1 | The original host app organized videos by service/creator/post (explains `postID`, `custom`, removed fields) | Medium | README 1.3.0 notes; git history |
 | A2 | `Examples/*.swift` were once executable targets and were removed from `Package.swift` | Low | `git log -S SimpleExample -- Package.swift` finds nothing in the available (84-commit) history, so the examples may never have been wired up |
-| A3 | `Makefile`/`scripts/` come from a generic multi-agent template and are unused for this package | High | Missing `.xcodeproj` and `scripts/xcbuild.sh` |
+| A3 | `Makefile`/`scripts/` come from a generic multi-agent template and are unused for this package | High | The Makefile targets a `MosaicKit.xcodeproj` that doesn't exist (`scripts/xcbuild.sh` itself is present) |
 | A4 | The `spec.md` stages beyond what is present (plans, handles, ledger) were deferred, not dropped | Low | Ask maintainer / PR history (#29, #30 and earlier) |
 
 ## Appendix C — State Block
@@ -1032,6 +1047,7 @@ KNOWN_RISKS:
   R11 Shared MTLCommandQueue barrier couples concurrent jobs
   R12 iOS CI red on main (scheme name)
   R13 ffmpegBinaryPath = trusted executable path
+  R14 OutputTransaction no-overwrite path: zero-byte placeholder race + leak on rename failure
 
 GLOSSARY_DELTA (Phase 2):
   Tracked task; attempt ID; batchEpoch; sliding-window admission; CancellationToken;
