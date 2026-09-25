@@ -1,0 +1,26 @@
+%% MosaicKit – mosaic generation sequence (file output)
+sequenceDiagram
+  participant App
+  participant Coord as MosaicGeneratorCoordinator
+  participant Gen as MetalMosaicGenerator (actor)
+  participant Lay as LayoutProcessor
+  participant Thumb as ThumbnailProcessor
+  participant AV as AVAssetImageGenerator
+  participant GPU as MetalImageProcessor
+  participant FS as OutputTransaction
+  App->>Coord: generateMosaic(for:config:progress)
+  Coord->>Gen: setProgressHandler + generate()
+  Gen->>Gen: config.validate(), skip-if-exists check
+  Gen->>Lay: calculateThumbnailCount + calculateLayout
+  Gen->>Thumb: createMetadataHeader (optional)
+  Gen->>Thumb: processedFramesStream(layout)
+  Thumb->>AV: images(for: times) (batched)
+  AV-->>Thumb: CGImage frames
+  Thumb-->>GPU: (index, labeled image) via AsyncThrowingStream
+  GPU->>GPU: sample 5 → DominantColors gradient bg
+  GPU->>GPU: 20-frame command buffers → barrier → readback
+  GPU-->>Gen: CGImage mosaic
+  Gen->>Gen: Color DNA + watermark (CPU)
+  Gen->>FS: encode to staging → commit (rename)
+  Gen-->>Coord: URL
+  Coord-->>App: MosaicGenerationResult

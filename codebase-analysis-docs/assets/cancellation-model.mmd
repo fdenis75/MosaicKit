@@ -1,0 +1,14 @@
+%% MosaicKit – how cancellation reaches the work
+graph LR
+  A[Caller Task cancelled] -->|withTaskCancellationHandler| B[Tracked unstructured Task]
+  C[coordinator.cancelGeneration / cancelAll] --> B
+  C2[cancelAllGenerations] -->|batchEpoch += 1| D[Batch loop stops dequeuing → CancellationError]
+  B -->|mosaic| E[Task.checkCancellation in stream / GPU loop / commit]
+  E --> E2[stream onTermination → producer.cancel + AVAssetImageGenerator cancel]
+  B -->|preview| F[onCancel → CancellationToken.cancel]
+  F --> G[phase checks in PreviewGenerationLogic]
+  F --> H[1 s watchdog → cancelExport / exportTask.cancel]
+  F --> I[2 s ffmpeg watchdog → SIGTERM, +2 s SIGKILL]
+  E --> J[OutputTransaction.discard – staging removed]
+  H --> J
+  I --> J
