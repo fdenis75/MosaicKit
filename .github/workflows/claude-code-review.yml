@@ -9,10 +9,15 @@ on:
     #   **/*.swift       Sources/, SourcesWebP/, Tests/, Examples/, Package.swift
     #   **/*.metal       Metal shaders
     #   Package.resolved dependency pins
+    #   Makefile, scripts/**  build/test/run tooling (the Makefile drives scripts/)
+    #   **/*.xctestplan  test plan configuration
     paths:
       - "**/*.swift"
       - "**/*.metal"
       - "Package.resolved"
+      - "Makefile"
+      - "scripts/**"
+      - "**/*.xctestplan"
 
 jobs:
   claude-review:
