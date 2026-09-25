@@ -109,6 +109,13 @@ jobs:
       # build-for-testing / test-without-building is the xcodebuild analogue
       # of swift build --build-tests / swift test --skip-build.
       #
+      # Scheme: the package has two library products (MosaicKit,
+      # MosaicKitWebP), so Xcode generates one scheme per product plus an
+      # umbrella `MosaicKit-Package` scheme. Only the umbrella scheme has
+      # MosaicKitTests in its Test action; the per-product `MosaicKit` scheme
+      # builds just the library and fails test-without-building with
+      # "Scheme MosaicKit is not currently configured for the test-without-building action".
+      #
       # Flags:
       #   -skipPackagePluginValidation   suppress plugin-sandbox warnings
       #   -parallel-testing-enabled NO   workaround for macos-26 iOS hang (#13143)
@@ -118,7 +125,7 @@ jobs:
       - name: Build and test iOS package
         run: |
           xcodebuild build-for-testing \
-            -scheme MosaicKit \
+            -scheme MosaicKit-Package \
             -destination 'platform=iOS Simulator,name=iPhone 17 Pro' \
             -derivedDataPath "$RUNNER_TEMP/MosaicKitDerivedData" \
             -skipPackagePluginValidation \
@@ -126,7 +133,7 @@ jobs:
             CODE_SIGNING_ALLOWED=NO \
             SWIFT_STRICT_CONCURRENCY=complete
           xcodebuild test-without-building \
-            -scheme MosaicKit \
+            -scheme MosaicKit-Package \
             -destination 'platform=iOS Simulator,name=iPhone 17 Pro' \
             -derivedDataPath "$RUNNER_TEMP/MosaicKitDerivedData" \
             -skipPackagePluginValidation \
