@@ -4,12 +4,13 @@
 > another engineer or LLM can use to implement features, fix bugs, and refactor safely without
 > first re-reading the whole codebase.
 >
-> **Build status of this document:** Phases 1–5 of 6 complete (Initial Context Scan, System
-> Architecture, Feature-by-Feature Analysis, Things You Must Know, Technical Reference). Phase 6
-> (final assembly) remains.
+> **Status:** complete (all six analysis phases done), dated 2026-09-25.
 >
-> **Snapshot:** branch `claude/codebase-analysis-docs-ppz2yf`, based on `main` @ `8f0c82f`
-> ("Update swift.yml"). README advertises release line **1.7.0**.
+> **Snapshot:** `main` @ `8f0c82f` ("Update swift.yml"). The README advertises release line
+> **1.7.0**, and an unreleased revert of its frame source is noted. All 20 file anchors were
+> re-verified against `main` in the final pass. Related open PRs:
+> - **#33**: iOS CI scheme + 8-bit test fixture (CI green).
+> - **#34**: ffmpeg cancellation watchdog (macOS CI green).
 >
 > **Conventions used here**
 > - All paths are relative to the repository root.
@@ -19,9 +20,72 @@
 
 ---
 
+## Executive summary
+
+**What it is.** MosaicKit is a Swift 6.2 package for macOS/iOS/macCatalyst 26+. It turns videos
+into two kinds of visual summary:
+- **mosaics / contact sheets**: one still image, optionally with an animated GIF/HEICS/WebP
+  version;
+- **previews / highlight reels**: a short video built from clips of the source, exported to a
+  file or returned as an `AVPlayerItem`.
+
+It runs entirely on-device: AVFoundation decoding, Metal compositing, and ImageIO,
+AVAssetExportSession, SJS, or an external ffmpeg for encoding.
+
+**How it is built.**
+- Codable config structs (`MosaicConfiguration`, `PreviewConfiguration`) and inspected inputs
+  (`VideoInput`) feed two actor engines, `MetalMosaicGenerator` and `PreviewVideoGenerator`.
+- Coordinator actors on top add batching, concurrency limits, cancellation, and preview retry.
+  `GenerationJobController` adds job and attempt IDs.
+- Every output is published through `OutputTransaction` (staging file + rename).
+- There is no database or network access. The only persistent "schema" is the Codable model
+  graph (§5.3).
+
+**What matters most before changing code:**
+1. The persisted identity of configs and outputs (Codable keys, enum raw values,
+   `configurationHash`, filenames) must stay stable (§4.1 rules 2–4).
+2. The heavy CPU steps of mosaic generation run on the generator actor. Preview export hops to
+   the main actor. Throughput is a hard requirement: the bounded 1.7.0 frame source was reverted
+   for being 30–45 % slower (§2.6).
+3. Output publication is atomic for `overwrite == true`. The no-overwrite path uses a
+   placeholder because `link(2)` fails on SMB. A destination-aware strategy is planned (§F12).
+
+**Top issues** (register in §4.2):
+
+| Priority | Issue |
+|---|---|
+| High | **I-1** rotated/portrait sources are stretched |
+| High | **I-2** the ffmpeg scale filter distorts non-16:9 and portrait video |
+| Medium | **I-3** ffmpeg HEVC forced to 30 fps |
+| Medium | **I-4** no-overwrite placeholder race |
+| Medium | **I-8** `.dynamic` layout overlaps and clips cells |
+| Medium | **I-12** preview skip-if-exists never matches |
+| Medium | **I-16** slow ffmpeg cancellation (fix in #34) |
+| Medium | **I-20** `.nochange` animation holds all frames in memory |
+| Medium | **I-22** 10-bit H.264 is undecodable on iOS (fixture fixed in #33) |
+| Medium | **I-24** strict `MosaicConfiguration` decoding breaks older saved configs |
+
+**Most valuable platform addition:** iOS/macOS 27
+`AVAssetExportSession.configureForResumableExport()`, which lets interrupted preview exports
+resume instead of restarting (§4.9).
+
+## How to read this document
+
+| Level | Read | For |
+|---|---|---|
+| **High-level overview** | Executive summary, Part 1 | What the library does, features and their business purpose, how they fit together |
+| **Mid-level technical notes** | Part 2 (architecture), Part 3 (per feature) | How data flows, where code runs, how each feature works, and edge cases |
+| **Deep reference** | Part 4 (must-know, issue register, roadmap), Part 5 (API, schema, errors, cookbook), Part 6 (consolidated roadmap), appendices | Before changing code; lookups |
+
+Each Part ends with a "wrap-up" subsection. These are the working log of the phase that
+produced the Part: decisions, open questions, and next steps at that time. **§4.2 (issue
+register) and Part 6 hold the current status.** Where a wrap-up item was later corrected, the
+correction is marked inline.
+
 ## Table of contents
 
-1. [Part 1 — High-Level Overview (Phase 1)](#part-1--high-level-overview-phase-1)
+- [Executive summary](#executive-summary) · [How to read this document](#how-to-read-this-document)
+1. [Part 1 — High-Level Overview](#part-1--high-level-overview)
    1. [What MosaicKit is](#11-what-mosaickit-is)
    2. [Who uses it](#12-who-uses-it)
    3. [Tech stack & dependencies](#13-tech-stack--dependencies)
@@ -31,9 +95,9 @@
    7. [How the features interact](#17-how-the-features-interact)
    8. [Public entry points at a glance](#18-public-entry-points-at-a-glance)
    9. [Which existing docs to trust](#19-which-existing-docs-to-trust)
-   10. [Early findings (to be expanded in Phase 4)](#110-early-findings-to-be-expanded-in-phase-4)
+   10. [Early findings (status tracked in §4.2)](#110-early-findings-status-tracked-in-42)
    11. [Phase 1 wrap-up](#111-phase-1-wrap-up)
-2. [Part 2 — System Architecture (Phase 2)](#part-2--system-architecture-phase-2)
+2. [Part 2 — System Architecture](#part-2--system-architecture)
    1. [Architectural style](#21-architectural-style-in-one-paragraph)
    2. [Component map](#22-component-map)
    3. [Mosaic data flow](#23-mosaic-data-flow-f3f7)
@@ -46,22 +110,23 @@
    10. [Third-party boundaries](#210-third-party-integration-boundaries)
    11. [Build, test & CI](#211-build-test--ci-architecture)
    12. [Phase 2 wrap-up](#212-phase-2-wrap-up)
-3. [Part 3 — Feature-by-Feature Analysis (Phase 3)](#part-3--feature-by-feature-analysis-phase-3)
+3. [Part 3 — Feature-by-Feature Analysis](#part-3--feature-by-feature-analysis)
    - [F1 Discovery](#f1--video-discovery) · [F2 Input](#f2--video-input--inspection) · [F3 Mosaic](#f3--mosaic-generation) · [F4 Layout](#f4--layout-engine) · [F5 Overlays](#f5--overlays--annotations) · [F6 Animated](#f6--animated-export-gif--heics--animated-webp) · [F7 WebP](#f7--optional-webp-support)
    - [F8 Preview](#f8--preview-video-highlight-reel) · [F9 Export backends](#f9--preview-export-backends) · [F10 Batch](#f10--batch-coordination) · [F11 Jobs](#f11--explicit-job-lifecycle) · [F12 Output & publication](#f12--output-paths-idempotency--atomic-publication) · [F13 Validation](#f13--up-front-validation--typed-errors)
    - [3.14 Interaction matrix](#314-cross-feature-interaction-matrix) · [3.15 Capabilities](#315-how-the-features-combine-into-product-capabilities) · [3.16 Wrap-up](#316-phase-3-wrap-up)
-4. [Part 4 — Things You Must Know Before Changing Code (Phase 4)](#part-4--things-you-must-know-before-changing-code-phase-4)
+4. [Part 4 — Things You Must Know Before Changing Code](#part-4--things-you-must-know-before-changing-code)
    - [4.1 Rules card](#41-the-rules-card-read-this-first) · [4.2 Issue register](#42-verified-issue-register) · [4.3 Performance](#43-performance-hotspots--budgets) · [4.4 Security](#44-security-implications) · [4.5 Business rules](#45-hard-coded-business-rules--constants)
    - [4.6 Design decisions](#46-non-obvious-design-decisions--likely-rationale) · [4.7 Tricky code](#47-tricky-code-explained) · [4.8 Checklists](#48-change-checklists) · [4.9 iOS/macOS 27 roadmap](#49-platform-roadmap-ios--macos-27-apis-relevant-to-mosaickit) · [4.10 Wrap-up](#410-phase-4-wrap-up)
-5. [Part 5 — Technical Reference & Glossary (Phase 5)](#part-5--technical-reference--glossary-phase-5)
+5. [Part 5 — Technical Reference & Glossary](#part-5--technical-reference--glossary)
    - [5.1 Glossary](#51-glossary) · [5.2 Public API](#52-public-api-reference) · [5.3 Model schema](#53-model-relationship-diagram-the-persisted-schema) · [5.4 Status reference](#54-progress--status-reference) · [5.5 Error catalog](#55-error-catalog) · [5.6 Cookbook](#56-usage-cookbook) · [5.7 Output naming](#57-output-artifact-naming-reference) · [5.8 Docs map](#58-documentation-map) · [5.9 Wrap-up](#59-phase-5-wrap-up)
-6. [Appendix A — File Index](#appendix-a--file-index)
-7. [Appendix B — Assumptions](#appendix-b--assumptions)
-8. [Appendix C — State Block](#appendix-c--state-block)
+6. [Part 6 — Consolidated Findings, Roadmap & Maintenance](#part-6--consolidated-findings-roadmap--maintenance)
+7. [Appendix A — File Index](#appendix-a--file-index)
+8. [Appendix B — Assumptions](#appendix-b--assumptions)
+9. [Appendix C — State Block](#appendix-c--state-block)
 
 ---
 
-## Part 1 — High-Level Overview (Phase 1)
+## Part 1 — High-Level Overview
 
 ### 1.1 What MosaicKit is
 
@@ -360,11 +425,24 @@ Default values worth knowing:
 | `CLAUDE.md` / `AGENTS.md` | Medium | Architecture summary is correct. Wrong on: swift-log usage, "no Makefile", `swift run` examples, the CI workflow list (`mosaickit-tests.yml` and `swift62.yml` do not exist; only `swift.yml` + `claude*.yml` do), and `Models/AspectRatio.swift` (`AspectRatio` is defined in `Models/LayoutConfiguration.swift`). `AGENTS.md` still mentions Core Graphics/vImage in pipeline step 4 and uses `VideoFormat` as the mosaic format type (it is `OutputFormat`). |
 | `MosaicKit-DeepDive.md` | **Stale — do not trust architecture sections** | Describes the removed dual engine (`CoreGraphicsMosaicGenerator`, `MosaicGeneratorFactory`, vImage buffer pool) and a `.gif` still format. The coordinator concurrency formula it gives is for previews only, and the cap of 8 it quotes is really 2. |
 | `spec.md` | **Design intent, only partly implemented** | Describes a `GenerationRequest/Plan`, `JobHandle/BatchHandle`, checkpoint ledger, and a single processing-service actor. None of these exist. What does exist: `VideoSource`, `OutputTransaction`, `MosaicFrameSource`, validation, `GenerationJobController`. |
-| `Sources/MosaicKit.docc/*` | Not yet reviewed | `PlatformStrategy.md` is documented as historical context. To verify in Phase 2. |
+| `Sources/MosaicKit.docc/*` | High, reviewed | `Architecture.md` is accurate but shows the array-based `generateMosaic(from:)` rather than the streaming path. `PreviewExporting.md` matches the stall timeouts. `BackgroundProcessing.md` is current. `PerformanceGuide.md` benchmark numbers are unverified. `PlatformStrategy.md` is historical context. |
 
-### 1.10 Early findings (to be expanded in Phase 4)
+### 1.10 Early findings (status tracked in §4.2)
 
-These were found while scanning. Each still needs deeper confirmation in Phase 4.
+These were found during the initial scan. Their verified status now lives in the §4.2
+register:
+
+| Item | Now tracked as |
+|---|---|
+| 1 | I-23 |
+| 2 | §4.5 constants |
+| 3 | I-12 |
+| 4 | I-13 |
+| 5 | I-24 |
+| 6 | I-25 |
+| 7 | resolved (§2.6) |
+| 8 | §5.2.3 |
+| 9 | I-25 |
 
 1. **swift-log is an unused dependency.** Code uses OSLog only. Subsystem strings are also
    inconsistent: `"com.mosaicKit"` in most files, but `"com.mosaickit"` (lowercase k) in
@@ -391,7 +469,7 @@ These were found while scanning. Each still needs deeper confirmation in Phase 4
    the caller's `outputdirectory`, overlay, or templates.
 7. *(Resolved in §2.6: guarded by `NSRecursiveLock`; OK.)* **`LayoutProcessor` is a non-`Sendable` `final class` with mutable state.**
    `mosaicAspectRatio` and a 64-entry cache (guarded by `stateLock`) are shared by the
-   generator actor. Thread-safety needs review in Phase 4.
+   generator actor.
 8. **Several `MosaicConfiguration` initializers have conflicting animation defaults.** The main
    initializer uses `gifSize .nochange` and `.webp`. The overlay initializer without `gifMode`
    uses `.small` and `.webp`. The deprecated `forIphone:` initializer uses `.nochange` and
@@ -428,7 +506,7 @@ sequence diagrams, and the concurrency/cancellation model.
 
 ---
 
-## Part 2 — System Architecture (Phase 2)
+## Part 2 — System Architecture
 
 > Phase 2 goal: map every major component, how data moves through it, where each piece of code
 > runs (actor / main actor / global executor), how cancellation and errors propagate, and the
@@ -886,9 +964,12 @@ graph LR
 - **CI (`.github/workflows/swift.yml`):**
   - Triggers: push to `main`/`claude/**`, and PRs to `main`.
   - *macOS job:* `swift build --build-tests` + `swift test --skip-build`, currently green.
-  - *iOS Simulator job:* `xcodebuild build-for-testing` / `test-without-building -scheme MosaicKit`.
-    **Currently red on `main`**: "Scheme MosaicKit is not currently configured for the
-    test-without-building action". Most likely fix: `-scheme MosaicKit-Package`.
+  - *iOS Simulator job:* `xcodebuild build-for-testing` / `test-without-building`.
+    - **On `main` it is red:** `-scheme MosaicKit` has no test action.
+    - **PR #33** switches to `-scheme MosaicKit-Package` and forwards
+      `TEST_RUNNER_MOSAICKIT_SUITE_MODE`. It also fixes an iOS-unavailable API in
+      `CombinationTests` and re-encodes the 10-bit fixture to 8-bit (I-22).
+    - With #33, all 178 tests run on the simulator and the job is **green**.
   - Plus `claude-code-review.yml` (PR review bot) and `claude.yml` (@claude mentions).
 
 ### 2.12 Phase 2 wrap-up
@@ -928,7 +1009,7 @@ graph LR
     - `AVAssetImageGenerator` *does* apply the transform (`appliesPreferredTrackTransform = true`),
       so the frames arrive portrait while the layout cells are landscape. `scaleTexture` then
       stretches them to fit.
-    - Verify with a rotated fixture in Phase 4.
+    - *Confirmed in Phase 4 from API semantics → I-1 (High).*
 11. **`OutputTransaction` with `overwrite == false` is not fully atomic.**
     - There is a zero-byte placeholder window during which other generations' skip-if-exists
       checks treat the output as done.
@@ -955,7 +1036,7 @@ backbone. Read `LayoutProcessor` algorithms, `ThumbnailProcessor` header/label r
 `MosaicConfiguration`/`PreviewConfiguration` templating, and the test suites per feature.
 
 
-## Part 3 — Feature-by-Feature Analysis (Phase 3)
+## Part 3 — Feature-by-Feature Analysis
 
 > Every feature below follows the same template: **Purpose** (the business need) → **Entry
 > points** → **How it works** → **Interactions** → **Edge cases & hidden dependencies** →
@@ -1574,7 +1655,7 @@ none.
   temp, timeouts).
 
 
-## Part 4 — Things You Must Know Before Changing Code (Phase 4)
+## Part 4 — Things You Must Know Before Changing Code
 
 > This part consolidates the findings from §1.10, §2.12, and §3.16 into verified, prioritized,
 > actionable guidance. Each item is checked against the code.
@@ -1628,10 +1709,13 @@ none.
     when the preset properties are `nil`: native after decoding an old config or explicit
     `nil`; SJS only after explicit `nil`. The `init` defaults are HEVC 1920×1080 (native) and
     `.hevc` (SJS) (§4.2 I-5, I-6).
-14. **CI:** macOS runs `swift test` in parallel with `MOSAICKIT_SUITE_MODE=none`. Media-dependent
-    suites self-skip. iOS runs `xcodebuild` on the `MosaicKit-Package` scheme (PR #31 / #33).
-    The embedded fixture is 10-bit H.264, which iOS can't decode (I-22). No preview export runs
-    end-to-end in CI.
+14. **CI:**
+    - macOS runs `swift test` in parallel with `MOSAICKIT_SUITE_MODE=none`; media-dependent
+      suites self-skip.
+    - iOS runs `xcodebuild` on the `MosaicKit-Package` scheme with an 8-bit fixture (PR #33).
+      Keep test fixtures **8-bit 4:2:0**, because iOS can't decode 10-bit H.264 (I-22).
+    - Test code must compile on iOS (no macOS-only Foundation APIs outside `#if os(macOS)`).
+    - No preview export runs end-to-end in CI.
 15. **Docs drift:** `MosaicKit-DeepDive.md` is stale, and parts of `CLAUDE.md`/`AGENTS.md`/README
     are wrong (§1.9). Update them when you touch the corresponding area.
 
@@ -1658,13 +1742,16 @@ robustness, performance, or cosmetic.
 | I-13 | F8 | Default `exportMaxResolution` is **1080p**; the README (1.6.2) and code comments say 4K. | Confirmed (static) | Low | `_exportMaxResolutionRaw = "1080p"` in three places | Decide the intended default and align code and docs. |
 | I-14 | F11 | **A `GenerationJobController` job cancelled before it runs is stuck in `.cancelling`** and cannot be retried. Records never freed; no tests. | Confirmed (static) | Low–Medium | `cancel` sets `.cancelling`; only `value(for:)` moves it to `.cancelled` | In `cancel`, if `task == nil`, go directly to `.cancelled`. Add `remove(_:)`. Add tests. |
 | I-15 | F10 | **Mosaic coordinator keys state by `video.id`.** Concurrent jobs on the same input clobber each other's cancellation and progress. | Confirmed (static) | Low | `activeTasks[videoID]`, `progressHandlers[videoID]` | Use per-attempt keys, as `PreviewGeneratorCoordinator` does. |
-| I-16 | F3/F9 | **Slow ffmpeg cancellation under load** (16–20 s instead of ~4 s). This makes `ffmpegCancellationKillsUncooperativeProcess` fail intermittently in CI. | Confirmed (CI evidence, 2 failures) | Medium | CI logs on PR #32/#33; the watchdog is a `Task` that polls every 2 s and escalates with `Task.sleep` | Move the watchdog to a `DispatchSourceTimer` and terminate directly from `onCancel` (patch posted on PR #32). |
+| I-16 | F3/F9 | **Slow ffmpeg cancellation under load** (16–20 s instead of ~4 s). This makes `ffmpegCancellationKillsUncooperativeProcess` fail intermittently in CI. | Confirmed (CI evidence, 2 failures) | Medium | CI logs on PR #32/#33; the watchdog is a `Task` that polls every 2 s and escalates with `Task.sleep` | **Fix in PR #34**: `DispatchSourceTimer` watchdog on a dedicated queue plus termination from `onCancel`. macOS CI is green, including this test. The native/SJS/passthrough watchdogs still poll from `Task`s (follow-up). |
 | I-17 | F1 | `discoverVideos` fails the whole scan on one undecodable file. The extension list includes formats AVFoundation rarely decodes (mkv, webm, avi, wmv, flv, asf). | Confirmed (static) | Low–Medium | `discoverVideos` rethrows the first inspection error | Collect per-file failures (a result type), or skip them with a report. |
 | I-18 | F5 | ColorDNA height decoded as 0 (bypassing the init clamp) → strip **silently skipped**. Watermark image load failure → **silently omitted**. | Confirmed (static) | Low | `OverlayProcessor` returns `nil`; the generator keeps the un-annotated image | Validate DNA height ≥ 8. Surface overlay failures (log at least, or throw in strict mode). |
 | I-19 | F2 | `VideoInput(url:)` (legacy) swallows inspection errors and returns metadata-less inputs. `generateMosaicsForFiles` uses it. | Confirmed (static) | Low | `VideoInput.init(url:…) async` | Prefer `VideoInput(from:)` or `VideoSource.inspect()` in new code. |
 | I-20 | F6 | Animated export with `.nochange` holds all full-resolution frames in memory (e.g. 4K × up to 800 frames). | Confirmed (static) | Medium (memory) | `extractFramesForGif` returns `[CGImage]` | Stream frames into `CGImageDestination` / the WebP encoder incrementally, or cap `.nochange` by frame count. |
-| I-21 | CI | iOS job used a scheme with no test action; the tests never compiled for iOS. | Confirmed; fixed by **PR #31** (earlier) / **PR #33** (duplicate) | — | CI logs | Scheme `MosaicKit-Package` + `URL.homeDirectory` in `CombinationTests` |
-| I-22 | F2/F3/F6/F8 + CI | **10-bit H.264 ("High 10") sources cannot be decoded on iOS.** Mosaic and animation jobs fail entirely because extraction is strict. The embedded test fixture is itself High 10, so the 10 embedded-media tests fail on the iOS Simulator (178 run, 10 fail). | Confirmed (fixture `avcC`: `profile_idc 110`, 10-bit luma/chroma; CI: VideoToolbox `err=-8969` on every frame) | Medium (iOS) | CI run on PR #33 @ 85c6d5e; local `avcC` parse | CI: re-encode the fixture to 8-bit H.264 High (proposed on PR #31). Product: detect unsupported codec/bit depth at inspection (`formatDescriptions`) and fail fast with a clear `VideoError`/`MosaicError`, or fall back to a software path. |
+| I-21 | CI | iOS job used a scheme with no test action; the tests never compiled for iOS. | Confirmed; **fixed in PR #33** (iOS CI green; #31 closed as duplicate) | — | CI logs | Scheme `MosaicKit-Package` + `URL.homeDirectory` in `CombinationTests` + `TEST_RUNNER_` suite-mode forwarding |
+| I-22 | F2/F3/F6/F8 + CI | **10-bit H.264 ("High 10") sources cannot be decoded on iOS.** Mosaic and animation jobs fail entirely because extraction is strict. The embedded test fixture is itself High 10, so the 10 embedded-media tests fail on the iOS Simulator (178 run, 10 fail). | Confirmed (fixture `avcC`: `profile_idc 110`, 10-bit luma/chroma; CI: VideoToolbox `err=-8969` on every frame) | Medium (iOS) | CI run on PR #33 @ 85c6d5e; local `avcC` parse | CI: **fixture re-encoded to 8-bit H.264 High in PR #33** (iOS green). Product (still open): detect unsupported codec/bit depth at inspection (`formatDescriptions`) and fail fast with a clear `VideoError`/`MosaicError`, or fall back to a software path. |
+| I-23 | Deps / logging | `swift-log` is declared in `Package.swift` but never imported. The OSLog subsystem is `com.mosaicKit` in most files but `com.mosaickit` in the preview files, which splits Console filtering. | Confirmed (static) | Low | `grep` finds no `import Logging`; `Logger(subsystem:)` strings | Remove the dependency (or adopt it). Unify the subsystem string. Fix the CLAUDE.md logging guidance. |
+| I-24 | Codable | `MosaicConfiguration.init(from:)` requires most keys (`decode`), so configs persisted by older versions fail to decode when a field is added. | Confirmed (static) | Medium (upgrade risk) | `MosaicConfiguration.swift` decoder | Use `decodeIfPresent ?? default` for every key added after 1.0 (rule 2). Add a decode-old-payload test per new field. |
+| I-25 | Hygiene | Dead or misleading code: `generateallcombinations` ignores the caller's config; unused private helpers in `MetalMosaicGenerator` (`extractFramesWithVideoToolbox`, `calculateExtractionTimes`, `calculateAspectRatio`); unused `MosaicFrameSource`/`makeFrameSource`, `prioritizeVideos`, `VideoError`, `LibraryError`; never-emitted statuses. | Confirmed (static) | Low | §2.12, §5.4 | Remove, or document as intentionally unused (`MosaicFrameSource` has history, §2.6). |
 
 ### 4.3 Performance: hotspots & budgets
 
@@ -1853,7 +1940,7 @@ The package's minimum deployment target is **26**, so everything below must be g
 ### 4.10 Phase 4 wrap-up
 
 **Decisions / findings**
-- 22 issues registered. **Confirmed High:**
+- 22 issues registered at the end of Phase 4 (I-23 … I-25 were added in the final pass). **Confirmed High:**
   - I-1 rotated sources are stretched;
   - I-2 the ffmpeg scale filter distorts non-16:9 and portrait video.
 - **Confirmed Medium:** I-3, I-4, I-8, I-12, I-16, I-20, I-22. (I-5, I-6, and I-7 were downgraded in Phase 5 after re-checking the preset defaults.)
@@ -1903,7 +1990,7 @@ def dynamic(n,W,ar):
 </details>
 
 
-## Part 5 — Technical Reference & Glossary (Phase 5)
+## Part 5 — Technical Reference & Glossary
 
 > Quick-lookup reference: terms, every public type, the model "schema" (there is no database;
 > the persisted schema is the `Codable` model graph), status and error catalogs, and
@@ -2320,6 +2407,49 @@ index hashes if sources changed, add an executive summary, and do a final consis
 
 ---
 
+## Part 6 — Consolidated Findings, Roadmap & Maintenance
+
+### 6.1 Recommended roadmap (prioritized)
+
+Each item references the §4.2 register. Effort estimates are rough, for one engineer familiar
+with the code.
+
+| # | Work item | Issues | Why now | Effort |
+|---|---|---|---|---|
+| 1 | Merge **#33** (iOS CI) and **#34** (ffmpeg watchdog), then merge `main` into the docs PR | I-16, I-21, I-22 (CI) | Restores a green, meaningful CI on both platforms | done / review only |
+| 2 | Apply `preferredTransform` to the dimensions in `VideoMetadataExtractor`; add a rotated-video fixture test | I-1 | Portrait phone videos are the most common source on iOS | S |
+| 3 | Fix the ffmpeg scale filter (aspect-preserving, even dimensions) and drop the forced `-r 30` / wrong `pix_fmt` for libx265 | I-2, I-3 | Wrong output for common sources in the ffmpeg mode | S |
+| 4 | Make preview default filenames deterministic (drop the run timestamp or make it a token) | I-12 | Enables incremental preview runs (skip-if-exists) | S (naming change: note in the release) |
+| 5 | Destination-aware output publication: local `renamex_np(RENAME_EXCL)`, remote staging, iCloud coordination; ignore zero-byte outputs in skip-if-exists | I-4 | Correctness on NAS and iCloud; maintainer-planned (§F12) | M |
+| 6 | Opt-in **resumable preview export** (iOS/macOS 27) with a stable per-job temp directory | §4.9 | Big win for long exports interrupted in the background | M |
+| 7 | Fail fast on undecodable sources (10-bit H.264 on iOS, …) at inspection time | I-22 | A clear error instead of "Frame extraction failed" | S |
+| 8 | Stream animated-export frames into the encoder instead of `[CGImage]` | I-20 | Memory safety for `.nochange` / long videos | M |
+| 9 | Fix or deprecate `.dynamic`; fix `.auto` units | I-8, I-9 | Broken layout options that are advertised in the README | M |
+| 10 | Housekeeping: `decodeIfPresent` for new keys, remove dead code and swift-log, unify the log subsystem, render or remove `.colorPalette`, and resolve I-13 (4K vs 1080p docs) | I-10, I-13, I-23, I-24, I-25 | Lower maintenance cost and fewer surprises | S each |
+| 11 | Performance exploration (always benchmark against the batched path): CVPixelBuffer → Metal zero-copy path, GPU-side frame treatment, moving encoding off the generator actor, the VideoToolbox constant-quality factor for SJS | §4.3, §4.9 | Throughput is a hard requirement | L |
+
+### 6.2 Open questions (still unresolved)
+
+| ID | Question | How to answer |
+|---|---|---|
+| Q11 | How much does actor serialization of encode and overlays limit batch throughput? | Instruments (`OSSignposter` intervals already exist) with 1/2/4 concurrent jobs |
+| Q13 | Does `-pix_fmt p010le` with libx265 warn, convert, or fail? | Run the ffmpeg export on a 10-bit-capable build and inspect the output |
+| Q14 | How does iCloud Drive treat hidden staging files and the placeholder? | Generate into an iCloud Drive folder with `overwrite == false`; watch `brctl log` / conflicts |
+| Q16 | Which configurations does `configureForResumableExport()` accept? | Probe with the native presets ± video composition, animation tool, and audio mix on OS 27 |
+| Q17 | Is AVIF (still/sequence) writable on iOS 27? | `CGImageDestinationCopyTypeIdentifiers()` on device |
+
+### 6.3 Keeping this document current
+
+- **After changing code**, run
+  `python3 codebase-analysis-docs/assets/doc_check.py`. It verifies internal links, table
+  shapes, and code fences, and it re-hashes every `[[F:path#range#hash8]]` anchor against the
+  working tree. Every mismatch it reports is a claim to re-verify; then update the hash.
+- **When fixing an issue**, update its row in §4.2 (status column) and the matching Part 6
+  roadmap line. Keep IDs stable and never renumber.
+- **When adding public API**, update §5.2 and §5.6. Follow the checklists in §4.8.
+- **Don't edit the per-phase wrap-ups** except to mark corrections inline. They are the audit
+  trail.
+
 ## Appendix A — File Index
 
 `(#) PRIORITY | PATH | TYPE | LINES | HASH8 | NOTES`. Priority: P0 = entry point / backbone,
@@ -2393,26 +2523,15 @@ non-existent `.xcodeproj`), `tasks/TASKS.md` (empty backlog).
 ## Appendix C — State Block
 
 ```
-INDEX_VERSION: 5 (Phases 1–5 complete; Phase 6 = final assembly pending)
-SNAPSHOT: main@8f0c82f → branch claude/codebase-analysis-docs-ppz2yf (Sources/ unchanged on this branch; Appendix A hashes valid)
-RELATED PRs: #33 iOS CI (scheme + iOS test compile + 8-bit fixture), #34 ffmpeg watchdog (I-16); #31 closed as duplicate of #33
+INDEX_VERSION: 6 (FINAL: all phases complete)
+SNAPSHOT: main@8f0c82f; Sources/ unchanged on the docs branch; 20/20 file anchors re-verified in the final pass
+RELATED PRs: #32 this doc (+README unreleased note); #33 iOS CI scheme + 8-bit fixture (green);
+             #34 ffmpeg watchdog (macOS green); #31 closed (duplicate of #33)
 
-FILE_MAP_SUMMARY: see Appendix A (49 files indexed; P0 = 8, P1 = 15)
-
-ISSUE REGISTER: §4.2 (I-1 … I-22). High: I-1, I-2. Medium: I-3 I-4 I-8 I-12 I-16 I-20 I-22. (I-5/I-6/I-7 downgraded in Phase 5)
-
-OPEN_QUESTIONS:
-  Q11 Measure actor-serialization impact on MetalMosaicGenerator
-  Q13 Runtime checks: ffmpeg -pix_fmt p010le with libx265 (I-3)
-  Q14 iCloud Drive behaviour with same-directory staging / placeholders
-  Q16 Which export configurations configureForResumableExport() accepts
-  Q17 AVIF writability (still + sequence) on iOS 27 / macOS 27
-
-GLOSSARY: §5.1 (complete)
-
-NEXT (Phase 6 – final assembly):
-  1 Executive summary at the top (1 screen)
-  2 Consistency pass: feature IDs, issue IDs, section cross-refs, anchors
-  3 Re-verify Appendix A hashes against main (after #33/#34 merge if applicable)
-  4 Fold PR #33/#34 outcomes into §2.11 / I-16 / I-21 / I-22 status
+FILE_MAP_SUMMARY: Appendix A (49 files; P0 = 8, P1 = 15)
+ISSUE REGISTER:   §4.2 I-1 … I-25   (High: I-1, I-2; Medium: I-3 I-4 I-8 I-12 I-16 I-20 I-22 I-24)
+ROADMAP:          §6.1
+OPEN_QUESTIONS:   §6.2 (Q11 Q13 Q14 Q16 Q17)
+GLOSSARY:         §5.1
+MAINTENANCE:      §6.3 + codebase-analysis-docs/assets/doc_check.py
 ```
