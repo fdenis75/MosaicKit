@@ -911,6 +911,9 @@ graph LR
 
    Combined with overlays or speed-changes, Passthrough may ignore the video composition or
    audio mix. `validate()` rejects overlays only when Passthrough is chosen *explicitly*.
+   *(Scope, verified in Phase 5: this mapping runs only when `exportPresetName == nil`. The
+   `init` default is `AVAssetExportPresetHEVC1920x1080`, so it affects decoded configs that lack
+   the key, or an explicit `nil`.)*
 6. `MosaicGeneratorCoordinator` tracks tasks and handlers by `video.id`, so concurrent jobs for
    the same input can clobber each other's cancellation and progress. The preview coordinator
    was fixed to use attempt IDs; the mosaic one was not.
@@ -1255,8 +1258,8 @@ backbone. Read `LayoutProcessor` algorithms, `ThumbnailProcessor` header/label r
 
   | Mode | How settings are chosen | Resolution control |
   |---|---|---|
-  | `.native` | `exportPresetName` if set, else `VideoFormat.exportPreset(quality:)` with **exact** matching: 1.0 → HEVCHighest, 0.9 → HEVC1920x1080, 0.8 → HighestQuality (H.264; **default**), 0.7 → `AVAssetExportPreset1920x1080` (H.264; the comment says HEVC), 0.5 → LowQuality, 0.4 → 960x540, **anything else → Passthrough**. | Preset-forced size (`nativeExportPreset.profile.maxResolution` or a size in the preset name) takes priority; otherwise the `exportMaxResolution` cap via the video composition. |
-  | `.sjs` | `sJSExportPresetName` if set: `.hevc` → HEVC; `.h264_HighAutoLevel` (**raw value "HEVC High"**) → H.264 High; `.h264_lowAutoLevel` → H.264 Baseline. Uses `renderSize`. Otherwise **exact** quality matching: 1.0 → HEVC; 0.75 → H.264 High; 0.5 → H.264 Main; 0.25 and **anything else (incl. default 0.8)** → **H.264 Baseline**. Dimensions come from `scaleDimensions` on the *source* size (limits 2160 or 1920). | `exportMaxResolution` via `renderSize` and the video composition |
+  | `.native` | `exportPresetName`, which **defaults to `AVAssetExportPresetHEVC1920x1080`** in `init`. When it is `nil` (a decoded config without the key, or set to `nil` explicitly), `VideoFormat.exportPreset(quality:)` is used with **exact** matching: 1.0 → HEVCHighest, 0.9 → HEVC1920x1080, 0.8 → HighestQuality (H.264), 0.7 → `AVAssetExportPreset1920x1080` (H.264; the comment says HEVC), 0.5 → LowQuality, 0.4 → 960x540, **anything else → Passthrough**. | Preset-forced size (`nativeExportPreset.profile.maxResolution` or a size in the preset name) takes priority; otherwise the `exportMaxResolution` cap via the video composition. |
+  | `.sjs` | `sJSExportPresetName`, which is **never `nil` from `init` or decoding** (both fall back to `.hevc`, so the default is HEVC at `renderSize`): `.hevc` → HEVC; `.h264_HighAutoLevel` (**raw value "HEVC High"**) → H.264 High; `.h264_lowAutoLevel` → H.264 Baseline. Uses `renderSize`. Only if the property is later set to `nil` explicitly: **exact** quality matching: 1.0 → HEVC; 0.75 → H.264 High; 0.5 → H.264 Main; 0.25 and **anything else (incl. 0.8)** → **H.264 Baseline**. Dimensions come from `scaleDimensions` on the *source* size (limits 2160 or 1920). | `exportMaxResolution` via `renderSize` and the video composition |
   | `.ffmpeg` | `ffmpegEncodingOptions` if set, else `FFmpegEncodingOptions.from(quality:format:)` with **range** matching: ≥ 1.0 → libx265 CRF 18 slow, 4K; ≥ 0.75 → libx264 CRF 20 medium, 4K (**default 0.8 lands here**); ≥ 0.5 → libx264 CRF 23 fast, 1080p; else libx264 CRF 28 fast, 720p. `forPreview(quality:)` is an alternative VideoToolbox factory (not used by default). | `options.maxResolution` → `-vf scale=…` in ffmpeg (the composition is not applied in passthrough) |
 
 - **ffmpeg argument template** (`FFmpegEncodingOptions.buildArguments`):
@@ -1284,13 +1287,11 @@ backbone. Read `LayoutProcessor` algorithms, `ThumbnailProcessor` header/label r
     composition's `frameDuration`. They also force `-pix_fmt p010le` (10-bit), a VideoToolbox
     pixel format. libx265 normally expects `yuv420p10le`, so ffmpeg will auto-convert or warn.
     To verify.
-  - ⚠ The SJS default (quality 0.8) produces **H.264 Baseline** because of exact matching.
-    When no SJS preset is set, the writer dimensions come from `scaleDimensions` on the
-    **untransformed natural size**, while the video composition renders at the capped
-    `renderSize`. The two can differ, so there is a risk of rescaling or aspect mismatch.
-  - ⚠ `PreviewExportDescription.sjs` assumes `.hevc` when `sJSExportPresetName == nil`, but
-    the actual export uses the quality mapping (H.264 Baseline at 0.8). The **UI description
-    is wrong for the default SJS config.**
+  - The SJS default is HEVC at `renderSize`, as `PreviewExportDescription` reports. Only when
+    `sJSExportPresetName` is **explicitly set to `nil`** does the exporter fall back to exact
+    quality matching (0.8 → **H.264 Baseline**). In that case the writer dimensions also come
+    from `scaleDimensions(naturalSize)` rather than `renderSize`, while the description still
+    says HEVC. This is an edge case, not the default.
   - Native Passthrough (explicit or via an unmatched quality) cannot apply a video composition
     or audio mix. Overlays are rejected only when Passthrough is *explicitly* selected.
     Speed-ups with audio (time-pitch mix) and resolution caps are silently ignored.
@@ -1529,9 +1530,11 @@ none.
 1. **The ffmpeg scale filter distorts non-16:9 and portrait video.** It clamps width and height
    independently (F9).
 2. **The ffmpeg HEVC path forces 30 fps** and a p010le pixel format (F9).
-3. **The SJS default config produces H.264 Baseline**, because quality is matched exactly
-   (0.8 matches nothing). `PreviewExportDescription.sjs` reports HEVC for the same config (F9).
-4. **Native `exportPreset(quality:)`:** 0.7 → 1080p **H.264** (the comment says HEVC). The
+3. **SJS with `sJSExportPresetName` explicitly set to `nil`** falls back to exact quality
+   matching, so 0.8 gives H.264 Baseline, while `PreviewExportDescription.sjs` still reports
+   HEVC. *(Corrected in Phase 5: the default config is HEVC and is described accurately.)* (F9)
+4. **Native `exportPreset(quality:)`**, used only when `exportPresetName == nil`, which is not
+   the `init` default (HEVC 1920×1080): 0.7 → 1080p **H.264** (the comment says HEVC). The
    MediumQuality branch can never be reached. Unmatched values fall back to Passthrough (F9).
 5. **`MetadataField.colorPalette` never renders** (no swatch colors are passed) (F5).
 6. **The default `VisualSettings.addShadow = true`** routes every frame through a CPU shadow
@@ -1620,8 +1623,10 @@ none.
     coordinator. Use `withID(_:)` to fork identity.
 12. **WebP is injected.** Core must never import `webp`. `animatedFormat` defaults to `.webp`,
     so animation requires `MosaicKitWebP.register()` or another format.
-13. **Preview quality → preset mapping uses exact floats** (native and SJS). Only the documented
-    values do what their names suggest (§4.2 I-5, I-6).
+13. **Preview quality → preset mapping uses exact floats** (native and SJS). It is only reached
+    when the preset properties are `nil`: native after decoding an old config or explicit
+    `nil`; SJS only after explicit `nil`. The `init` defaults are HEVC 1920×1080 (native) and
+    `.hevc` (SJS) (§4.2 I-5, I-6).
 14. **CI:** macOS runs `swift test` in parallel with `MOSAICKIT_SUITE_MODE=none`. Media-dependent
     suites self-skip. iOS runs `xcodebuild` on the `MosaicKit-Package` scheme (PR #31 / #33).
     The embedded fixture is 10-bit H.264, which iOS can't decode (I-22). No preview export runs
@@ -1641,9 +1646,9 @@ robustness, performance, or cosmetic.
 | I-2 | F9 | **ffmpeg scale filter distorts** non-16:9 and portrait sources. | Confirmed (static) | **High** (ffmpeg users) | `ExportMaxResolution.scaleFilter` = `scale='min(W,iw)':'min(ih,H)'` clamps each axis independently. 3840×1600 → 1920×1080; 1080×1920 → 1080×1080. | `scale=w='min(W,iw)':h='min(H,ih)':force_original_aspect_ratio=decrease:force_divisible_by=2`, with W/H swapped for portrait (as `buildVideoComposition` does). |
 | I-3 | F9 | **ffmpeg HEVC forces `-r 30`** (and `-pix_fmt p010le`). | Confirmed (static); pix_fmt effect suspected | Medium | `buildArguments` adds `-r 30` for `.hevc` / `.hevcVideoToolbox`. | Drop `-r` (keep the source rate), or derive it from the composition's frame duration. Use `yuv420p10le` for libx265 and keep `p010le` only for VideoToolbox. |
 | I-4 | F12 | **No-overwrite publication is not atomic.** Zero-byte placeholder race; placeholder leaked if `rename` fails. | Confirmed (static) | Medium | `OutputTransaction.commit()`, §F12 | See the §F12 design note (strategy per destination). Minimum: delete the placeholder on rename failure, and treat zero-byte files as "not done" in skip-if-exists. |
-| I-5 | F9 | **Native `exportPreset(quality:)` matches exact floats.** Unmatched values → **Passthrough**; 0.7 → H.264 1080p (the comment says HEVC); the MediumQuality branch is unreachable (duplicate `0.7`). | Confirmed (static) | Medium | `VideoFormat.swift` @L397–416 | Use ranges (`>= 0.95`, …). Decide what the 0.7 mapping should be. Reject Passthrough when a composition or audio mix is required (overlays, resize, speed ≠ 1). |
-| I-6 | F9 | **SJS default (quality 0.8) produces H.264 Baseline**, while `PreviewExportDescription.sjs` reports **HEVC**. | Confirmed (static) | Medium | `videoSettings(for:…)` matches only 1.0/0.75/0.5/0.25; `PreviewExportDescription.sjs` defaults to `.hevc` when no preset is set | Use range mapping and make the description call the same resolver as the exporter (one source of truth). |
-| I-7 | F9 | SJS writer dimensions come from `scaleDimensions(naturalSize)`, but the composition renders at the capped `renderSize`. | Suspected | Medium | `exportWithSJSSession` | Always pass `renderSize` to `VideoOutputSettings` (as the preset branch already does). |
+| I-5 | F9 | **Native `exportPreset(quality:)` matches exact floats.** Unmatched values → **Passthrough**; 0.7 → H.264 1080p (the comment says HEVC); the MediumQuality branch is unreachable (duplicate `0.7`). Reached only when `exportPresetName == nil`: **configs decoded without that key** (the decoder uses `decodeIfPresent` with no default) or explicit `nil`. The `init` default is HEVC 1920×1080. | Confirmed (static) | Low–Medium | `VideoFormat.swift` @L397–416 | Use ranges (`>= 0.95`, …). Decide what the 0.7 mapping should be. Reject Passthrough when a composition or audio mix is required (overlays, resize, speed ≠ 1). |
+| I-6 | F9 | **SJS with `sJSExportPresetName` explicitly `nil`** produces H.264 Baseline at 0.8 (exact matching), while `PreviewExportDescription.sjs` reports **HEVC**. *(Corrected: `init` and decoding both default to `.hevc`, so the default config is fine.)* | Confirmed (static) | Low | `videoSettings(for:…)` matches only 1.0/0.75/0.5/0.25; `PreviewExportDescription.sjs` defaults to `.hevc` when no preset is set | Use range mapping and make the description call the same resolver as the exporter (one source of truth). |
+| I-7 | F9 | In the same explicit-`nil` SJS branch, writer dimensions come from `scaleDimensions(naturalSize)`, but the composition renders at the capped `renderSize`. | Suspected | Low | `exportWithSJSSession` | Always pass `renderSize` to `VideoOutputSettings` (as the preset branch already does). |
 | I-8 | F4 | **`.dynamic` layout is geometrically broken.** Rows overlap, wide rows are clipped, and the width ignores `config.width`. | Confirmed (simulated) | Medium | Simulation (5120 px, 16:9): n=107 → canvas width 4737 but widest row 6257 (**clipped**); 40/107 cells taller than their row (**overlap**). n=30 → width 6897 > 5120. n=800 → 15 rows with negative scale, cells as narrow as 5 px. | Normalize each row to `mosaicWidth`, use a single height per row, clamp the scale at ≥ 0, and compute the canvas from the max row width. Or deprecate `.dynamic`. |
 | I-9 | F4 | **`.auto` fails on iPhone.** It mixes points and pixels; the count is 0, the layout is empty, and it throws "Empty mosaic layout". | Confirmed (static) | Low–Medium | `calculateMaxThumbnails`: 390 pt / (160·3) → 0 columns | Use pixels consistently (points × scale), or points consistently. Floor the count at 4. |
 | I-10 | F5 | **`MetadataField.colorPalette` never renders.** | Confirmed (static) | Low | The generator never passes `swatchColors` to `createMetadataHeader` | Compute swatches from the dominant colors (already computed for the background) and pass them in. This requires generating the header **after** the first frames. |
@@ -1705,8 +1710,8 @@ robustness, performance, or cosmetic.
 - Export is dominated by the encoder.
 - The ffmpeg path adds a full intermediate `.mov`. It is a passthrough, except that a **full
   re-encode at HighestQuality** happens when a speed-change audio mix exists.
-- The native `AVAssetExportPresetHighestQuality` default re-encodes H.264 at source resolution,
-  capped at 1080p via the composition.
+- The native default preset (`AVAssetExportPresetHEVC1920x1080`) re-encodes HEVC with a
+  preset-forced 1080p bound, and the composition applies that size.
 
 ### 4.4 Security implications
 
@@ -1850,7 +1855,7 @@ The package's minimum deployment target is **26**, so everything below must be g
 - 22 issues registered. **Confirmed High:**
   - I-1 rotated sources are stretched;
   - I-2 the ffmpeg scale filter distorts non-16:9 and portrait video.
-- **Confirmed Medium:** I-3, I-4, I-5, I-6, I-8, I-12, I-16, I-20, I-22.
+- **Confirmed Medium:** I-3, I-4, I-8, I-12, I-16, I-20, I-22. (I-5, I-6, and I-7 were downgraded in Phase 5 after re-checking the preset defaults.)
 - **Q15 answered.** `MosaicCancellationTests` documents that `setConcurrencyLimit(0)` mid-batch is
   a no-op for the mosaic coordinator (not a pause). For the preview coordinator, 0 means *auto*
   (≤ 2), so there is no pause there either. **There is no pause primitive in either
@@ -1983,7 +1988,7 @@ RELATED PRs: #31 and #33 both fix the iOS CI scheme + iOS test compile (duplicat
 
 FILE_MAP_SUMMARY: see Appendix A (49 files indexed; P0 = 8, P1 = 15)
 
-ISSUE REGISTER: §4.2 (I-1 … I-22). High: I-1, I-2. Medium: I-3 I-4 I-5 I-6 I-7 I-8 I-12 I-16 I-20 I-22.
+ISSUE REGISTER: §4.2 (I-1 … I-22). High: I-1, I-2. Medium: I-3 I-4 I-8 I-12 I-16 I-20 I-22 (I-5/I-6/I-7 downgraded in Phase 5).
 
 OPEN_QUESTIONS:
   Q11 Measure actor-serialization impact on MetalMosaicGenerator
