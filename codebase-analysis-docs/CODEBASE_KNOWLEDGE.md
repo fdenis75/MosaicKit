@@ -355,7 +355,7 @@ Default values worth knowing:
 | Doc | Reliability | Notes |
 |---|---|---|
 | Source code | **Authoritative** | Always verify against it. |
-| `README.md` | High, with exceptions | Current through 1.7.0. Exception: "New in 1.6.2" says the default `ExportMaxResolution` is **4K**, but the code defaults to **"1080p"** (§1.10 item 4). The installation snippet still says `from: "1.2.0"`. |
+| `README.md` | High, with exceptions | Current through 1.7.0, but the 1.7.0 "bounded pull-based stream" note describes a design that was later **reverted** for performance (§2.6). Other exception: "New in 1.6.2" says the default `ExportMaxResolution` is **4K**, but the code defaults to **"1080p"** (§1.10 item 4). The installation snippet still says `from: "1.2.0"`. |
 | `CLAUDE.md` / `AGENTS.md` | Medium | Architecture summary is correct. Wrong on: swift-log usage, "no Makefile", `swift run` examples, the CI workflow list (`mosaickit-tests.yml` and `swift62.yml` do not exist; only `swift.yml` + `claude*.yml` do), and `Models/AspectRatio.swift` (`AspectRatio` is defined in `Models/LayoutConfiguration.swift`). `AGENTS.md` still mentions Core Graphics/vImage in pipeline step 4 and uses `VideoFormat` as the mosaic format type (it is `OutputFormat`). |
 | `MosaicKit-DeepDive.md` | **Stale — do not trust architecture sections** | Describes the removed dual engine (`CoreGraphicsMosaicGenerator`, `MosaicGeneratorFactory`, vImage buffer pool) and a `.gif` still format. The coordinator concurrency formula it gives is for previews only, and the cap of 8 it quotes is really 2. |
 | `spec.md` | **Design intent, only partly implemented** | Describes a `GenerationRequest/Plan`, `JobHandle/BatchHandle`, checkpoint ledger, and a single processing-service actor. None of these exist. What does exist: `VideoSource`, `OutputTransaction`, `MosaicFrameSource`, validation, `GenerationJobController`. |
@@ -728,8 +728,23 @@ change code:
   buffer**. Only labeling concurrency is bounded (8).
 - If decoding outpaces GPU submission, decoded frames can queue up in memory. In practice the
   GPU side commits without waiting, so it is rarely the bottleneck.
-- `MosaicFrameSource` (pull-based, bounded) was written to replace this but is not wired in.
-- *(This contradicts the README 1.7.0 claim "frame extraction uses a pull-based bounded stream".)*
+- **History (maintainer input, 2026-09-25):**
+  - 1.7.0 shipped a pull-based, bounded frame source (`MosaicFrameSource`).
+  - It was **reverted** because mosaic generation became **30–45 % slower** than with the
+    batched implementation, which was not acceptable.
+  - The revert is PR #29, "Restore batched AVAssetImageGenerator extraction", together with
+    PR #28, "Restore pipelined Metal mosaic batches".
+- `MosaicFrameSource` is still in the tree but has no callers.
+- The README's "New in 1.7.0" note ("frame extraction uses a pull-based bounded stream")
+  describes the 1.7.0 release, not the current code. There is no changelog entry for the
+  revert yet.
+- **Constraint for future work:** memory bounding must not cost throughput. Before
+  reintroducing backpressure, benchmark against the batched path. Cheaper options:
+  - bound the `AsyncThrowingStream` buffer with `.bufferingOldest(n)`. **This is not
+    acceptable as-is, because it drops frames**, and strict mode would then fail.
+  - Better: throttle the producer. The producer could await a semaphore-like credit that the
+    GPU side releases per batch, so decoding stays batched and never runs more than
+    N frames ahead.
 
 ### 2.7 Cancellation model
 
@@ -883,8 +898,9 @@ graph LR
    the generator actor. Concurrency helps decoding and the GPU only.
 2. Several `@MainActor` hops in the preview export path mean hosts must keep the main actor
    serviced.
-3. The live frame path uses an unbounded `AsyncThrowingStream`. The bounded `MosaicFrameSource`
-   is dead code, which contradicts the README.
+3. The live frame path uses an unbounded `AsyncThrowingStream`. This is **deliberate**: the
+   bounded `MosaicFrameSource` from 1.7.0 was reverted because it cost 30–45 % throughput
+   (maintainer). It is now dead code. The README's 1.7.0 note describes the reverted design.
 4. Mosaic frame extraction is strict (any failed frame fails the job). There is no best-effort
    mode, despite `spec.md` asking for an explicit policy.
 5. `VideoFormat.exportPreset(quality:)` [[F:Sources/Models/VideoFormat.swift#397-416#26c5e961]]
@@ -1655,7 +1671,7 @@ robustness, performance, or cosmetic.
 | Readback: `[UInt8]` buffer **and** `Data` copy **and** `CGImage` | ~2 × 59 MB | `createCGImage(from:)` copies twice |
 | Color DNA / watermark: each redraws the full mosaic into a new context | +59 MB each | `OverlayProcessor` |
 | HEIF/JPEG encoder working set | tens of MB | `CGImageDestinationFinalize` |
-| Frames in flight | up to 8 labeling tasks + an **unbounded** stream buffer + 20 per GPU batch | §2.6 |
+| Frames in flight | up to 8 labeling tasks + an **unbounded** stream buffer (a deliberate throughput trade-off: the bounded 1.7.0 design was reverted, see §2.6) + 20 per GPU batch | §2.6 |
 
 - Peak ≈ **250–350 MB per job at 5120 px**, and roughly **4×** that at 10,000 px.
 - The coordinator's auto-limit budget assumes `width × densityFactor / 2000` GB per task
@@ -1744,7 +1760,7 @@ robustness, performance, or cosmetic.
 | `.timeDomain` pitch algorithm for speed-ups | `.spectral` stalls the offline mixer in the background; `.varispeed` conflicts during export | Keep it unless background export is re-validated |
 | Detached `.userInitiated` export tasks + `ProcessInfo` activity (macOS) | Prevent App Nap / background throttling from stalling VideoToolbox | Needed for long exports; see the DocC `PreviewExporting` article |
 | Stored detached task for SJS | SJS has no cancel API; only Task cancellation stops its writer | Keep a handle to the task |
-| Pull-based `MosaicFrameSource` exists but isn't wired | A reliability-spec deliverable (bounded memory) that the batched `images(for:)` path superseded, probably for throughput (PR #29 "Restore batched AVAssetImageGenerator extraction") | Removing it is safe; wiring it in trades throughput for memory bounds |
+| Pull-based `MosaicFrameSource` exists but isn't wired | **Confirmed by the maintainer:** it shipped in 1.7.0 as a reliability-spec deliverable (bounded memory), then was reverted (PR #29, with PR #28 restoring pipelined GPU batches) because generation was **30–45 % slower** than the batched `images(for:)` path | Throughput is a hard requirement. Removing the dead type is safe. Any backpressure must be benchmarked against the batched path; prefer producer credits over per-frame pulls (§2.6). |
 | 20-frame command buffers | PR #28 "Restore pipelined Metal mosaic batches": 8-frame batches increased submissions ~2.5× | Don't shrink batches without measuring |
 | Background from the first 5 frames only | Keeps GPU rendering incremental (it must start before all frames are decoded) | Better palettes need a second pass or deferred background compositing |
 | `PreviewConfiguration` stores the max resolution as a raw `String` | Keeps the struct Codable without availability gating on `ExportMaxResolution` | Both are now OS 26+, so this could be simplified |
