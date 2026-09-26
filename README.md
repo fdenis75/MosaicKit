@@ -22,6 +22,7 @@ A high-performance Swift package for generating video mosaics with Metal-acceler
 ## Unreleased (since 1.7.0)
 
 - **Mosaic frame extraction reverted to the batched pipeline** — the pull-based, bounded frame source introduced in 1.7.0 made mosaic generation 30–45 % slower, so extraction is back to batched `AVAssetImageGenerator` requests feeding pipelined 20-frame Metal command buffers (#28, #29). The 1.7.0 "pull-based bounded stream" bullet below no longer describes the current implementation.
+- **Logging** — the unused `swift-log` dependency is removed, and every component now logs under the OSLog subsystem `com.mosaicKit`. Console filters on `com.mosaickit` (lowercase, previously used by the preview components) no longer match.
 
 ## New in 1.7.0
 

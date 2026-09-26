@@ -128,7 +128,7 @@ Every PR updates its row here (status) and the matching §4.2 / §6.1 entries in
 |---|---|---|
 | P-1 | planned | |
 | P-2 | planned | |
-| S-1 | planned | |
+| S-1 | in review | #38 |
 | S-2 | planned | |
 | S-3 | planned | |
 | S-4 | planned | |
