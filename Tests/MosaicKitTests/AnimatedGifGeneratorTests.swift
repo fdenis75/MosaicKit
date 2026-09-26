@@ -1,5 +1,6 @@
 import Foundation
 import CoreGraphics
+import ImageIO
 import Testing
 @testable import MosaicKit
 import MosaicKitWebP
@@ -102,6 +103,33 @@ struct AnimatedGifGeneratorTests {
         #expect(FileManager.default.fileExists(atPath: outputURL.path))
         let attrs = try FileManager.default.attributesOfItem(atPath: outputURL.path)
         #expect((attrs[.size] as? Int ?? 0) > 0)
+    }
+
+    /// `MetalMosaicGenerator` passes `1 / gifFps` as the frame delay, so reading the
+    /// delay back from every frame checks each format × fps combination in
+    /// milliseconds, without extracting frames from a video.
+    @Test("Animated formats store the requested per-frame delay",
+          arguments: [AnimatedFormat.gif, .heic, .webp], [2.0, 5.0, 10.0, 25.0])
+    func animatedFormatStoresFrameDelay(format: AnimatedFormat, fps: Double) throws {
+        let frames = makeSolidFrames(count: 3, width: 64, height: 36)
+        let outputURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("delay-\(UUID().uuidString).\(format.fileExtension)")
+        defer { try? FileManager.default.removeItem(at: outputURL) }
+
+        let expectedDelay = 1.0 / fps
+        try AnimatedGifGenerator.save(frames: frames, to: outputURL, format: format, frameDelay: expectedDelay)
+
+        let source = try #require(CGImageSourceCreateWithURL(outputURL as CFURL, nil))
+        let frameCount = CGImageSourceGetCount(source)
+        #expect(frameCount == frames.count)
+        for index in 0..<frameCount {
+            let properties = CGImageSourceCopyPropertiesAtIndex(source, index, nil) as? [String: Any] ?? [:]
+            let delay = try #require(storedFrameDelay(in: properties, format: format),
+                                     "No delay stored for frame \(index) of .\(format.rawValue)")
+            // GIF stores centiseconds and WebP milliseconds; every tested fps is exact in both.
+            #expect(abs(delay - expectedDelay) < 0.005,
+                    ".\(format.rawValue) at \(fps) fps: frame \(index) delay \(delay), expected \(expectedDelay)")
+        }
     }
 
     @Test("AnimatedFormat.fileExtension returns correct extensions")
@@ -290,9 +318,15 @@ struct AnimatedGifGeneratorTests {
         let attrs = try FileManager.default.attributesOfItem(atPath: returnedURL.path)
         #expect((attrs[.size] as? Int ?? 0) > 0)
     }
-    
-    
-    @Test("create all versions")
+
+    /// Full density × size × format × fps matrix (108 end-to-end generations from the
+    /// embedded video). It takes ~2.5 min on macOS and ~12 min on the iOS Simulator,
+    /// where every animated HEIC encode also floods the log with `(Fig) signalled err`
+    /// lines, while each dimension is already covered by a dedicated test. Skipped
+    /// when `MOSAICKIT_SUITE_MODE=none` (CI); run it locally as an extended suite.
+    @Test("create all versions",
+          .enabled(if: ProcessInfo.processInfo.environment["MOSAICKIT_SUITE_MODE"] != "none",
+                   "Extended matrix; skipped when MOSAICKIT_SUITE_MODE=none"))
     func createAllModes() async throws {
         let videoURL = try embeddedVideoURL
         let video = try await VideoInput(from: videoURL)
@@ -424,12 +458,38 @@ struct AnimatedGifGeneratorTests {
                 width: width, height: height,
                 bitsPerComponent: 8, bytesPerRow: 0,
                 space: space,
-                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+                // Opaque frames: an alpha channel makes ImageIO log an
+                // "opaque image with 'AlphaLast'" error on every write.
+                bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue
             ) else { return nil }
             ctx.setFillColor(CGColor(red: r, green: g, blue: b, alpha: 1))
             ctx.fill(CGRect(x: 0, y: 0, width: width, height: height))
             return ctx.makeImage()
         }
+    }
+
+    /// Reads the frame delay ImageIO decodes for one frame, preferring the unclamped
+    /// value (ImageIO may clamp short delays such as 25 fps in the plain key).
+    private func storedFrameDelay(in properties: [String: Any], format: AnimatedFormat) -> Double? {
+        let dictionaryKey: CFString
+        let unclampedKey: CFString
+        let delayKey: CFString
+        switch format {
+        case .gif:
+            dictionaryKey = kCGImagePropertyGIFDictionary
+            unclampedKey = kCGImagePropertyGIFUnclampedDelayTime
+            delayKey = kCGImagePropertyGIFDelayTime
+        case .heic:
+            dictionaryKey = kCGImagePropertyHEICSDictionary
+            unclampedKey = kCGImagePropertyHEICSUnclampedDelayTime
+            delayKey = kCGImagePropertyHEICSDelayTime
+        case .webp:
+            dictionaryKey = kCGImagePropertyWebPDictionary
+            unclampedKey = kCGImagePropertyWebPUnclampedDelayTime
+            delayKey = kCGImagePropertyWebPDelayTime
+        }
+        guard let dictionary = properties[dictionaryKey as String] as? [String: Any] else { return nil }
+        return (dictionary[unclampedKey as String] as? Double) ?? (dictionary[delayKey as String] as? Double)
     }
 }
 
