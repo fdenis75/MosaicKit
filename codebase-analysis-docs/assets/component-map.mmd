@@ -1,0 +1,42 @@
+%% MosaicKit – Phase 2 component map (layers + main collaborations)
+graph TB
+  subgraph API["Public API layer"]
+    SCAN["scanVideos / discoverVideos\n(VideoInputScanner.swift)"]
+    SRC["VideoSource / VideoInput"]
+    MCFG["MosaicConfiguration"]
+    PCFG["PreviewConfiguration"]
+  end
+  subgraph ORCH["Orchestration layer (actors)"]
+    JOB["GenerationJobController"]
+    MCO["MosaicGeneratorCoordinator<G>"]
+    PCO["PreviewGeneratorCoordinator"]
+  end
+  subgraph ENG["Engine layer"]
+    MMG["MetalMosaicGenerator (actor)"]
+    PVG["PreviewVideoGenerator (actor)"]
+    PGL["PreviewGenerationLogic (static)"]
+  end
+  subgraph PROC["Processing components"]
+    LAY["LayoutProcessor (class + NSRecursiveLock)"]
+    THP["ThumbnailProcessor (Sendable class)"]
+    MIP["MetalImageProcessor (@unchecked Sendable)"]
+    OVP["OverlayProcessor (enum, static)"]
+    AGG["AnimatedGifGenerator (static)"]
+    FFE["FFmpegEncoder (enum, macOS)"]
+    ALM["AppLifecycleMonitor.shared"]
+    OTX["OutputTransaction"]
+    VME["VideoMetadataExtractor (actor)"]
+  end
+  SCAN --> SRC --> VME
+  MCO --> MMG
+  PCO --> PVG --> PGL
+  PCO --> ALM
+  MMG --> LAY
+  MMG --> THP
+  MMG --> MIP
+  MMG --> OVP
+  MMG --> AGG
+  MMG --> OTX
+  AGG --> OTX
+  PGL --> FFE --> OTX
+  PGL --> OTX

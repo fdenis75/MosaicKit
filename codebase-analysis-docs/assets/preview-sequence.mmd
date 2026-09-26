@@ -1,0 +1,23 @@
+%% MosaicKit – preview generation sequence (file export)
+sequenceDiagram
+  participant App
+  participant PCo as PreviewGeneratorCoordinator
+  participant PVG as PreviewVideoGenerator (actor)
+  participant PGL as PreviewGenerationLogic
+  participant AVC as AVMutableComposition
+  participant EXP as Exporter (native | SJS | ffmpeg)
+  participant FS as OutputTransaction
+  App->>PCo: generatePreview(for:config:)
+  PCo->>PCo: executeWithBackgroundRetry (≤3, iOS foreground gate)
+  PCo->>PVG: generate()
+  PVG->>PVG: validate(), skip-if-exists, CancellationToken
+  PVG->>PGL: generate(cancellationCheck: token)
+  PGL->>PGL: validateVideo, extract count/duration/speed, timestamps
+  PGL->>AVC: insert N segments (+audio), scaleTimeRange, audio mix
+  PGL->>PGL: buildVideoComposition (scale cap / overlay cues)
+  PGL->>EXP: export to staging (watchdog: cancel + stall)
+  EXP-->>FS: staging file
+  FS->>FS: commit (rename / exclusive create)
+  PGL-->>PVG: final URL
+  PVG-->>PCo: URL
+  PCo-->>App: URL

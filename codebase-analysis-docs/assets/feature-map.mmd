@@ -1,0 +1,44 @@
+%% MosaicKit – Phase 1 feature interaction map
+%% Source of truth: codebase-analysis-docs/CODEBASE_KNOWLEDGE.md §1.7
+graph LR
+  subgraph Input
+    SCAN[F1 Video discovery<br/>VideoInputScanner.swift]
+    SRC[F2 Video input & inspection<br/>VideoSource / VideoInput]
+  end
+  subgraph Mosaic
+    MOS[F3 Mosaic generation<br/>MetalMosaicGenerator]
+    LAY[F4 Layout engine<br/>LayoutProcessor]
+    OVL[F5 Overlays & annotations<br/>OverlayProcessor + ThumbnailProcessor]
+    ANI[F6 Animated export<br/>AnimatedGifGenerator]
+    WEBP[F7 Optional WebP<br/>MosaicKitWebP]
+  end
+  subgraph Preview
+    PRV[F8 Preview highlight reel<br/>PreviewVideoGenerator]
+    EXP[F9 Export backends<br/>native / SJS / ffmpeg]
+  end
+  subgraph Orchestration
+    BAT[F10 Batch coordinators<br/>Mosaic/PreviewGeneratorCoordinator]
+    JOB[F11 Job lifecycle<br/>GenerationJobController]
+  end
+  subgraph Shared
+    OUT[F12 Output paths & atomic commit<br/>*Configuration paths + OutputTransaction]
+    VAL[F13 Validation<br/>ConfigurationValidation]
+  end
+  SCAN --> SRC
+  SRC --> MOS
+  SRC --> PRV
+  MOS --> LAY
+  MOS --> OVL
+  MOS --> ANI
+  MOS -. .webp .-> WEBP
+  ANI -. .webp .-> WEBP
+  PRV --> EXP
+  BAT --> MOS
+  BAT --> PRV
+  JOB -. wraps closures .-> MOS
+  JOB -. wraps closures .-> PRV
+  MOS --> OUT
+  ANI --> OUT
+  EXP --> OUT
+  VAL --> MOS
+  VAL --> PRV
