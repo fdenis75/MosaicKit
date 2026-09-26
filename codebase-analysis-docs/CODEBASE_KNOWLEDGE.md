@@ -290,7 +290,7 @@ work as the package stands. The files in `Examples/` are reference snippets only
 │   ├── VideoInputScanner.swift        scanVideos / discoverVideoSources / discoverVideos
 │   └── MosaicKit.docc/                DocC catalog (8 articles)
 ├── SourcesWebP/MosaicKitWebP.swift    → target "MosaicKitWebP" (DefaultMosaicKitWebPEncoder + register())
-├── Tests/MosaicKitTests/              Swift Testing suites (19 files) + embeddedAsset/test_video.mp4
+├── Tests/MosaicKitTests/              Swift Testing suites (20 files) + embeddedAsset/test_video.mp4
 ├── Examples/                          5 illustrative .swift files (NOT wired as SPM targets)
 ├── Media.xcassets/                    test_video dataset (same fixture, for Xcode)
 ├── .github/workflows/                 swift.yml (macOS + iOS Simulator CI), claude*.yml
@@ -959,9 +959,12 @@ graph LR
     (`.process("Shaders")`), and `Bundle.module` locates `default.metallib`.
   - The test target embeds `embeddedAsset/test_video.mp4` (87 s, 8-bit H.264 High, 720p, video-only).
 - **Tests:**
-  - Swift Testing, 19 files. `CombinationTests` and `PreviewCombinationTests` are `.serialized`.
+  - Swift Testing, 20 files. `CombinationTests` and `PreviewCombinationTests` are `.serialized`.
   - Suites that need a media folder read `MOSAICKIT_SUITE_MODE` (`single` | `folder` | `none`;
     unrecognized values → `single`, missing → `none`) and skip in `none`.
+  - `BenchmarkTests` (plan P-1, #39) is an opt-in throughput benchmark, enabled only by
+    `MOSAICKIT_BENCHMARK=/path/to/videos`. It is the before/after gate for pipeline changes
+    (§4.3).
 - **CI (`.github/workflows/swift.yml`):**
   - Triggers: push to `main`/`claude/**`, and PRs to `main`.
   - *macOS job:* `swift build --build-tests` + `swift test --skip-build`, currently green.
@@ -1760,6 +1763,11 @@ robustness, performance, or cosmetic.
 
 ### 4.3 Performance: hotspots & budgets
 
+**Measuring:** use `BenchmarkTests` (plan P-1). It is opt-in via `MOSAICKIT_BENCHMARK` and runs
+fixed mosaic and animated-export scenarios at concurrency 1 and auto, with one warm-up run and
+the median of N. Compare `main` and the branch on the same machine; there are no absolute
+budgets, because throughput depends on the hardware.
+
 **Per-job memory**, estimated for a 5120-px-wide, 16:9 mosaic (canvas ≈ 5120×2880 RGBA ≈ **59 MB**):
 
 | Allocation | Size | Where |
@@ -2529,8 +2537,9 @@ P1 = core feature, P2 = supporting, P3 = docs/infra.
 | 45 | P3 | `README.md` | doc | 997 | df5d5f45 | Changelog + usage |
 | 46 | P3 | `spec.md` | doc | 78 | 4508df31 | Reliability spec (partially implemented) |
 | 47 | P3 | `MosaicKit-DeepDive.md` | doc | 199 | 1e67bef6 | Stale architecture |
-| 48 | P3 | `CLAUDE.md` | doc | 387 | 783c9276 | Agent guide (rewritten 2026-09-26; points to this doc; keep mirrored) |
-| 49 | P3 | `AGENTS.md` | doc | 387 | 076e4691 | Agent guide (rewritten 2026-09-26; points to this doc; keep mirrored) |
+| 48 | P3 | `CLAUDE.md` | doc | 394 | 889fdfbe | Agent guide (rewritten 2026-09-26; points to this doc; keep mirrored) |
+| 49 | P3 | `AGENTS.md` | doc | 394 | ae8c4568 | Agent guide (rewritten 2026-09-26; points to this doc; keep mirrored) |
+| 50 | P2 | `Tests/MosaicKitTests/BenchmarkTests.swift` | test | 231 | 3ac1e33b | Opt-in throughput benchmark (`MOSAICKIT_BENCHMARK`); gate for ⚡ plan steps |
 
 Excluded or low value: `Media.xcassets/**` (binary fixture), `Tests/MosaicKitTests/embeddedAsset/test_video.mp4`
 (87 s 8-bit H.264 video-only fixture), `scripts/**` + `Makefile` (xcodebuild agent scaffold for a
@@ -2555,7 +2564,7 @@ RELATED PRs (merged): #32 this doc (+README unreleased note); #33 iOS CI scheme 
              #34 ffmpeg watchdog (I-16); #35 review path filter; #36 fast animated tests;
              #31 closed (duplicate of #33). Open: #37 CLAUDE.md/AGENTS.md rewrite + this refresh
 
-FILE_MAP_SUMMARY: Appendix A (49 files; P0 = 8, P1 = 15)
+FILE_MAP_SUMMARY: Appendix A (50 files; P0 = 8, P1 = 15)
 ISSUE REGISTER:   §4.2 I-1 … I-25   (High: I-1, I-2; Medium: I-3 I-4 I-8 I-12 I-16 I-20 I-22 I-24)
 ROADMAP:          §6.1 → IMPLEMENTATION_PLAN.md (decisions §6.4)
 OPEN_QUESTIONS:   §6.2 (Q11 Q13 Q14 Q16 Q17)
