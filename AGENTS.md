@@ -20,6 +20,12 @@ register, change checklists and a glossary. Diagrams are in `codebase-analysis-d
    the branch, commits and PR.
 4. The matching **§4.8 Change checklist** (new config option, layout, format, preview mode, …).
 
+**Planned work** (simplification and issue fixes) is sequenced in
+[`codebase-analysis-docs/IMPLEMENTATION_PLAN.md`](codebase-analysis-docs/IMPLEMENTATION_PLAN.md),
+with the maintainer decisions in knowledge base §6.4. Pick up the next unblocked item there,
+follow its gates (⚡ = benchmark before/after, 📁 = output-naming change → changelog), and
+update its §8 status row in your PR.
+
 Also use **§4.3** for performance-sensitive work (throughput is a hard requirement: benchmark
 against the current batched pipeline, and never regress it) and **§5** for API, schema, status
 and error references.
@@ -377,5 +383,5 @@ Follow the matching checklist in knowledge base §4.8. In short:
 - **Fixing a register issue (`I-n`):**
   1. Read its row and fix sketch.
   2. Add a regression test.
-  3. Update the row's status and the §6.1 roadmap line.
+  3. Update the row's status, the §6.1 roadmap line and the plan's §8 row.
   4. Run `doc_check.py`.

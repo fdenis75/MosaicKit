@@ -120,6 +120,7 @@ correction is marked inline.
 5. [Part 5 — Technical Reference & Glossary](#part-5--technical-reference--glossary)
    - [5.1 Glossary](#51-glossary) · [5.2 Public API](#52-public-api-reference) · [5.3 Model schema](#53-model-relationship-diagram-the-persisted-schema) · [5.4 Status reference](#54-progress--status-reference) · [5.5 Error catalog](#55-error-catalog) · [5.6 Cookbook](#56-usage-cookbook) · [5.7 Output naming](#57-output-artifact-naming-reference) · [5.8 Docs map](#58-documentation-map) · [5.9 Wrap-up](#59-phase-5-wrap-up)
 6. [Part 6 — Consolidated Findings, Roadmap & Maintenance](#part-6--consolidated-findings-roadmap--maintenance)
+   - [6.1 Roadmap](#61-recommended-roadmap-prioritized) · [6.2 Open questions](#62-open-questions-still-unresolved) · [6.3 Maintenance](#63-keeping-this-document-current) · [6.4 Decisions](#64-maintainer-decisions-2026-09-26)
 7. [Appendix A — File Index](#appendix-a--file-index)
 8. [Appendix B — Assumptions](#appendix-b--assumptions)
 9. [Appendix C — State Block](#appendix-c--state-block)
@@ -1734,17 +1735,17 @@ robustness, performance, or cosmetic.
 | I-1 | F2/F3 | **Rotated (portrait phone) videos get landscape layout cells.** Frames arrive rotated and are then **stretched**. | Confirmed (API + static) | **High** | `AVAssetTrack.naturalSize` is untransformed; `VideoMetadataExtractor` stores it as width/height; `AVAssetImageGenerator.appliesPreferredTrackTransform = true` rotates frames; `renderFrame` scales each frame to the exact cell size (`scaleTexture` ignores aspect). The decoder's `maximumSize` also fits the rotated frame inside the landscape box, so it is downscaled **and** blurred. | Apply `preferredTransform` to `naturalSize` in the extractor (use abs of the transformed size), as `buildVideoComposition` already does. Note that `VideoInput.width/height` semantics change, which affects the header "Resolution" field. |
 | I-2 | F9 | **ffmpeg scale filter distorts** non-16:9 and portrait sources. | Confirmed (static) | **High** (ffmpeg users) | `ExportMaxResolution.scaleFilter` = `scale='min(W,iw)':'min(ih,H)'` clamps each axis independently. 3840×1600 → 1920×1080; 1080×1920 → 1080×1080. | `scale=w='min(W,iw)':h='min(H,ih)':force_original_aspect_ratio=decrease:force_divisible_by=2`, with W/H swapped for portrait (as `buildVideoComposition` does). |
 | I-3 | F9 | **ffmpeg HEVC forces `-r 30`** (and `-pix_fmt p010le`). | Confirmed (static); pix_fmt effect suspected | Medium | `buildArguments` adds `-r 30` for `.hevc` / `.hevcVideoToolbox`. | Drop `-r` (keep the source rate), or derive it from the composition's frame duration. Use `yuv420p10le` for libx265 and keep `p010le` only for VideoToolbox. |
-| I-4 | F12 | **No-overwrite publication is not atomic.** Zero-byte placeholder race; placeholder leaked if `rename` fails. | Confirmed (static) | Medium | `OutputTransaction.commit()`, §F12 | See the §F12 design note (strategy per destination). Minimum: delete the placeholder on rename failure, and treat zero-byte files as "not done" in skip-if-exists. |
+| I-4 | F12 | **No-overwrite publication is not atomic.** Zero-byte placeholder race; placeholder leaked if `rename` fails. | Confirmed (static) | Medium | `OutputTransaction.commit()`, §F12 | See the §F12 design note (strategy per destination). Minimum: delete the placeholder on rename failure, and treat zero-byte files as "not done" in skip-if-exists. **Decision D6 → plan F-4.** |
 | I-5 | F9 | **Native `exportPreset(quality:)` matches exact floats.** Unmatched values → **Passthrough**; 0.7 → H.264 1080p (the comment says HEVC); the MediumQuality branch is unreachable (duplicate `0.7`). Reached only when `exportPresetName == nil`: **configs decoded without that key** (the decoder uses `decodeIfPresent` with no default) or explicit `nil`. The `init` default is HEVC 1920×1080. | Confirmed (static) | Low–Medium | `VideoFormat.swift` @L397–416 | Use ranges (`>= 0.95`, …). Decide what the 0.7 mapping should be. Reject Passthrough when a composition or audio mix is required (overlays, resize, speed ≠ 1). |
 | I-6 | F9 | **SJS with `sJSExportPresetName` explicitly `nil`** produces H.264 Baseline at 0.8 (exact matching), while `PreviewExportDescription.sjs` reports **HEVC**. *(Corrected: `init` and decoding both default to `.hevc`, so the default config is fine.)* | Confirmed (static) | Low | `videoSettings(for:…)` matches only 1.0/0.75/0.5/0.25; `PreviewExportDescription.sjs` defaults to `.hevc` when no preset is set | Use range mapping and make the description call the same resolver as the exporter (one source of truth). |
 | I-7 | F9 | In the same explicit-`nil` SJS branch, writer dimensions come from `scaleDimensions(naturalSize)`, but the composition renders at the capped `renderSize`. | Suspected | Low | `exportWithSJSSession` | Always pass `renderSize` to `VideoOutputSettings` (as the preset branch already does). |
-| I-8 | F4 | **`.dynamic` layout is geometrically broken.** Rows overlap, wide rows are clipped, and the width ignores `config.width`. | Confirmed (simulated) | Medium | Simulation (5120 px, 16:9): n=107 → canvas width 4737 but widest row 6257 (**clipped**); 40/107 cells taller than their row (**overlap**). n=30 → width 6897 > 5120. n=800 → 15 rows with negative scale, cells as narrow as 5 px. | Normalize each row to `mosaicWidth`, use a single height per row, clamp the scale at ≥ 0, and compute the canvas from the max row width. Or deprecate `.dynamic`. |
+| I-8 | F4 | **`.dynamic` layout is geometrically broken.** Rows overlap, wide rows are clipped, and the width ignores `config.width`. | Confirmed (simulated) | Medium | Simulation (5120 px, 16:9): n=107 → canvas width 4737 but widest row 6257 (**clipped**); 40/107 cells taller than their row (**overlap**). n=30 → width 6897 > 5120. n=800 → 15 rows with negative scale, cells as narrow as 5 px. | Normalize each row to `mosaicWidth`, use a single height per row, clamp the scale at ≥ 0, and compute the canvas from the max row width. Or deprecate `.dynamic`. **Decision D4 (deprecate) → plan F-7.** |
 | I-9 | F4 | **`.auto` fails on iPhone.** It mixes points and pixels; the count is 0, the layout is empty, and it throws "Empty mosaic layout". | Confirmed (static) | Low–Medium | `calculateMaxThumbnails`: 390 pt / (160·3) → 0 columns | Use pixels consistently (points × scale), or points consistently. Floor the count at 4. |
 | I-10 | F5 | **`MetadataField.colorPalette` never renders.** | Confirmed (static) | Low | The generator never passes `swatchColors` to `createMetadataHeader` | Compute swatches from the dominant colors (already computed for the background) and pass them in. This requires generating the header **after** the first frames. |
-| I-11 | F12 | **The `{aspectRatio}` template token inserts `:`** into paths. | Confirmed (static) | Low–Medium | `layout.aspectRatio.rawValue` ("16:9") is used verbatim; `configurationHash` already replaces `:` with `-` | Use the hash-style `16-9` in templates. |
-| I-12 | F8 | **Preview skip-if-exists never matches** with default naming (run timestamp in the filename). | Confirmed (static) | Medium | `PreviewConfiguration.generateFilename` | Drop the run timestamp from the default name (it could be a `{time}` token instead). This is a naming change (rule 4). |
-| I-13 | F8 | Default `exportMaxResolution` is **1080p**; the README (1.6.2) and code comments say 4K. | Confirmed (static) | Low | `_exportMaxResolutionRaw = "1080p"` in three places | Decide the intended default and align code and docs. |
-| I-14 | F11 | **A `GenerationJobController` job cancelled before it runs is stuck in `.cancelling`** and cannot be retried. Records never freed; no tests. | Confirmed (static) | Low–Medium | `cancel` sets `.cancelling`; only `value(for:)` moves it to `.cancelled` | In `cancel`, if `task == nil`, go directly to `.cancelled`. Add `remove(_:)`. Add tests. |
+| I-11 | F12 | **The `{aspectRatio}` template token inserts `:`** into paths. | Confirmed (static) | Low–Medium | `layout.aspectRatio.rawValue` ("16:9") is used verbatim; `configurationHash` already replaces `:` with `-` | Use the hash-style `16-9` in templates. **Decision D5 → plan F-3.** |
+| I-12 | F8 | **Preview skip-if-exists never matches** with default naming (run timestamp in the filename). | Confirmed (static) | Medium | `PreviewConfiguration.generateFilename` | Drop the run timestamp from the default name (it could be a `{time}` token instead). This is a naming change (rule 4). **Decision D2 → plan F-3.** |
+| I-13 | F8 | Default `exportMaxResolution` is **1080p**; the README (1.6.2) and code comments say 4K. | Confirmed (static) | Low | `_exportMaxResolutionRaw = "1080p"` in three places | Decide the intended default and align code and docs. **Decision D3 (keep 1080p) → plan S-5.** |
+| I-14 | F11 | **A `GenerationJobController` job cancelled before it runs is stuck in `.cancelling`** and cannot be retried. Records never freed; no tests. | Confirmed (static) | Low–Medium | `cancel` sets `.cancelling`; only `value(for:)` moves it to `.cancelled` | In `cancel`, if `task == nil`, go directly to `.cancelled`. Add `remove(_:)`. Add tests. **Decision D1: deprecate `GenerationJobController` (won't fix) → plan S-6.** |
 | I-15 | F10 | **Mosaic coordinator keys state by `video.id`.** Concurrent jobs on the same input clobber each other's cancellation and progress. | Confirmed (static) | Low | `activeTasks[videoID]`, `progressHandlers[videoID]` | Use per-attempt keys, as `PreviewGeneratorCoordinator` does. |
 | I-16 | F3/F9 | **Slow ffmpeg cancellation under load** (16–20 s instead of ~4 s). This makes `ffmpegCancellationKillsUncooperativeProcess` fail intermittently in CI. | **Fixed (PR #34, merged)** | Medium | CI logs on PR #32/#33; the watchdog is a `Task` that polls every 2 s and escalates with `Task.sleep` | **Fixed in PR #34**: `DispatchSourceTimer` watchdog on a dedicated queue plus termination from `onCancel`. macOS CI is green, including this test. The native/SJS/passthrough watchdogs still poll from `Task`s (follow-up). |
 | I-17 | F1 | `discoverVideos` fails the whole scan on one undecodable file. The extension list includes formats AVFoundation rarely decodes (mkv, webm, avi, wmv, flv, asf). | Confirmed (static) | Low–Medium | `discoverVideos` rethrows the first inspection error | Collect per-file failures (a result type), or skip them with a report. |
@@ -2415,6 +2416,9 @@ index hashes if sources changed, add an executive summary, and do a final consis
 
 ### 6.1 Recommended roadmap (prioritized)
 
+The executable version of this roadmap, with PR-sized steps, gates and dependencies, is
+`codebase-analysis-docs/IMPLEMENTATION_PLAN.md`, based on the decisions in §6.4.
+
 Each item references the §4.2 register. Effort estimates are rough, for one engineer familiar
 with the code.
 
@@ -2453,6 +2457,23 @@ with the code.
 - **When adding public API**, update §5.2 and §5.6. Follow the checklists in §4.8.
 - **Don't edit the per-phase wrap-ups** except to mark corrections inline. They are the audit
   trail.
+- **When working from the plan**, update the PR's row in
+  `codebase-analysis-docs/IMPLEMENTATION_PLAN.md` §8 as well.
+
+### 6.4 Maintainer decisions (2026-09-26)
+
+These answer the product questions raised before planning. They are binding for
+`IMPLEMENTATION_PLAN.md` unless the maintainer changes them.
+
+| ID | Question | Decision | Affects |
+|---|---|---|---|
+| D1 | Unused public API (`ThumbnailProcessor.generateMosaic` & extraction helpers, `MetalImageProcessor.generateMosaic`, `generateallcombinations`, `GenerationJobController`, …) | Deprecate now; remove in the next major release | S-6, I-14 (won't fix: deprecated), I-25 |
+| D2 | Preview default file name contains the run timestamp | Drop it from the default; keep it as an opt-in `{time}` token; changelog entry | I-12 (F-3) |
+| D3 | Default `exportMaxResolution`: code says 1080p, README says 4K | Keep **1080p**; fix the README and comments | I-13 (S-5) |
+| D4 | `.dynamic` layout is broken | Deprecate it; it still decodes and is laid out as `custom` | I-8 (F-7) |
+| D5 | `{aspectRatio}` template token inserts `:` | Render it as `16-9` (moves outputs for users of the token) | I-11 (F-3) |
+| D6 | Output publication on remote volumes | Local: atomic `renamex_np(RENAME_EXCL)`. Remote (SMB/NFS): stage locally, copy under a hidden temporary name, then rename; non-atomic is acceptable. iCloud: deferred until Q14 is measured. | I-4 (F-4) |
+| D7 | Throughput validation for pipeline changes | Add an opt-in benchmark suite (P-1); the maintainer runs it before merging ⚡ PRs | all ⚡ PRs |
 
 ## Appendix A — File Index
 
@@ -2508,8 +2529,8 @@ P1 = core feature, P2 = supporting, P3 = docs/infra.
 | 45 | P3 | `README.md` | doc | 997 | df5d5f45 | Changelog + usage |
 | 46 | P3 | `spec.md` | doc | 78 | 4508df31 | Reliability spec (partially implemented) |
 | 47 | P3 | `MosaicKit-DeepDive.md` | doc | 199 | 1e67bef6 | Stale architecture |
-| 48 | P3 | `CLAUDE.md` | doc | 381 | 35b0221c | Agent guide (rewritten 2026-09-26; points to this doc; keep mirrored) |
-| 49 | P3 | `AGENTS.md` | doc | 381 | 968e513d | Agent guide (rewritten 2026-09-26; points to this doc; keep mirrored) |
+| 48 | P3 | `CLAUDE.md` | doc | 387 | 783c9276 | Agent guide (rewritten 2026-09-26; points to this doc; keep mirrored) |
+| 49 | P3 | `AGENTS.md` | doc | 387 | 076e4691 | Agent guide (rewritten 2026-09-26; points to this doc; keep mirrored) |
 
 Excluded or low value: `Media.xcassets/**` (binary fixture), `Tests/MosaicKitTests/embeddedAsset/test_video.mp4`
 (87 s 8-bit H.264 video-only fixture), `scripts/**` + `Makefile` (xcodebuild agent scaffold for a
@@ -2536,7 +2557,7 @@ RELATED PRs (merged): #32 this doc (+README unreleased note); #33 iOS CI scheme 
 
 FILE_MAP_SUMMARY: Appendix A (49 files; P0 = 8, P1 = 15)
 ISSUE REGISTER:   §4.2 I-1 … I-25   (High: I-1, I-2; Medium: I-3 I-4 I-8 I-12 I-16 I-20 I-22 I-24)
-ROADMAP:          §6.1
+ROADMAP:          §6.1 → IMPLEMENTATION_PLAN.md (decisions §6.4)
 OPEN_QUESTIONS:   §6.2 (Q11 Q13 Q14 Q16 Q17)
 GLOSSARY:         §5.1
 MAINTENANCE:      §6.3 + codebase-analysis-docs/assets/doc_check.py
