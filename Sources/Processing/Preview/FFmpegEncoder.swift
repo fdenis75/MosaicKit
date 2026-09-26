@@ -352,29 +352,44 @@ enum FFmpegEncoder {
             throw error
         }
 
-        // Watchdog: terminates the process on user cancellation or stall
-        let watchdog = Task {
-            while !Task.isCancelled && !processFinished.isCancelled {
-                if cancellationCheck() || callerCancelled.isCancelled {
-                    logger.warning("Cancellation requested, terminating ffmpeg")
-                    processRef.terminate()
-                    try? await Task.sleep(for: .seconds(2))
-                    if processRef.isRunning { kill(processRef.processIdentifier, SIGKILL) }
-                    return
+        // Watchdog: terminates the process on user cancellation or stall.
+        //
+        // It runs on a dedicated serial dispatch queue rather than in a Swift `Task`:
+        // when the cooperative pool is saturated (e.g. by other generations doing
+        // synchronous CPU/GPU work), `Task.sleep`-based polling wakes up many seconds
+        // late, which delayed killing an uncooperative ffmpeg by 15–20 s instead of ~2 s.
+        // All termination state is only touched on `watchdogQueue`.
+        let watchdogQueue = DispatchQueue(label: "com.mosaicKit.ffmpeg.watchdog", qos: .userInitiated)
+        let terminationRequested = CancellationToken()
+        let terminateProcess: @Sendable () -> Void = {
+            guard !terminationRequested.isCancelled, !processFinished.isCancelled else { return }
+            terminationRequested.cancel()
+            processRef.terminate()
+            // Escalate if ffmpeg ignores SIGTERM.
+            watchdogQueue.asyncAfter(deadline: .now() + 2) {
+                if !processFinished.isCancelled, processRef.isRunning {
+                    kill(processRef.processIdentifier, SIGKILL)
                 }
-                let elapsed = progressTracker.secondsSinceLastProgress
-                let total = Date().timeIntervalSince(startTime)
-                if elapsed >= 120 || total >= ffmpegTimeout {
-                    logger.error("FFmpeg stalled or timed out (\(Int(elapsed))s since last progress), terminating")
-                    stallDetected.cancel()
-                    processRef.terminate()
-                    try? await Task.sleep(for: .seconds(2))
-                    if processRef.isRunning { kill(processRef.processIdentifier, SIGKILL) }
-                    return
-                }
-                try? await Task.sleep(nanoseconds: 2_000_000_000)
             }
         }
+        let watchdog = DispatchSource.makeTimerSource(queue: watchdogQueue)
+        watchdog.schedule(deadline: .now() + .milliseconds(500), repeating: .milliseconds(500))
+        watchdog.setEventHandler {
+            guard !processFinished.isCancelled, !terminationRequested.isCancelled else { return }
+            if cancellationCheck() || callerCancelled.isCancelled {
+                logger.warning("Cancellation requested, terminating ffmpeg")
+                terminateProcess()
+                return
+            }
+            let elapsed = progressTracker.secondsSinceLastProgress
+            let total = Date().timeIntervalSince(startTime)
+            if elapsed >= 120 || total >= ffmpegTimeout {
+                logger.error("FFmpeg stalled or timed out (\(Int(elapsed))s since last progress), terminating")
+                stallDetected.cancel()
+                terminateProcess()
+            }
+        }
+        watchdog.resume()
         defer {
             watchdog.cancel()
             pipeRef.fileHandleForReading.readabilityHandler = nil
@@ -384,7 +399,7 @@ enum FFmpegEncoder {
         // concurrency pool (waitUntilExit() is a blocking call).
         let exitCode = await withTaskCancellationHandler {
             await withCheckedContinuation { (continuation: CheckedContinuation<Int32, Never>) in
-                DispatchQueue.global(qos: .utility).async {
+                DispatchQueue.global(qos: .userInitiated).async {
                     processRef.waitUntilExit()
                     processFinished.cancel()
                     continuation.resume(returning: processRef.terminationStatus)
@@ -392,6 +407,8 @@ enum FFmpegEncoder {
             }
         } onCancel: {
             callerCancelled.cancel()
+            // Terminate immediately instead of waiting for the next watchdog tick.
+            watchdogQueue.async { terminateProcess() }
         }
 
         if exitCode != 0 {
