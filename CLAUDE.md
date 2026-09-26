@@ -1,233 +1,268 @@
 # MosaicKit – CLAUDE.md
 
-This file helps AI assistants understand the MosaicKit codebase, development workflows, and conventions.
+This file tells AI assistants how to work in the MosaicKit codebase. `AGENTS.md` mirrors it for
+other agents: when you change one, make the same change to the other.
 
 ---
 
-## Project Overview
+## Start here: the codebase knowledge base (mandatory)
 
-**MosaicKit** is a Swift package that generates video mosaics (contact-sheet style image grids) and
-preview videos from video files on Apple platforms (macOS 26+, iOS 26+, macCatalyst 26+).
+[`codebase-analysis-docs/CODEBASE_KNOWLEDGE.md`](codebase-analysis-docs/CODEBASE_KNOWLEDGE.md) is
+the map of this codebase: architecture, data flows, per-feature analysis, a verified issue
+register, change checklists and a glossary. Diagrams are in `codebase-analysis-docs/assets/`.
 
-- **Language**: Swift 6.2
-- **Build system**: Swift Package Manager (SPM)
+**Before any work** (feature, fix, refactor, test or doc change), read:
+
+1. The **Executive summary** and **§4.1 Rules card**. These are non-negotiable invariants.
+2. The **Part 3** section of each feature you touch (F1–F13), plus **§3.14**, the cross-feature
+   interaction matrix, to see what else your change affects.
+3. **§4.2 Issue register** rows for that area. If you are fixing an issue, cite its ID (`I-n`) in
+   the branch, commits and PR.
+4. The matching **§4.8 Change checklist** (new config option, layout, format, preview mode, …).
+
+Also use **§4.3** for performance-sensitive work (throughput is a hard requirement: benchmark
+against the current batched pipeline, and never regress it) and **§5** for API, schema, status
+and error references.
+
+**Source code is authoritative.** If the doc and the code disagree, trust the code and correct
+the doc in the same PR.
+
+**After any change, keep the doc current** (§6.3), in the same PR:
+
+- **Fixed or found an issue:** update or add its §4.2 row (status column) and the matching
+  §6.1 roadmap line. Keep IDs stable: never renumber, and add new issues as the next `I-n`.
+- **Changed behavior, architecture or public API:** update the affected Part 2/Part 3 sections,
+  §5.2 (API) and §5.6 (cookbook).
+- **Run the checker:** `python3 codebase-analysis-docs/assets/doc_check.py`. It validates links,
+  tables and fences, and re-hashes every `[[F:path#range#hash8]]` anchor. Re-verify every claim
+  whose anchor it reports as changed, then update the anchor.
+- **Don't edit** the per-phase wrap-up sections, except to mark corrections inline.
+
+Other docs are less reliable (§1.9). `MosaicKit-DeepDive.md` describes a removed architecture:
+don't use it. `spec.md` is design intent and only partly implemented.
+
+---
+
+## Project overview
+
+**MosaicKit** is a Swift package that generates video mosaics (contact-sheet image grids),
+animated previews (GIF / HEICS / WebP) and preview highlight-reel videos from video files on
+Apple platforms (macOS 26+, iOS 26+, macCatalyst 26+).
+
+- **Language**: Swift 6.2 (Swift 6 language mode)
+- **Build system**: Swift Package Manager
 - **License**: Apache 2.0
+- **Products**:
+  - `MosaicKit` (core).
+  - `MosaicKitWebP` (opt-in WebP encoder). Call `MosaicKitWebP.register()` at startup. It is
+    kept separate because its binary xcframework breaks Xcode SwiftUI Previews for every client
+    that links it.
 
 ---
 
-## Repository Layout
+## Repository layout
 
 ```
 MosaicKit/
-├── Sources/
-│   ├── Models/            # Codable configuration & data structs
-│   ├── Processing/        # Core generation logic
-│   │   └── Preview/       # Preview video generation
-│   ├── Shaders/           # Metal GPU compute kernels (.metal)
-│   └── MosaicKit.docc/    # DocC documentation catalog
-├── Tests/
-│   └── MosaicKitTests/    # Swift Testing unit/integration tests
-├── Examples/              # Standalone example executables
-├── Media.xcassets/        # Bundled test video asset
-├── Package.swift          # SPM manifest (Swift 6.2)
-├── Package.resolved       # Dependency lock file
-├── README.md
-├── DOCUMENTATION.md
-└── CONTRIBUTING.md
+├── Sources/                 # MosaicKit target
+│   ├── Models/              # Codable, Sendable configuration & data types (+ validation)
+│   ├── Processing/          # Mosaic engine, layout, frames, overlays, output publication
+│   │   └── Preview/         # Preview video generation & export backends
+│   ├── Shaders/             # Metal compute kernels (processed as a resource)
+│   ├── VideoInputScanner.swift  # Directory discovery
+│   └── MosaicKit.docc/      # DocC catalog
+├── SourcesWebP/             # MosaicKitWebP target (webp.swift encoder, injected into core)
+├── Tests/MosaicKitTests/    # Swift Testing suites + embeddedAsset/test_video.mp4
+├── codebase-analysis-docs/  # Knowledge base (read first) + diagrams + doc_check.py
+├── Examples/                # Reference snippets (not SPM targets, not built by CI)
+├── Makefile, scripts/       # Xcode-project helpers (target a missing .xcodeproj) + scripts/task.sh
+├── tasks/                   # Task backlog used by scripts/task.sh (see AGENTS.simple-tasks.md)
+├── Media.xcassets/          # Xcode test asset (not used by the SPM tests)
+├── Package.swift / Package.resolved
+└── README.md, DOCUMENTATION.md, CONTRIBUTING.md, spec.md, MosaicKit-DeepDive.md (stale)
 ```
 
 ---
 
-## Architecture
+## Architecture (summary; details in knowledge base Part 2)
 
-### Single Metal engine
-
-MosaicKit uses a single Metal GPU backend on all platforms (macOS, iOS, macCatalyst):
-
-| Class | Platform | Backend |
-|---|---|---|
-| `MetalMosaicGenerator` | macOS, iOS, macCatalyst | Metal GPU (actor-isolated) |
-
-`MetalMosaicGenerator` is the sole public entry point and conforms to `MosaicGeneratorProtocol`.
-There is no factory or platform-selection wrapper — construct it directly.
+- **One Metal engine on every platform.** `MetalMosaicGenerator` (actor) is the mosaic entry
+  point and conforms to `MosaicGeneratorProtocol`. There is no factory and no Core Graphics
+  fallback engine.
+- **Mosaic pipeline:**
+  1. `VideoInput` / `VideoSource` inspection (`VideoMetadataExtractor`).
+  2. Frame extraction: `ThumbnailProcessor.processedFramesStream`, batched
+     `AVAssetImageGenerator` requests. The pull-based bounded source introduced in 1.7.0 was
+     reverted because it was 30–45 % slower. `MosaicFrameSource` is currently unused (I-25).
+  3. Layout (`LayoutProcessor`, cached).
+  4. GPU composition in pipelined 20-frame Metal command buffers (`MetalImageProcessor`).
+  5. Dominant-color background (`DominantColors`).
+  6. Overlays (`OverlayProcessor`).
+  7. Encode and publish through `OutputTransaction` (staging file + `rename`).
+- **Animated export:** `AnimatedGifGenerator` writes GIF/HEICS via ImageIO, and WebP via the
+  injected encoder. The frame delay is `1 / gifFps`.
+- **Previews:** `PreviewVideoGenerator` (actor) composes a highlight reel and exports it with
+  `.native` (AVAssetExportSession), `.sjs` (SJSAssetExportSession) or `.ffmpeg`.
+- **Batches:** `MosaicGeneratorCoordinator` and `PreviewGeneratorCoordinator` (concurrency
+  limits, `batchEpoch` cancellation). `GenerationJobController` provides an explicit job
+  lifecycle.
 
 ### Key types
 
 | Type | File | Role |
 |---|---|---|
-| `MetalMosaicGenerator` | `Processing/MetalMosaicGenerator.swift` | Metal engine (actor, all platforms) — main entry point |
+| `MetalMosaicGenerator` | `Processing/MetalMosaicGenerator.swift` | Mosaic engine (actor) |
 | `MosaicGeneratorProtocol` | `Processing/MosaicGeneratorProtocol.swift` | Shared interface |
-| `MosaicGeneratorCoordinator` | `Processing/MosaicGeneratorCoordinator.swift` | Concurrent batch manager |
+| `MosaicGeneratorCoordinator` | `Processing/MosaicGeneratorCoordinator.swift` | Concurrent mosaic batches |
+| `GenerationJobController` | `Processing/GenerationJobs.swift` | Explicit job lifecycle |
 | `LayoutProcessor` | `Processing/LayoutProcessor.swift` | Layout calculation + caching |
 | `ThumbnailProcessor` | `Processing/ThumbnailProcessor.swift` | Frame extraction |
 | `MetalImageProcessor` | `Processing/MetalImageProcessor.swift` | Metal shader dispatch |
-| `AnimatedGifGenerator` | `Processing/AnimatedGifGenerator.swift` | Animated GIF/HEICS/WebP export |
+| `OverlayProcessor` | `Processing/OverlayProcessor.swift` | Header, labels, watermark, ColorDNA |
+| `AnimatedGifGenerator` | `Processing/AnimatedGifGenerator.swift` | GIF / HEICS / WebP export |
+| `OutputTransaction` | `Processing/OutputTransaction.swift` | Staged output publication (shared by 5 features) |
 | `VideoMetadataExtractor` | `Processing/VideoMetadataExtractor.swift` | AVFoundation metadata |
 | `scanVideos(in:recursive:)` | `VideoInputScanner.swift` | Directory scan → `[VideoInput]` |
-| `PreviewVideoGenerator` | `Processing/Preview/PreviewVideoGenerator.swift` | Highlight reel generation |
-| `PreviewGeneratorCoordinator` | `Processing/Preview/PreviewGeneratorCoordinator.swift` | Concurrent preview batch manager |
+| `PreviewVideoGenerator` | `Processing/Preview/PreviewVideoGenerator.swift` | Highlight-reel generation |
+| `PreviewGeneratorCoordinator` | `Processing/Preview/PreviewGeneratorCoordinator.swift` | Concurrent preview batches |
 | `FFmpegEncoder` | `Processing/Preview/FFmpegEncoder.swift` | Passthrough export + ffmpeg transcode (macOS only) |
 | `AppLifecycleMonitor` | `Processing/Preview/AppLifecycleMonitor.swift` | Foreground-wait gating for background-safe export |
-| `MosaicConfiguration` | `Models/MosaicConfiguration.swift` | Main config struct |
-| `FFmpegEncodingOptions` | `Models/FFmpegEncodingOptions.swift` | Codec/CRF/preset options for `PreviewExportMode.ffmpeg` |
+| `MosaicConfiguration` | `Models/MosaicConfiguration.swift` | Main mosaic config (+ `OutputFormat`, `AnimatedFormat`, `GifSize`) |
+| `PreviewConfiguration` | `Models/PreviewConfiguration.swift` | Preview config (+ `PreviewExportMode`) |
+| Validation | `Models/ConfigurationValidation.swift` | All up-front config validation |
+| `FFmpegEncodingOptions` | `Models/FFmpegEncodingOptions.swift` | Codec/CRF/preset options for `.ffmpeg` |
 | `DensityConfig` | `Models/DensityConfig.swift` | Frame density levels |
-| `LayoutConfiguration` | `Models/LayoutConfiguration.swift` | Layout settings |
-| `AspectRatio` | `Models/AspectRatio.swift` | Predefined ratios |
-
-### Generation pipeline
-
-1. Extract video metadata (AVAsset / `VideoMetadataExtractor`)
-2. Extract frames (VideoToolbox hardware acceleration via `ThumbnailProcessor`)
-3. Calculate layout (`LayoutProcessor` – cached)
-4. Process images (Metal GPU shaders via `MetalImageProcessor`)
-5. Extract dominant colors (`DominantColors` package → smart background)
-6. Compose final mosaic with optional metadata overlay
-7. Encode & save (HEIF / JPEG / PNG / WebP via `OutputFormat`)
+| `LayoutConfiguration`, `LayoutType`, `AspectRatio` | `Models/LayoutConfiguration.swift` | Layout settings |
+| `VideoInput`, `VideoSource` | `Models/VideoInput.swift`, `Models/VideoSource.swift` | Input identity & inspection |
 
 ---
 
-## Models & Configuration
+## Models & configuration
 
-All model types are `Codable` and `Sendable`.
+All model types are `Codable` and `Sendable`. The full reference, with defaults, is in knowledge
+base §5.2–§5.3.
 
-### `MosaicConfiguration`
-The primary configuration object. Key fields:
-- `density: DensityConfig` – controls how many frames are extracted
-- `layout: LayoutConfiguration` – layout algorithm and target size
-- `format: OutputFormat` – output file format (`.heic`, `.jpg`, `.png`, `.webp`)
-- `compression` – quality settings per format
-- `gifMode: GifCreationMode` – `.disabled` / `.withMosaic` / `.gifOnly` animated export
-- `gifSize: GifSize`, `animatedFormat: AnimatedFormat` (`.gif`/`.heic`/`.webp`), `gifFps: Double`
-  (default `10`) – control the animated export produced by `AnimatedGifGenerator`
-
-### `DensityConfig` (7 levels)
-`XXL` (0.25×) → `XL` (0.5×) → `L` (0.75×) → **`M` (1.0× default)** → `S` (2.0×) → `XS` (3.0×) → `XXS` (4.0×)
-
-### `LayoutConfiguration` (5 layout types)
-- `custom` – three-zone (small top/bottom, large center) **[default]**
-- `classic` – uniform grid
-- `auto` – screen-aware automatic selection
-- `dynamic` – center-emphasized variable sizing
-- `iPhone` – mobile-optimized
-
-### `AspectRatio` (5 presets)
-`16:9`, `4:3`, `1:1`, `21:9`, `9:16`
+- **`MosaicConfiguration`:**
+  - `density` (default `.m`), `format: OutputFormat` (`.heif` default, `.jpeg`, `.png`,
+    `.webp`), `layout`, `compressionQuality`, overlays.
+  - Animation: `gifMode` (`.disabled` / `.withMosaic` / `.gifOnly`), `gifSize`,
+    `animatedFormat` (`.gif` / `.heic` / `.webp`; the **default `.webp` needs
+    `MosaicKitWebP.register()`**), `gifFps` (default `10`).
+- **`DensityConfig`** (7 levels): `XXL` 0.25× → `XL` 0.5× → `L` 0.75× → **`M` 1.0× (default)** →
+  `S` 2.0× → `XS` 3.0× → `XXS` 4.0×.
+- **`LayoutType`:**
+  - `custom`: three-zone, **default**.
+  - `classic`: uniform grid.
+  - `auto`: screen-aware; broken on iPhone, see I-9.
+  - `dynamic`: center-emphasized; geometrically broken, see I-8.
+  - `iphone`: mobile-optimized.
+- **`AspectRatio`:** `16:9`, `4:3`, `1:1`, `21:9`, `9:16`.
+- **Codable rule:** add new keys with `decodeIfPresent` plus a default. `MosaicConfiguration`'s
+  decoder is strict, so a required new key breaks configs saved by older versions (I-24).
+- **Persisted values:** never rename raw values that are persisted. They also appear in output
+  paths through `configurationHash` (rules card #3–#4).
 
 ---
 
-## Preview Export Modes
+## Preview export modes
 
-`PreviewConfiguration.exportMode: PreviewExportMode` selects how previews are encoded:
+`PreviewConfiguration.exportMode: PreviewExportMode`:
 
 | Mode | Behavior |
 |---|---|
-| `.native` | AVAssetExportSession (default) |
-| `.sjs` | `SJSAssetExportSession` for resolution downscaling |
-| `.ffmpeg` | Passthrough export to a temp `.mov`, then transcode via an external `ffmpeg` binary |
+| `.native` (default) | AVAssetExportSession |
+| `.sjs` | `SJSAssetExportSession`, for resolution downscaling |
+| `.ffmpeg` | Passthrough export to a temp `.mov`, then transcode with an external `ffmpeg` binary |
 
-`.ffmpeg` is **macOS-only** and requires `PreviewConfiguration.ffmpegBinaryPath` to point at a valid,
-executable `ffmpeg` (validated fail-fast before composition starts). `ffmpegEncodingOptions`
-(`FFmpegEncodingOptions`) controls codec/CRF/preset/resolution; when `nil` it's derived from
-`compressionQuality`. `ffmpegTempFolder` defaults to an auto-cleaned UUID dir under
-`/tmp/MosaicKitFFmpeg/`.
-
-`PreviewConfiguration.enableAppLifecycleMonitor` (default `true`) and `enableExportRetry` (default
-`true`) control foreground-wait gating and stall-retry behavior — set both `false` for
-daemons/XPC/CLI tools where the app never becomes foreground.
-
----
-
-## Concurrency Model
-
-- `MetalMosaicGenerator` is a Swift **actor** – all mutable state is actor-isolated.
-- `MosaicGeneratorCoordinator` manages concurrent batch jobs with CPU/memory-aware limits.
-- All public API is `async throws`.
-- Use `Task { }` for fire-and-forget; propagate `CancellationError` where appropriate.
-- Conform new types to `Sendable` when crossing actor boundaries.
-
-### Cancellation model
-
-- Internal work runs in *tracked* unstructured tasks (`activeTasks` /
-  `generationTasks` dictionaries keyed by video ID). Every `try await task.value`
-  on a tracked task must be wrapped in `withTaskCancellationHandler` with
-  `onCancel: { task.cancel() }` — unstructured tasks do not inherit the caller's
-  cancellation.
-- `PreviewVideoGenerator` bridges task cancellation into its `CancellationToken`s
-  (`withTaskCancellationHandler` → `token.cancel()`); the token is what export
-  watchdogs and phase checks poll.
-- Coordinators keep a `batchEpoch` counter; `cancelAllGenerations()` bumps it and
-  the batch loops check it, so a cancelled batch stops dequeuing queued videos and
-  throws `CancellationError`. Single-video cancellation only fails that video's
-  result; the batch continues.
-- Long loops (frame extraction, animated-image encoding, `generateallcombinations`)
-  must call `try Task.checkCancellation()` per iteration.
-- Report cancelled work to progress handlers with the `.cancelled` status, never
-  `.failed`.
+- **`.ffmpeg` requirements:**
+  - It is **macOS-only**.
+  - `ffmpegBinaryPath` must point at an executable, and it is validated before composition
+    starts.
+  - `ffmpegEncodingOptions` is derived from `compressionQuality` when `nil`.
+  - `ffmpegTempFolder` defaults to a UUID directory under
+    `FileManager.default.temporaryDirectory/MosaicKitFFmpeg/`, cleaned up afterwards.
+- **Background and CLI use:** `enableAppLifecycleMonitor` and `enableExportRetry` both default
+  to `true`. Set both to `false` for daemons, XPC services and CLI tools that never become
+  foreground.
 
 ---
 
-## Error Handling
+## Concurrency & cancellation
 
-Custom error types conform to `LocalizedError` with `errorDescription`, `failureReason`, and
-`recoverySuggestion`:
+- `MetalMosaicGenerator` and `PreviewVideoGenerator` are **actors**. All public API is
+  `async throws`. Types that cross actor boundaries must be `Sendable`.
+- Tracked tasks inherit the generator actor's isolation. **Don't add synchronous heavy work or
+  blocking calls** (`waitUntilCompleted`, semaphores) to async code: they serialize jobs and
+  starve the cooperative pool (rules card #6).
+- Internal work runs in *tracked* unstructured tasks (`activeTasks` / `generationTasks`, keyed
+  by video ID). Every `try await task.value` on a tracked task must be wrapped in
+  `withTaskCancellationHandler` with `onCancel: { task.cancel() }`, because unstructured tasks
+  don't inherit the caller's cancellation.
+- `PreviewVideoGenerator` bridges task cancellation into its `CancellationToken`s, which the
+  export watchdogs and phase checks poll.
+- Coordinators keep a `batchEpoch` counter. `cancelAllGenerations()` bumps it, and a cancelled
+  batch stops dequeuing and throws `CancellationError`. Cancelling a single video only fails
+  that video's result.
+- Long loops (frame extraction, animated encoding, `generateallcombinations`) must call
+  `try Task.checkCancellation()` on every iteration.
+- Report cancelled work with the `.cancelled` status, never `.failed`.
+
+---
+
+## Error handling
+
+Use the existing typed errors, never ad-hoc `NSError` or string errors. Validation errors are
+thrown from `Models/ConfigurationValidation.swift`.
 
 | Error type | File |
 |---|---|
 | `MosaicError` | `Processing/ProcessingError.swift` |
-| `LibraryError` | `Processing/ProcessingError.swift` |
+| `LibraryError` | `Processing/ProcessingError.swift` (currently unused, I-25) |
 | `VideoError` | `Processing/VideoError.swift` |
 | `PreviewError` | `Processing/Preview/PreviewError.swift` |
-
-Always use these types rather than creating ad-hoc `NSError` or string-based errors.
+| `MetalProcessorError` | `Processing/MetalImageProcessor.swift` |
+| `MosaicKitWebPError` | `Processing/WebPSupport.swift` |
 
 ---
 
 ## Logging
 
-Use `swift-log` (`import Logging`). Logger subsystem is `com.mosaicKit`. Example:
+The code uses **OSLog**, not swift-log. `swift-log` is declared in `Package.swift` but never
+imported (I-23).
 
 ```swift
-private let logger = Logger(label: "com.mosaicKit.myComponent")
-logger.info("Processing started", metadata: ["file": .string(url.lastPathComponent)])
+import OSLog
+private let logger = Logger(subsystem: "com.mosaicKit", category: "my-component")
+logger.info("Processing started: \(url.lastPathComponent, privacy: .public)")
 ```
 
-Use `OSLog` signposts for performance-sensitive paths (the Metal pipeline uses these already).
+- Use the subsystem **`com.mosaicKit`**. Some preview files still use `com.mosaickit` (I-23).
+- Use signposts for performance-sensitive paths.
 
 ---
 
-## Platform-Specific Code
+## Platform-specific code
 
-```swift
-#if os(macOS)
-// Metal / AppKit code
-#else
-// Core Graphics / UIKit code
-#endif
-
-#if canImport(AppKit)
-// NSImage etc.
-#elseif canImport(UIKit)
-// UIImage etc.
-#endif
-```
-
-Never use AppKit APIs in code that may run on iOS and vice versa. Always wrap.
+- Metal runs on every platform. Guard `Process`/ffmpeg and other macOS-only APIs with
+  `#if os(macOS)`.
+- Use `#if canImport(AppKit)` / `#elseif canImport(UIKit)` for image types.
+- **Test code must also compile on iOS:** the iOS CI job builds the tests. For example, use
+  `URL.homeDirectory`, not `homeDirectoryForCurrentUser`.
 
 ---
 
-## External Dependencies (Package.resolved)
+## External dependencies
 
 | Package | Version | Use |
 |---|---|---|
-| `apple/swift-log` | ≥ 1.6.0 | Structured logging |
-| `DominantColors` | ≥ 1.2.0 | Background color extraction from frames |
-| `SJSAssetExportSession` | ≥ 0.4.0 | Enhanced AVAsset export (resolution downscaling) |
-| `webp.swift` / `libwebp-ios` | ≥ 1.1.x | WebP encoding for `AnimatedGifGenerator` |
+| `DominantColors` | ≥ 1.2.0 | Background color extraction |
+| `SJSAssetExportSession` | ≥ 0.4.0 | `.sjs` preview export |
+| `webp.swift` (→ `libwebp-ios`) | ≥ 1.1.2 | WebP encoding, **`MosaicKitWebP` target only**; core never imports `webp` |
+| `apple/swift-log` | ≥ 1.6.0 | Declared but unused (I-23) |
 
-Do not add new dependencies without a clear justification. Prefer built-in Apple frameworks.
-
-`PreviewExportMode.ffmpeg` additionally shells out to an external `ffmpeg` binary (path supplied via
-`PreviewConfiguration.ffmpegBinaryPath`); this is a runtime dependency, not an SPM package.
+- Don't add dependencies without a clear justification. Prefer Apple frameworks.
+- `.ffmpeg` shells out to an external `ffmpeg` binary. That is a runtime dependency, not an SPM
+  package.
 
 ---
 
@@ -236,108 +271,104 @@ Do not add new dependencies without a clear justification. Prefer built-in Apple
 Framework: **Swift Testing** (`import Testing`).
 
 ```bash
-swift test                          # Run all tests
-swift test --filter <TestName>      # Run a specific test
-swift test --parallel               # Parallel execution
-swift test --enable-code-coverage   # Generate coverage
+swift build --build-tests && swift test --skip-build   # what macOS CI runs
+swift test --filter <TestName>
+MOSAICKIT_SUITE_MODE=none swift test                    # CI mode: skip extended suites
 ```
 
-Test files live in `Tests/MosaicKitTests/`. Test assets are in `Tests/MosaicKitTests/embeddedAsset/`
-and `Media.xcassets/`.
-
-CI disables extended suites with:
-```
-MOSAICKIT_SUITE_MODE=none
-```
-
-When writing new tests:
-- Use `@Test` and `#expect` / `#require` (Swift Testing macros).
-- For async code use `@Test func myTest() async throws { … }`.
-- Avoid hard-coded file paths; use bundle resources.
+- **Location:** tests live in `Tests/MosaicKitTests/`. The embedded fixture is
+  `embeddedAsset/test_video.mp4`, loaded with `Bundle.module`.
+- **Fixture format:** keep test videos **8-bit 4:2:0**. iOS cannot decode 10-bit H.264 (I-22).
+- **`MOSAICKIT_SUITE_MODE`:** `none` skips media-folder and extended suites. That includes the
+  108-run "create all versions" animated matrix. Prefer the `.enabled(if:)` trait over silently
+  passing.
+- **New tests:**
+  - Use `@Test` with `#expect` / `#require`, and `async throws` for async code.
+  - Don't hard-code file paths.
+  - Keep per-test runtime small. The whole suite runs in about 40 s on macOS and about 4 min on
+    the iOS Simulator; keep it that way.
 
 ---
 
-## Build Commands
+## Build commands
 
 ```bash
 swift build                              # Debug build
 swift build -c release                   # Release build
-swift package generate-documentation    # Build DocC docs
+swift package generate-documentation     # DocC
 ```
 
-There is no Makefile. Everything goes through `swift`.
+Everything goes through `swift`. The `Makefile` (and its `scripts/xcbuild.sh` helper) targets an
+Xcode project that isn't in the repo, so it doesn't work as is.
 
 ---
 
-## Code Style Conventions
+## Code style
 
-Follow Swift 6 best practices as documented in `CONTRIBUTING.md`.
+Follow `CONTRIBUTING.md`.
 
-- **Types**: PascalCase (`MetalMosaicGenerator`, `DensityConfig`)
-- **Functions / variables**: camelCase
-- **Error types**: `<Domain>Error` suffix
-- **Actors**: used for any class with shared mutable state accessed concurrently
-- **Structs over classes** for value-semantic data (all Model types are structs)
-- **Protocol-first** design – add to the protocol before adding a concrete method
-- Explicit access control (`public`, `internal`, `private`) on all declarations
-- No `force_try` / `force_cast` in production code; use `guard let` or `try?` with fallback
-- Keep files focused: one primary type per file
+- **Naming:**
+  - Types are PascalCase; functions and variables are camelCase.
+  - Error types use the `<Domain>Error` suffix.
+- **Type design:**
+  - Use actors for shared mutable state.
+  - Use structs for value types (all models are structs).
+  - Design protocol-first.
+- **Access control:** make it explicit on all declarations.
+- **Safety:** no force-try or force-cast in production code.
+- **Files:** one primary type per file.
 
 ---
 
 ## Documentation
 
-DocC catalog is at `Sources/MosaicKit.docc/`. Articles:
-- `GettingStarted.md` / `QuickStart.md` – quick onboarding
-- `LayoutAlgorithms.md` – layout algorithm details
-- `Architecture.md` – system architecture overview
-- `PlatformStrategy.md` – Metal vs Core Graphics strategy (historical context)
-- `PerformanceGuide.md` – optimization guidance
-- `PreviewExporting.md` – preview export modes (native/SJS/ffmpeg)
-
-Update or add DocC articles when introducing new public API.
+- **Knowledge base:** `codebase-analysis-docs/CODEBASE_KNOWLEDGE.md`. Keep it current, as
+  described in the first section of this file.
+- **DocC** (`Sources/MosaicKit.docc/`):
+  - `GettingStarted`, `QuickStart`: onboarding.
+  - `LayoutAlgorithms`: layout types.
+  - `Architecture`: accurate, but shows the array-based path.
+  - `PerformanceGuide`: benchmarks unverified.
+  - `PreviewExporting`: preview export modes.
+  - `BackgroundProcessing`: iOS background execution.
+  - `PlatformStrategy`: historical context.
+- **When you add public API:** update DocC, `README.md` and knowledge base §5.2/§5.6.
 
 ---
 
-## CI/CD Workflows (`.github/workflows/`)
+## CI/CD (`.github/workflows/`)
 
 | File | Purpose |
 |---|---|
-| `swift.yml` | Basic build + test on macOS latest |
-| `mosaickit-tests.yml` | Full matrix tests, Swift 6.2, SPM caching |
-| `swift62.yml` | Swift 6.2-specific verification |
-| `claude-code-review.yml` | Automated code review |
-| `claude.yml` | Claude integration |
+| `swift.yml` | macOS: `swift build --build-tests` + `swift test --skip-build`. iOS Simulator: `xcodebuild build-for-testing` / `test-without-building` on the `MosaicKit-Package` scheme. Both set `MOSAICKIT_SUITE_MODE=none`; iOS gets it as `TEST_RUNNER_MOSAICKIT_SUITE_MODE`. |
+| `claude-code-review.yml` | Automated PR review. Runs only when code changes: `**/*.swift`, `**/*.metal`, `Package.resolved`, `Makefile`, `scripts/**`, `**/*.xctestplan`. |
+| `claude.yml` | `@claude` mentions |
 
-CI runs `swift build` then `swift test --parallel` on push/PR to `main`.
+CI runs on pushes to `main` and `claude/**`, and on PRs to `main`.
 
 ---
 
-## Common Tasks
+## Common tasks
 
-### Add a new layout type
-1. Add case to `LayoutConfiguration` enum
-2. Implement calculation in `LayoutProcessor.swift`
-3. Update DocC article `LayoutAlgorithms.md`
-4. Add tests in `MosaicGeneratorCoordinatorTests.swift` or a new test file
+Follow the matching checklist in knowledge base §4.8. In short:
 
-### Add a new output format
-1. Add case to `OutputFormat` in `Models/MosaicConfiguration.swift` (still mosaics) and/or
-   `VideoFormat` in `Models/VideoFormat.swift` (preview video containers)
-2. Handle encoding in `MetalMosaicGenerator` (mosaic still images) and/or
-   `AnimatedGifGenerator` (animated formats)
-3. Update `README.md` format table
-
-### Add a new configuration option
-1. Add to `MosaicConfiguration` (keep `Codable` and `Sendable`)
-2. Thread it through the generator protocol and both implementations
-3. Document it in README.md configuration reference section
-
-### Run examples
-```bash
-swift run SimpleExample
-swift run BasicExample
-swift run BatchExample
-swift run AdvancedExample
-swift run PreviewCompositionExample
-```
+- **New configuration option:**
+  1. Add the field (`Codable`, `Sendable`, `decodeIfPresent` + default).
+  2. Validate it in `ConfigurationValidation.swift`.
+  3. Thread it through `MetalMosaicGenerator` and/or `PreviewVideoGenerator`.
+  4. Document it in README and knowledge base §5.2.
+- **New layout type:**
+  1. Add a `LayoutType` case.
+  2. Implement it in `LayoutProcessor.swift`.
+  3. Update DocC `LayoutAlgorithms.md`.
+  4. Add tests in `LayoutProcessorTests.swift`.
+- **New output format:**
+  1. Add an `OutputFormat` case (still images) or an `AnimatedFormat` case (animations);
+     preview containers use `VideoFormat` in `Models/VideoFormat.swift`.
+  2. Handle encoding in `MetalMosaicGenerator` or `AnimatedGifGenerator`.
+  3. Update the README format table.
+- **Fixing a register issue (`I-n`):**
+  1. Read its row and fix sketch.
+  2. Add a regression test.
+  3. Update the row's status and the §6.1 roadmap line.
+  4. Run `doc_check.py`.

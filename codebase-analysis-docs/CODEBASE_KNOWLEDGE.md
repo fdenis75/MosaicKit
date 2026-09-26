@@ -422,7 +422,7 @@ Default values worth knowing:
 |---|---|---|
 | Source code | **Authoritative** | Always verify against it. |
 | `README.md` | High, with exceptions | Current through 1.7.0, but the 1.7.0 "bounded pull-based stream" note describes a design that was later **reverted** for performance (§2.6). Other exception: "New in 1.6.2" says the default `ExportMaxResolution` is **4K**, but the code defaults to **"1080p"** (§1.10 item 4). The installation snippet still says `from: "1.2.0"`. |
-| `CLAUDE.md` / `AGENTS.md` | Medium | Architecture summary is correct. Wrong on: swift-log usage, "no Makefile", `swift run` examples, the CI workflow list (`mosaickit-tests.yml` and `swift62.yml` do not exist; only `swift.yml` + `claude*.yml` do), and `Models/AspectRatio.swift` (`AspectRatio` is defined in `Models/LayoutConfiguration.swift`). `AGENTS.md` still mentions Core Graphics/vImage in pipeline step 4 and uses `VideoFormat` as the mosaic format type (it is `OutputFormat`). |
+| `CLAUDE.md` / `AGENTS.md` | High (rewritten 2026-09-26) | Both files are now identical except for the title and point agents to this document first. Earlier errors (swift-log, "no Makefile", `swift run` examples, nonexistent workflows, `Models/AspectRatio.swift`, Core Graphics/vImage, `VideoFormat` as the mosaic format) are corrected. Keep the two files in sync. |
 | `MosaicKit-DeepDive.md` | **Stale — do not trust architecture sections** | Describes the removed dual engine (`CoreGraphicsMosaicGenerator`, `MosaicGeneratorFactory`, vImage buffer pool) and a `.gif` still format. The coordinator concurrency formula it gives is for previews only, and the cap of 8 it quotes is really 2. |
 | `spec.md` | **Design intent, only partly implemented** | Describes a `GenerationRequest/Plan`, `JobHandle/BatchHandle`, checkpoint ledger, and a single processing-service actor. None of these exist. What does exist: `VideoSource`, `OutputTransaction`, `MosaicFrameSource`, validation, `GenerationJobController`. |
 | `Sources/MosaicKit.docc/*` | High, reviewed | `Architecture.md` is accurate but shows the array-based `generateMosaic(from:)` rather than the streaming path. `PreviewExporting.md` matches the stall timeouts. `BackgroundProcessing.md` is current. `PerformanceGuide.md` benchmark numbers are unverified. `PlatformStrategy.md` is historical context. |
@@ -956,7 +956,7 @@ graph LR
 - **Build:**
   - SwiftPM, Swift 6 language mode (tools 6.2). Metal shaders are processed as a resource
     (`.process("Shaders")`), and `Bundle.module` locates `default.metallib`.
-  - The test target embeds `embeddedAsset/test_video.mp4` (87 s, H.264/AAC).
+  - The test target embeds `embeddedAsset/test_video.mp4` (87 s, 8-bit H.264 High, 720p, video-only).
 - **Tests:**
   - Swift Testing, 19 files. `CombinationTests` and `PreviewCombinationTests` are `.serialized`.
   - Suites that need a media folder read `MOSAICKIT_SUITE_MODE` (`single` | `folder` | `none`;
@@ -964,13 +964,16 @@ graph LR
 - **CI (`.github/workflows/swift.yml`):**
   - Triggers: push to `main`/`claude/**`, and PRs to `main`.
   - *macOS job:* `swift build --build-tests` + `swift test --skip-build`, currently green.
-  - *iOS Simulator job:* `xcodebuild build-for-testing` / `test-without-building`.
-    - **On `main` it is red:** `-scheme MosaicKit` has no test action.
-    - **PR #33** switches to `-scheme MosaicKit-Package` and forwards
-      `TEST_RUNNER_MOSAICKIT_SUITE_MODE`. It also fixes an iOS-unavailable API in
-      `CombinationTests` and re-encodes the 10-bit fixture to 8-bit (I-22).
-    - With #33, all 178 tests run on the simulator and the job is **green**.
-  - Plus `claude-code-review.yml` (PR review bot) and `claude.yml` (@claude mentions).
+  - *iOS Simulator job:* `xcodebuild build-for-testing` / `test-without-building` on the
+    `MosaicKit-Package` scheme, with `TEST_RUNNER_MOSAICKIT_SUITE_MODE=none` (**PR #33,
+    merged**). It had been red because `-scheme MosaicKit` has no test action; #33 also fixed an
+    iOS-unavailable API in `CombinationTests` and re-encoded the 10-bit fixture to 8-bit (I-22).
+    The job is **green**.
+  - *Runtime (PR #36, merged):* the 108-run "create all versions" animated matrix is skipped when
+    `MOSAICKIT_SUITE_MODE=none` and replaced by a millisecond format × fps frame-delay test.
+    Test runs dropped from 156 s to 41 s (macOS) and from 961 s to 253 s (iOS Simulator).
+  - Plus `claude-code-review.yml` (PR review bot; since PR #35 it runs only when code paths
+    change) and `claude.yml` (@claude mentions).
 
 ### 2.12 Phase 2 wrap-up
 
@@ -1716,8 +1719,9 @@ none.
       Keep test fixtures **8-bit 4:2:0**, because iOS can't decode 10-bit H.264 (I-22).
     - Test code must compile on iOS (no macOS-only Foundation APIs outside `#if os(macOS)`).
     - No preview export runs end-to-end in CI.
-15. **Docs drift:** `MosaicKit-DeepDive.md` is stale, and parts of `CLAUDE.md`/`AGENTS.md`/README
-    are wrong (§1.9). Update them when you touch the corresponding area.
+15. **Docs drift:** `MosaicKit-DeepDive.md` is stale, and parts of the README are wrong (§1.9).
+    `CLAUDE.md` and `AGENTS.md` were rewritten on 2026-09-26 and must stay mirrored. Update docs
+    when you touch the corresponding area.
 
 ### 4.2 Verified issue register
 
@@ -1742,13 +1746,13 @@ robustness, performance, or cosmetic.
 | I-13 | F8 | Default `exportMaxResolution` is **1080p**; the README (1.6.2) and code comments say 4K. | Confirmed (static) | Low | `_exportMaxResolutionRaw = "1080p"` in three places | Decide the intended default and align code and docs. |
 | I-14 | F11 | **A `GenerationJobController` job cancelled before it runs is stuck in `.cancelling`** and cannot be retried. Records never freed; no tests. | Confirmed (static) | Low–Medium | `cancel` sets `.cancelling`; only `value(for:)` moves it to `.cancelled` | In `cancel`, if `task == nil`, go directly to `.cancelled`. Add `remove(_:)`. Add tests. |
 | I-15 | F10 | **Mosaic coordinator keys state by `video.id`.** Concurrent jobs on the same input clobber each other's cancellation and progress. | Confirmed (static) | Low | `activeTasks[videoID]`, `progressHandlers[videoID]` | Use per-attempt keys, as `PreviewGeneratorCoordinator` does. |
-| I-16 | F3/F9 | **Slow ffmpeg cancellation under load** (16–20 s instead of ~4 s). This makes `ffmpegCancellationKillsUncooperativeProcess` fail intermittently in CI. | Confirmed (CI evidence, 2 failures) | Medium | CI logs on PR #32/#33; the watchdog is a `Task` that polls every 2 s and escalates with `Task.sleep` | **Fix in PR #34**: `DispatchSourceTimer` watchdog on a dedicated queue plus termination from `onCancel`. macOS CI is green, including this test. The native/SJS/passthrough watchdogs still poll from `Task`s (follow-up). |
+| I-16 | F3/F9 | **Slow ffmpeg cancellation under load** (16–20 s instead of ~4 s). This makes `ffmpegCancellationKillsUncooperativeProcess` fail intermittently in CI. | **Fixed (PR #34, merged)** | Medium | CI logs on PR #32/#33; the watchdog is a `Task` that polls every 2 s and escalates with `Task.sleep` | **Fixed in PR #34**: `DispatchSourceTimer` watchdog on a dedicated queue plus termination from `onCancel`. macOS CI is green, including this test. The native/SJS/passthrough watchdogs still poll from `Task`s (follow-up). |
 | I-17 | F1 | `discoverVideos` fails the whole scan on one undecodable file. The extension list includes formats AVFoundation rarely decodes (mkv, webm, avi, wmv, flv, asf). | Confirmed (static) | Low–Medium | `discoverVideos` rethrows the first inspection error | Collect per-file failures (a result type), or skip them with a report. |
 | I-18 | F5 | ColorDNA height decoded as 0 (bypassing the init clamp) → strip **silently skipped**. Watermark image load failure → **silently omitted**. | Confirmed (static) | Low | `OverlayProcessor` returns `nil`; the generator keeps the un-annotated image | Validate DNA height ≥ 8. Surface overlay failures (log at least, or throw in strict mode). |
 | I-19 | F2 | `VideoInput(url:)` (legacy) swallows inspection errors and returns metadata-less inputs. `generateMosaicsForFiles` uses it. | Confirmed (static) | Low | `VideoInput.init(url:…) async` | Prefer `VideoInput(from:)` or `VideoSource.inspect()` in new code. |
 | I-20 | F6 | Animated export with `.nochange` holds all full-resolution frames in memory (e.g. 4K × up to 800 frames). | Confirmed (static) | Medium (memory) | `extractFramesForGif` returns `[CGImage]` | Stream frames into `CGImageDestination` / the WebP encoder incrementally, or cap `.nochange` by frame count. |
-| I-21 | CI | iOS job used a scheme with no test action; the tests never compiled for iOS. | Confirmed; **fixed in PR #33** (iOS CI green; #31 closed as duplicate) | — | CI logs | Scheme `MosaicKit-Package` + `URL.homeDirectory` in `CombinationTests` + `TEST_RUNNER_` suite-mode forwarding |
-| I-22 | F2/F3/F6/F8 + CI | **10-bit H.264 ("High 10") sources cannot be decoded on iOS.** Mosaic and animation jobs fail entirely because extraction is strict. The embedded test fixture is itself High 10, so the 10 embedded-media tests fail on the iOS Simulator (178 run, 10 fail). | Confirmed (fixture `avcC`: `profile_idc 110`, 10-bit luma/chroma; CI: VideoToolbox `err=-8969` on every frame) | Medium (iOS) | CI run on PR #33 @ 85c6d5e; local `avcC` parse | CI: **fixture re-encoded to 8-bit H.264 High in PR #33** (iOS green). Product (still open): detect unsupported codec/bit depth at inspection (`formatDescriptions`) and fail fast with a clear `VideoError`/`MosaicError`, or fall back to a software path. |
+| I-21 | CI | iOS job used a scheme with no test action; the tests never compiled for iOS. | **Fixed (PR #33, merged)**; #31 closed as duplicate | — | CI logs | Scheme `MosaicKit-Package` + `URL.homeDirectory` in `CombinationTests` + `TEST_RUNNER_` suite-mode forwarding |
+| I-22 | F2/F3/F6/F8 + CI | **10-bit H.264 ("High 10") sources cannot be decoded on iOS.** Mosaic and animation jobs fail entirely because extraction is strict. The embedded test fixture is itself High 10, so the 10 embedded-media tests fail on the iOS Simulator (178 run, 10 fail). | Confirmed (fixture `avcC`: `profile_idc 110`, 10-bit luma/chroma; CI: VideoToolbox `err=-8969` on every frame) | Medium (iOS) | CI run on PR #33 @ 85c6d5e; local `avcC` parse | CI: **fixture re-encoded to 8-bit H.264 High in PR #33 (merged)**. Product (still open): detect unsupported codec/bit depth at inspection (`formatDescriptions`) and fail fast with a clear `VideoError`/`MosaicError`, or fall back to a software path. |
 | I-23 | Deps / logging | `swift-log` is declared in `Package.swift` but never imported. The OSLog subsystem is `com.mosaicKit` in most files but `com.mosaickit` in the preview files, which splits Console filtering. | Confirmed (static) | Low | `grep` finds no `import Logging`; `Logger(subsystem:)` strings | Remove the dependency (or adopt it). Unify the subsystem string. Fix the CLAUDE.md logging guidance. |
 | I-24 | Codable | `MosaicConfiguration.init(from:)` requires most keys (`decode`), so configs persisted by older versions fail to decode when a field is added. | Confirmed (static) | Medium (upgrade risk) | `MosaicConfiguration.swift` decoder | Use `decodeIfPresent ?? default` for every key added after 1.0 (rule 2). Add a decode-old-payload test per new field. |
 | I-25 | Hygiene | Dead or misleading code: `generateallcombinations` ignores the caller's config; unused private helpers in `MetalMosaicGenerator` (`extractFramesWithVideoToolbox`, `calculateExtractionTimes`, `calculateAspectRatio`); unused `MosaicFrameSource`/`makeFrameSource`, `prioritizeVideos`, `VideoError`, `LibraryError`; never-emitted statuses. | Confirmed (static) | Low | §2.12, §5.4 | Remove, or document as intentionally unused (`MosaicFrameSource` has history, §2.6). |
@@ -2416,7 +2420,7 @@ with the code.
 
 | # | Work item | Issues | Why now | Effort |
 |---|---|---|---|---|
-| 1 | Merge **#33** (iOS CI) and **#34** (ffmpeg watchdog), then merge `main` into the docs PR | I-16, I-21, I-22 (CI) | Restores a green, meaningful CI on both platforms | done / review only |
+| 1 | ~~Merge **#33** (iOS CI) and **#34** (ffmpeg watchdog)~~ **Done**: #32–#36 merged; CI green on both platforms | I-16, I-21, I-22 (CI) | Restores a green, meaningful CI on both platforms | done |
 | 2 | Apply `preferredTransform` to the dimensions in `VideoMetadataExtractor`; add a rotated-video fixture test | I-1 | Portrait phone videos are the most common source on iOS | S |
 | 3 | Fix the ffmpeg scale filter (aspect-preserving, even dimensions) and drop the forced `-r 30` / wrong `pix_fmt` for libx265 | I-2, I-3 | Wrong output for common sources in the ffmpeg mode | S |
 | 4 | Make preview default filenames deterministic (drop the run timestamp or make it a token) | I-12 | Enables incremental preview runs (skip-if-exists) | S (naming change: note in the release) |
@@ -2508,7 +2512,7 @@ P1 = core feature, P2 = supporting, P3 = docs/infra.
 | 49 | P3 | `AGENTS.md` | doc | 300 | 78b9f6dc | Agent guide (partly stale) |
 
 Excluded or low value: `Media.xcassets/**` (binary fixture), `Tests/MosaicKitTests/embeddedAsset/test_video.mp4`
-(87 s H.264/AAC fixture), `scripts/**` + `Makefile` (xcodebuild agent scaffold for a
+(87 s 8-bit H.264 video-only fixture), `scripts/**` + `Makefile` (xcodebuild agent scaffold for a
 non-existent `.xcodeproj`), `tasks/TASKS.md` (empty backlog).
 
 ## Appendix B — Assumptions
