@@ -786,45 +786,6 @@ public actor MosaicGeneratorCoordinator<Generator: MosaicGeneratorProtocol> {
             
         
     
-    /// Prioritize videos for processing based on various factors
-    /// - Parameter videos: The videos to prioritize
-    /// - Returns: Videos sorted by priority
-    private func prioritizeVideos(_ videos: [VideoInput]) -> [VideoInput] {
-        logger.debug("🔄 Prioritizing \(videos.count) videos for processing")
-        
-        // Sort videos based on a weighted priority algorithm:
-        // 1. Shorter videos get higher priority (faster to process)
-        // 2. Already cached videos get higher priority
-        // 3. Higher resolution videos get slightly lower priority (more resource-intensive)
-
-        return videos.sorted { video1, video2 in
-            var score1: Double = 0
-            var score2: Double = 0
-
-            // Factor 1: Duration - shorter videos get higher score (negative correlation)
-            // Clamp to 1-300 seconds range for scoring purposes
-            // Provide default value for optional duration
-            let duration1 = min(300, max(1, video1.duration ?? 300))
-            let duration2 = min(300, max(1, video2.duration ?? 300))
-            score1 += 300.0 / duration1 * 10 // Shorter = higher score, max weight 10
-            score2 += 300.0 / duration2 * 10
-
-            // Factor 2: Already has thumbnail/cached data - bonus points
-
-
-            // Factor 3: Resolution - lower resolution gets higher score (easier to process)
-            let resolution1 = (video1.width ?? 1920) * (video1.height ?? 1080)
-            let resolution2 = (video2.width ?? 1920) * (video2.height ?? 1080)
-            // Normalize to 0-5 range based on 4K resolution as upper bound
-            let resolutionMax = 3840 * 2160
-            score1 += 5.0 * (1.0 - min(1.0, Double(resolution1) / Double(resolutionMax)))
-            score2 += 5.0 * (1.0 - min(1.0, Double(resolution2) / Double(resolutionMax)))
-
-            // Return comparison result (higher score comes first)
-            return score1 > score2
-        }
-        
-    }
 }
 
 // MARK: - Convenience Factory Functions

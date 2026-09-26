@@ -126,9 +126,9 @@ Every PR updates its row here (status) and the matching §4.2 / §6.1 entries in
 
 | ID | Status | PR |
 |---|---|---|
-| P-1 | in review | #39 |
+| P-1 | done | #39 |
 | P-2 | planned | |
-| S-1 | planned | |
+| S-1 | done | #38 |
 | S-2 | planned | |
 | S-3 | planned | |
 | S-4 | planned | |
@@ -167,3 +167,4 @@ PR title.
 | A-6 | 2026-09-26 | P-1 | Report source-seconds/s and input MB/s instead of frames/s | Two-way | Frame counts aren't exposed by `MosaicGenerationResult`; adding them would change public API for a test-only need |
 | A-7 | 2026-09-26 | P-1 | Fixed scenarios, one discarded warm-up run, median of N; peak memory is process-wide `ru_maxrss` | Two-way | Stable, comparable numbers across PRs; the per-scenario memory figure is only meaningful with `--filter BenchmarkTests` |
 | A-8 | 2026-09-26 | S-1 review | Keep the swift-log removal despite the Codex P1 comment asking to retain it | Two-way | The comment cited the stale pre-#37 `AGENTS.md` rule; the code never imported `Logging` (I-23) |
+| A-9 | 2026-09-26 | P-1/S-1 | Merge #39 and #38 myself once CI is green on both platforms and every review thread is addressed (merge commits) | Two-way (revert commits) | Keeps the plan moving while the maintainer is away; nothing is released or tagged |

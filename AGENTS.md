@@ -99,7 +99,7 @@ MosaicKit/
   1. `VideoInput` / `VideoSource` inspection (`VideoMetadataExtractor`).
   2. Frame extraction: `ThumbnailProcessor.processedFramesStream`, batched
      `AVAssetImageGenerator` requests. The pull-based bounded source introduced in 1.7.0 was
-     reverted because it was 30–45 % slower. `MosaicFrameSource` is currently unused (I-25).
+     reverted because it was 30–45 % slower; its `MosaicFrameSource` was removed in S-1.
   3. Layout (`LayoutProcessor`, cached).
   4. GPU composition in pipelined 20-frame Metal command buffers (`MetalImageProcessor`).
   5. Dominant-color background (`DominantColors`).
@@ -240,8 +240,8 @@ thrown from `Models/ConfigurationValidation.swift`.
 
 ## Logging
 
-The code uses **OSLog**, not swift-log. `swift-log` is declared in `Package.swift` but never
-imported (I-23).
+The code uses **OSLog**. (`swift-log` was declared but never imported; it was removed in S-1,
+I-23.)
 
 ```swift
 import OSLog
@@ -249,7 +249,7 @@ private let logger = Logger(subsystem: "com.mosaicKit", category: "my-component"
 logger.info("Processing started: \(url.lastPathComponent, privacy: .public)")
 ```
 
-- Use the subsystem **`com.mosaicKit`**. Some preview files still use `com.mosaickit` (I-23).
+- Use the subsystem **`com.mosaicKit`** everywhere.
 - Use signposts for performance-sensitive paths.
 
 ---
@@ -271,7 +271,6 @@ logger.info("Processing started: \(url.lastPathComponent, privacy: .public)")
 | `DominantColors` | ≥ 1.2.0 | Background color extraction |
 | `SJSAssetExportSession` | ≥ 0.4.0 | `.sjs` preview export |
 | `webp.swift` (→ `libwebp-ios`) | ≥ 1.1.2 | WebP encoding, **`MosaicKitWebP` target only**; core never imports `webp` |
-| `apple/swift-log` | ≥ 1.6.0 | Declared but unused (I-23) |
 
 - Don't add dependencies without a clear justification. Prefer Apple frameworks.
 - `.ffmpeg` shells out to an external `ffmpeg` binary. That is a runtime dependency, not an SPM

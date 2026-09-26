@@ -230,16 +230,6 @@ public final class ThumbnailProcessor: Sendable {
         return stream
     }
 
-    private func makeFrameSource(file: URL, layout: MosaicLayout, asset: AVAsset, accurate: Bool) -> MosaicFrameSource {
-        signposter.emitEvent("makeFrameSource")
-        let intervalState = signposter.beginInterval("makeFrameSource")
-        defer { signposter.endInterval("makeFrameSource", intervalState) }
-        let generator = configureGenerator(for: asset, accurate: accurate, preview: false, layout: layout)
-        return MosaicFrameSource(decoder: MosaicImageDecoder(asset: asset, generator: generator), count: layout.positions.count,
-            times: { self.calculateExtractionTimes(duration: $0, count: layout.positions.count) },
-            timestamp: { self.formatTimestamp(seconds: $0) })
-    }
-    
     /// Extract thumbnails from video with timestamps
     /// - Parameters:
     ///   - file: Video file URL
@@ -577,34 +567,6 @@ public final class ThumbnailProcessor: Sendable {
         
         context?.fill(CGRect(origin: .zero, size: size))
         return context?.makeImage()
-    }
-    
-    /// Deep copies a CGImage to decouple it from AVAssetImageGenerator's buffer pool
-    private func createDeepCopy(of image: CGImage) -> CGImage? {
-        signposter.emitEvent("createDeepCopy")
-        let intervalState = signposter.beginInterval("createDeepCopy")
-        defer { signposter.endInterval("createDeepCopy", intervalState) }
-        let width = image.width
-        let height = image.height
-        guard width > 0 && height > 0 else { return nil }
-        
-        let colorSpace = image.colorSpace ?? CGColorSpaceCreateDeviceRGB()
-        // Use bgra8Unorm equivalent which is fast on Apple Silicon
-        let bitmapInfo = CGBitmapInfo.byteOrder32Little.rawValue | CGImageAlphaInfo.premultipliedFirst.rawValue
-        
-        guard let context = CGContext(
-            data: nil,
-            width: width,
-            height: height,
-            bitsPerComponent: 8,
-            bytesPerRow: 0,
-            space: colorSpace,
-            bitmapInfo: bitmapInfo
-        ) else { return nil }
-        
-        context.interpolationQuality = .none
-        context.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
-        return context.makeImage()
     }
     
     /// Minimum header height as a fraction of the thumbnail height, scaling with
@@ -995,96 +957,6 @@ public final class ThumbnailProcessor: Sendable {
     }
     
     // Private helper method to draw metadata directly to a context
-    private func drawMetadata(
-        context: CGContext,
-        metadata: VideoMetadata,
-        width: Int,
-        height: Int,
-        headerHeight: Int? = nil
-    ) {
-        signposter.emitEvent("drawMetadata")
-        let intervalState = signposter.beginInterval("drawMetadata")
-        defer { signposter.endInterval("drawMetadata", intervalState) }
-        // Use the provided height or calculate a reasonable size for the header
-        let metadataHeight = headerHeight ?? Int(round(Double(height) * 0.2))  // Use 1/5 of total height by default
-                                                                              // This will be overridden by the thumbnailHeight in the main method
-        let fontSize = max(12.0, CGFloat(metadataHeight) / 3.0)
-        
-        // Draw a semi-transparent background bar at the top
-        context.saveGState()
-        
-        // First clear the area to ensure transparency
-        context.clear(CGRect(x: 0, y: 0, width: width, height: metadataHeight))
-        
-        // Create dark semi-transparent background for metadata - more transparent to match main method
-        #if canImport(AppKit)
-        let metadataBackgroundColor = NSColor(white: 0.1, alpha: 0.5).cgColor
-        #elseif canImport(UIKit)
-        let metadataBackgroundColor = UIColor(white: 0.1, alpha: 0.5).cgColor
-        #endif
-        context.setFillColor(metadataBackgroundColor)
-        drawRoundedHeaderBackground(
-            in: context,
-            width: CGFloat(width),
-            height: CGFloat(metadataHeight),
-            color: metadataBackgroundColor
-        )
-        
-        // Prepare the metadata text
-        var metadataItems = [
-            "Codec: \(metadata.codec ?? "Unknown")",
-            "Bitrate: \(formatBitrate(metadata.bitrate))"
-        ]
-        
-        // Add custom metadata
-        let customText = metadata.custom.map { "\($0.key): \($0.value)" }.joined(separator: " | ")
-        if !customText.isEmpty {
-            metadataItems.append(customText)
-        }
-        
-        let metadataText = metadataItems.joined(separator: " | ")
-        
-        // Set up text attributes using CoreText - matching the main method styling
-        let font = CTFontCreateWithName("Helvetica-Bold" as CFString, fontSize, nil)
-        let paragraphStyle = NSMutableParagraphStyle()
-        // Use left alignment to match the main method
-        paragraphStyle.alignment = .left
-        
-        // Create the attributed string with enhanced visibility against semi-transparent background
-        #if canImport(AppKit)
-        let attributes: [NSAttributedString.Key: Any] = [
-            .font: font,
-            .foregroundColor: NSColor.white,
-            .paragraphStyle: paragraphStyle,
-            .strokeWidth: -0.5, // Text outline for better visibility
-            .strokeColor: NSColor.black.withAlphaComponent(0.5)
-        ]
-        #elseif canImport(UIKit)
-        let attributes: [NSAttributedString.Key: Any] = [
-            .font: font,
-            .foregroundColor: UIColor.white,
-            .paragraphStyle: paragraphStyle,
-            .strokeWidth: -0.5, // Text outline for better visibility
-            .strokeColor: UIColor.black.withAlphaComponent(0.5)
-        ]
-        #endif
-        
-        let attributedString = NSAttributedString(string: metadataText, attributes: attributes)
-        let line = CTLineCreateWithAttributedString(attributedString)
-        
-        // Left-align text with padding to match main method
-        let leftPadding: CGFloat = 20.0
-        // Calculate vertical position
-        let bounds = CTLineGetBoundsWithOptions(line, .useOpticalBounds)
-        let yPos = CGFloat(metadataHeight) / 2 + bounds.height / 4  // Vertically centered
-        
-        // Draw text
-        context.textMatrix = CGAffineTransform.identity
-        context.translateBy(x: leftPadding, y: yPos)
-        CTLineDraw(line, context)
-        
-        context.restoreGState()
-    }
     
     private nonisolated(unsafe) static let bitrateFormatter: ByteCountFormatter = {
         let f = ByteCountFormatter()
@@ -1107,7 +979,7 @@ public final class ThumbnailProcessor: Sendable {
         guard let bitrate = bitrate else { return "Unknown" }
         return ThumbnailProcessor.bitrateFormatter.string(fromByteCount: bitrate) + "/s"
     }
-    
+
     /// Add timestamp overlay to the thumbnail image with Apple-inspired design
     /// - Parameters:
     ///   - image: The thumbnail image
@@ -1412,27 +1284,6 @@ public final class ThumbnailProcessor: Sendable {
             return image
         }
         return finalImage
-    }
-    
-    /// Helper method to draw timestamp text
-    private func drawTimestampText(in context: CGContext, text: String, attributes: [NSAttributedString.Key: Any], rect: CGRect) {
-        signposter.emitEvent("drawTimestampText")
-        let intervalState = signposter.beginInterval("drawTimestampText")
-        defer { signposter.endInterval("drawTimestampText", intervalState) }
-        let nsString = NSString(string: text)
-        let stringSize = nsString.size(withAttributes: attributes)
-        
-        let textX = rect.minX + (rect.width - stringSize.width) / 2
-        let textY = rect.minY + (rect.height - stringSize.height) / 2
-        
-        context.saveGState()
-        context.textMatrix = CGAffineTransform.identity
-        context.translateBy(x: textX, y: textY)
-        
-        let attributedString = NSAttributedString(string: text, attributes: attributes)
-        let line = CTLineCreateWithAttributedString(attributedString)
-        CTLineDraw(line, context)
-        context.restoreGState()
     }
     
     /// Helper method to draw pill background
