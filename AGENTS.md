@@ -288,6 +288,13 @@ swift test --filter <TestName>
 MOSAICKIT_SUITE_MODE=none swift test                    # CI mode: skip extended suites
 ```
 
+- **Throughput benchmark (plan P-1):** `BenchmarkTests` runs only when `MOSAICKIT_BENCHMARK`
+  points at a folder of videos (or one file). Every change tagged ⚡ in the implementation plan
+  needs a before/after run on the same machine, pasted into the PR:
+  `MOSAICKIT_BENCHMARK=/path/to/videos swift test -c release --filter BenchmarkTests`.
+  Optional: `MOSAICKIT_BENCHMARK_RUNS` (default 3), `MOSAICKIT_BENCHMARK_CONCURRENCY`
+  (default `1,0`), `MOSAICKIT_BENCHMARK_JSON` (write results as JSON).
+
 - **Location:** tests live in `Tests/MosaicKitTests/`. The embedded fixture is
   `embeddedAsset/test_video.mp4`, loaded with `Bundle.module`.
 - **Fixture format:** keep test videos **8-bit 4:2:0**. iOS cannot decode 10-bit H.264 (I-22).
