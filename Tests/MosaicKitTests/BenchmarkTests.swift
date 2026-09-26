@@ -67,9 +67,8 @@ struct BenchmarkTests {
         let env = ProcessInfo.processInfo.environment
         let videos = try await loadVideos(from: try #require(env["MOSAICKIT_BENCHMARK"]))
         try #require(!videos.isEmpty, "No readable videos found in MOSAICKIT_BENCHMARK")
-        let runs = max(1, Int(env["MOSAICKIT_BENCHMARK_RUNS"] ?? "") ?? 3)
-        let concurrencies = (env["MOSAICKIT_BENCHMARK_CONCURRENCY"] ?? "1,0")
-            .split(separator: ",").compactMap { Int($0.trimmingCharacters(in: .whitespaces)) }
+        let runs = try Self.parseRuns(env["MOSAICKIT_BENCHMARK_RUNS"])
+        let concurrencies = try Self.parseConcurrencies(env["MOSAICKIT_BENCHMARK_CONCURRENCY"])
 
         let sourceSeconds = videos.compactMap(\.duration).reduce(0, +)
         let inputMB = Double(videos.compactMap(\.fileSize).reduce(0, +)) / 1_048_576
@@ -84,7 +83,7 @@ struct BenchmarkTests {
                     let (seconds, bytes) = try await runBatch(videos: videos, scenario: scenario, concurrency: concurrency)
                     if run > 0 { timings.append(seconds); outputMB = Double(bytes) / 1_048_576 }
                 }
-                let median = timings.sorted()[timings.count / 2]
+                let median = Self.median(timings)
                 measurements.append(Measurement(
                     scenario: scenario.name,
                     concurrency: concurrency,
@@ -108,6 +107,34 @@ struct BenchmarkTests {
     }
 
     // MARK: - Helpers
+
+    /// `MOSAICKIT_BENCHMARK_RUNS`: a positive integer, default 3. Invalid values fail the run
+    /// instead of silently measuring something else.
+    private static func parseRuns(_ raw: String?) throws -> Int {
+        guard let raw else { return 3 }
+        guard let runs = Int(raw.trimmingCharacters(in: .whitespaces)), runs >= 1 else {
+            throw BenchmarkError.invalidSetting("MOSAICKIT_BENCHMARK_RUNS", raw)
+        }
+        return runs
+    }
+
+    /// `MOSAICKIT_BENCHMARK_CONCURRENCY`: comma-separated integers ≥ 0 (`0` = automatic), default
+    /// `1,0`. A typo must not silently yield an empty report, and a negative limit would make the
+    /// coordinator wait forever, so every entry has to parse.
+    private static func parseConcurrencies(_ raw: String?) throws -> [Int] {
+        guard let raw else { return [1, 0] }
+        let values = raw.split(separator: ",").map { Int($0.trimmingCharacters(in: .whitespaces)) }
+        guard !values.isEmpty, values.allSatisfy({ ($0 ?? -1) >= 0 }) else {
+            throw BenchmarkError.invalidSetting("MOSAICKIT_BENCHMARK_CONCURRENCY", raw)
+        }
+        return values.compactMap { $0 }
+    }
+
+    private static func median(_ values: [Double]) -> Double {
+        let sorted = values.sorted()
+        let middle = sorted.count / 2
+        return sorted.count.isMultiple(of: 2) ? (sorted[middle - 1] + sorted[middle]) / 2 : sorted[middle]
+    }
 
     private func loadVideos(from path: String) async throws -> [VideoInput] {
         let url = URL(fileURLWithPath: path)
@@ -193,10 +220,12 @@ struct BenchmarkTests {
 
 private enum BenchmarkError: Error, CustomStringConvertible {
     case pathNotFound(String)
+    case invalidSetting(String, String)
 
     var description: String {
         switch self {
         case .pathNotFound(let path): return "MOSAICKIT_BENCHMARK path not found: \(path)"
+        case .invalidSetting(let name, let value): return "Invalid \(name) value: \(value)"
         }
     }
 }
