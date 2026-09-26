@@ -163,10 +163,4 @@ actor VideoMetadataExtractor {
         }
     }
 
-    /// Get video duration in seconds
-    func getDuration(from url: URL) async throws -> TimeInterval {
-        let asset = AVURLAsset(url: url)
-        let duration = try await asset.load(.duration)
-        return duration.seconds
-    }
 }

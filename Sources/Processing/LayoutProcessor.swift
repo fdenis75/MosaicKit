@@ -20,22 +20,6 @@ public final class LayoutProcessor {
     }
     private var layoutCache: [String: MosaicLayout] = [:]
     
-    /// Get the screen size for the main screen
-    private func getMainScreenSize() -> (size: CGSize, scale: CGFloat)? {
-        let state = signposter.beginInterval("Get Main Screen Size")
-        defer { signposter.endInterval("Get Main Screen Size", state) }
-        
-        #if canImport(AppKit)
-        guard let mainScreen = NSScreen.main else { return nil }
-        return (mainScreen.visibleFrame.size, mainScreen.backingScaleFactor)
-        #elseif canImport(UIKit)
-        let mainScreen = UIScreen.main
-        return (mainScreen.bounds.size, mainScreen.scale)
-        #else
-        return nil
-        #endif
-    }
-    
     /// Get the screen with the largest size
     private func getLargestScreen() -> (size: CGSize, scale: CGFloat)? {
         let state = signposter.beginInterval("Get Largest Screen")
@@ -584,58 +568,6 @@ public final class LayoutProcessor {
     
     // MARK: - Helper Methods
 
-    private func adjustPortraitLayout(
-        smallCols: Int,
-        largeCols: Int,
-        smallRows: Int,
-        largeRows: Int,
-        smallThumbWidth: CGFloat,
-        smallThumbHeight: CGFloat,
-        mosaicAspectRatio: CGFloat
-    ) -> (smallCols: Int, largeCols: Int) {
-        var adjustedSmallCols = smallCols
-        var adjustedLargeCols = largeCols
-        
-        var mozW = smallThumbWidth * CGFloat(adjustedSmallCols)
-        var mozH = smallThumbHeight * CGFloat(smallRows + largeRows * 2)
-        var mozAR = mozW / mozH
-        
-        while mozAR < mosaicAspectRatio {
-            adjustedSmallCols += 2
-            adjustedLargeCols += 1
-            mozW = smallThumbWidth * CGFloat(adjustedSmallCols)
-            mozH = smallThumbHeight * CGFloat(smallRows + largeRows * 2)
-            mozAR = mozW / mozH
-        }
-        
-        return (adjustedSmallCols, adjustedLargeCols)
-    }
-    
-    private func adjustLandscapeLayout(
-        smallRows: Int,
-        largeRows: Int,
-        mosaicHeight: Int,
-        smallThumbHeight: CGFloat
-    ) -> (smallRows: Int, largeRows: Int) {
-        var adjustedSmallRows = smallRows
-        var adjustedLargeRows = largeRows
-        
-        let tmpTotalRows = Int(CGFloat(mosaicHeight) / smallThumbHeight)
-        var diff = tmpTotalRows - (adjustedSmallRows + 2 * adjustedLargeRows)
-        
-        while diff > 0 {
-            if diff >= 2 {
-                adjustedLargeRows += 1
-                diff -= 2
-            } else if diff >= 1 {
-                adjustedSmallRows += 1
-                diff -= 1
-            }
-        }
-        
-        return (adjustedSmallRows, adjustedLargeRows)
-    }
-    
     /// Calculate thumbnail count based on video duration and width
     /// - Parameters:
     ///   - duration: Video duration in seconds

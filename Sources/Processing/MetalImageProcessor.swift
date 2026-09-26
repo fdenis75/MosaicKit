@@ -1310,27 +1310,6 @@ public final class MetalImageProcessor: @unchecked Sendable {
         }
     }
     
-    private func formatMetadata(_ metadata: VideoMetadata) -> String {
-        signposter.emitEvent("formatMetadata")
-        let intervalState = signposter.beginInterval("formatMetadata")
-        defer { signposter.endInterval("formatMetadata", intervalState) }
-        var lines: [String] = []
-        
-        if let codec = metadata.codec {
-            lines.append("Codec: \(codec)")
-        }
-        
-        if let bitrate = metadata.bitrate {
-            lines.append("Bitrate: \(MetalImageProcessor.bitrateFormatter.string(fromByteCount: bitrate))/s")
-        }
-        
-        for (key, value) in metadata.custom {
-            lines.append("\(key): \(value)")
-        }
-        
-        return lines.joined(separator: " | ")
-    }
-    
     // Timestamp is now handled directly in ThumbnailProcessor
     
     // Metadata functionality is now handled in ThumbnailProcessor

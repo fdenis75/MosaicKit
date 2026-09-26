@@ -65,7 +65,7 @@ public actor PreviewVideoGenerator {
 
     // MARK: - Properties
 
-    private let logger = Logger(subsystem: "com.mosaickit", category: "PreviewVideoGenerator")
+    private let logger = Logger(subsystem: "com.mosaicKit", category: "PreviewVideoGenerator")
     private var progressHandlers: [UUID: @Sendable (PreviewGenerationProgress) -> Void] = [:]
     private var cancellationTokens: [UUID: (sourceID: UUID, token: CancellationToken)] = [:]
 
@@ -244,7 +244,7 @@ public actor PreviewVideoGenerator {
 // MARK: - Generation logic
 
 struct PreviewGenerationLogic {
-    private static let logger = Logger(subsystem: "com.mosaickit", category: "PreviewGenerationLogic")
+    private static let logger = Logger(subsystem: "com.mosaicKit", category: "PreviewGenerationLogic")
 
     private struct PreviewOverlayCue {
         let compositionStart: CMTime

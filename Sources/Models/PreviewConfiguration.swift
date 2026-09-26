@@ -30,7 +30,7 @@ public enum PreviewExportMode: String, Codable, Sendable, Hashable {
 // @available(macOS 26, iOS 26, *)
 public struct PreviewConfiguration: Codable, Sendable, Hashable {
 
-    private static let logger = Logger(subsystem: "com.mosaickit", category: "PreviewConfiguration")
+    private static let logger = Logger(subsystem: "com.mosaicKit", category: "PreviewConfiguration")
 
     // MARK: - Properties
 

@@ -10,7 +10,7 @@ public actor PreviewGeneratorCoordinator {
     // MARK: - Properties
 
     private let previewGenerator: PreviewVideoGenerator
-    private let logger = Logger(subsystem: "com.mosaickit", category: "PreviewGeneratorCoordinator")
+    private let logger = Logger(subsystem: "com.mosaicKit", category: "PreviewGeneratorCoordinator")
 
     /// Active generation tasks keyed by independent attempt identity
     private var activeTasks: [UUID: Task<URL, Error>] = [:]
