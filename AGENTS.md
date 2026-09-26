@@ -139,8 +139,12 @@ MosaicKit/
 
 ## Models & configuration
 
-All model types are `Codable` and `Sendable`. The full reference, with defaults, is in knowledge
-base §5.2–§5.3.
+Configuration and input models (`MosaicConfiguration`, `PreviewConfiguration`, `DensityConfig`,
+layout, overlay and format types, `VideoInput`) are `Codable` and `Sendable`. Progress, result
+and description types (`MosaicGenerationProgress`/`Result`, `PreviewGenerationProgress`/`Result`,
+`PreviewCompositionResult`, `PreviewExportDescription`) are `Sendable` only; they carry `Error`
+or `AVPlayerItem` values and must not be persisted. The full reference, with defaults, is in
+knowledge base §5.2–§5.3.
 
 - **`MosaicConfiguration`:**
   - `density` (default `.m`), `format: OutputFormat` (`.heif` default, `.jpeg`, `.png`,
@@ -189,8 +193,11 @@ base §5.2–§5.3.
 
 ## Concurrency & cancellation
 
-- `MetalMosaicGenerator` and `PreviewVideoGenerator` are **actors**. All public API is
-  `async throws`. Types that cross actor boundaries must be `Sendable`.
+- `MetalMosaicGenerator` and `PreviewVideoGenerator` are **actors**. Generation entry points are
+  `async throws`. Cancellation, progress-handler and metrics methods (`cancel(for:)`,
+  `cancelAll()`, `setProgressHandler`, `getPerformanceMetrics()`) are synchronous
+  actor-isolated methods; keep them that way. Types that cross actor boundaries must be
+  `Sendable`.
 - Tracked tasks inherit the generator actor's isolation. **Don't add synchronous heavy work or
   blocking calls** (`waitUntilCompleted`, semaphores) to async code: they serialize jobs and
   starve the cooperative pool (rules card #6).

@@ -203,8 +203,8 @@ the `MosaicConfiguration.filenameTemplate` doc comment.
 - `Makefile` + `scripts/*.sh` are an **agent/xcodebuild scaffold** (`xcbuild.sh`, `task.sh`,
   simulator runners). `scripts/xcbuild.sh` exists and the Makefile uses it as `XCBUILD`, but
   every target builds `MosaicKit.xcodeproj` / `-scheme MosaicKit`, and **no `.xcodeproj` exists**
-  in the repo. Treat the Makefile as unusable as configured. (`CLAUDE.md` also claims "There is
-  no Makefile", which is out of date as well.)
+  in the repo. Treat the Makefile as unusable as configured. (`CLAUDE.md` used to claim "There is no
+  Makefile"; corrected on 2026-09-26.)
 - `.spi.yml` builds DocC for the Swift Package Index (macOS + iOS, Swift 6.2).
 - `MosaicKitTests.xctestplan` is an Xcode test plan.
 
@@ -239,8 +239,8 @@ Preview JIT for every client that links it. The core target therefore only decla
 `MosaicKitWebPError.encoderNotRegistered`. `MosaicConfiguration.validate()` checks this before
 any work starts.
 
-**⚠ Finding:** `CLAUDE.md` and `Examples/README.md` say to run `swift run SimpleExample` and
-similar commands. `Package.swift` declares **no executable targets**, so those commands cannot
+**⚠ Finding:** `Examples/README.md` says to run `swift run SimpleExample` and similar commands
+(`CLAUDE.md` said so too until 2026-09-26). `Package.swift` declares **no executable targets**, so those commands cannot
 work as the package stands. The files in `Examples/` are reference snippets only.
 
 ### 1.5 Repository structure
@@ -422,7 +422,7 @@ Default values worth knowing:
 |---|---|---|
 | Source code | **Authoritative** | Always verify against it. |
 | `README.md` | High, with exceptions | Current through 1.7.0, but the 1.7.0 "bounded pull-based stream" note describes a design that was later **reverted** for performance (§2.6). Other exception: "New in 1.6.2" says the default `ExportMaxResolution` is **4K**, but the code defaults to **"1080p"** (§1.10 item 4). The installation snippet still says `from: "1.2.0"`. |
-| `CLAUDE.md` / `AGENTS.md` | High (rewritten 2026-09-26) | Both files are now identical except for the title and point agents to this document first. Earlier errors (swift-log, "no Makefile", `swift run` examples, nonexistent workflows, `Models/AspectRatio.swift`, Core Graphics/vImage, `VideoFormat` as the mosaic format) are corrected. Keep the two files in sync. |
+| `CLAUDE.md` / `AGENTS.md` | High (rewritten 2026-09-26) | Both files are identical except for the title and first paragraph, and point agents to this document first. Earlier errors (swift-log, "no Makefile", `swift run` examples, nonexistent workflows, `Models/AspectRatio.swift`, Core Graphics/vImage, `VideoFormat` as the mosaic format) are corrected. Keep the two files in sync. |
 | `MosaicKit-DeepDive.md` | **Stale — do not trust architecture sections** | Describes the removed dual engine (`CoreGraphicsMosaicGenerator`, `MosaicGeneratorFactory`, vImage buffer pool) and a `.gif` still format. The coordinator concurrency formula it gives is for previews only, and the cap of 8 it quotes is really 2. |
 | `spec.md` | **Design intent, only partly implemented** | Describes a `GenerationRequest/Plan`, `JobHandle/BatchHandle`, checkpoint ledger, and a single processing-service actor. None of these exist. What does exist: `VideoSource`, `OutputTransaction`, `MosaicFrameSource`, validation, `GenerationJobController`. |
 | `Sources/MosaicKit.docc/*` | High, reviewed | `Architecture.md` is accurate but shows the array-based `generateMosaic(from:)` rather than the streaming path. `PreviewExporting.md` matches the stall timeouts. `BackgroundProcessing.md` is current. `PerformanceGuide.md` benchmark numbers are unverified. `PlatformStrategy.md` is historical context. |
@@ -2478,7 +2478,7 @@ P1 = core feature, P2 = supporting, P3 = docs/infra.
 | 15 | P1 | `Sources/Processing/OutputTransaction.swift` | code | 62 | e5da241b | Atomic commit |
 | 16 | P1 | `Sources/Processing/MosaicFrameSource.swift` | code | 76 | 73a43637 | Pull-based frame source |
 | 17 | P1 | `Sources/Models/ConfigurationValidation.swift` | model | 102 | 83f12470 | All `validate()` |
-| 18 | P1 | `Sources/Processing/Preview/FFmpegEncoder.swift` | code | 423 | 754d03e0 | ffmpeg pipeline (macOS) |
+| 18 | P1 | `Sources/Processing/Preview/FFmpegEncoder.swift` | code | 440 | 84b44eaa | ffmpeg pipeline (macOS) |
 | 19 | P1 | `Sources/Processing/OverlayProcessor.swift` | code | 302 | 47e12c52 | DNA strip, watermark |
 | 20 | P1 | `Sources/Models/OverlayConfiguration.swift` | model | 329 | 50177235 | Overlay configs |
 | 21 | P1 | `Sources/Processing/AnimatedGifGenerator.swift` | code | 141 | bd92de71 | Animated writer |
@@ -2498,18 +2498,18 @@ P1 = core feature, P2 = supporting, P3 = docs/infra.
 | 35 | P2 | `Sources/Processing/VideoMetadataExtractor.swift` | code | 172 | c25f1885 | Metadata actor |
 | 36 | P2 | `Sources/VideoInputScanner.swift` | code | 106 | 3eee6885 | Discovery |
 | 37 | P2 | `Sources/Shaders/MetalShaders.metal` | shader | 160 | 69c46806 | 5 kernels |
-| 38 | P2 | `Tests/MosaicKitTests/CombinationTests.swift` | test | 709 | 0706d719 | Serialized mosaic matrix |
+| 38 | P2 | `Tests/MosaicKitTests/CombinationTests.swift` | test | 709 | ca867ab4 | Serialized mosaic matrix |
 | 39 | P2 | `Tests/MosaicKitTests/PreviewCombinationTests.swift` | test | 686 | 7bdd7237 | Serialized preview matrix |
 | 40 | P2 | `Tests/MosaicKitTests/MosaicCancellationTests.swift` | test | 375 | 125fb448 | Cancellation semantics |
 | 41 | P2 | `Tests/MosaicKitTests/PreviewCancellationTests.swift` | test | 371 | a144428d | Skipped when `MOSAICKIT_SUITE_MODE=none` |
 | 42 | P2 | `Tests/MosaicKitTests/InputValidationRegressionTests.swift` | test | 129 | 1f41f0d4 | Validation regressions |
 | 43 | P2 | `Tests/MosaicKitTests/OutputTransactionTests.swift` | test | 43 | cd1a7e9a | Atomic commit |
-| 44 | P3 | `.github/workflows/swift.yml` | ci | 135 | 1b347282 | macOS `swift test` + iOS Sim `xcodebuild` |
-| 45 | P3 | `README.md` | doc | 993 | 83fe5134 | Changelog + usage |
+| 44 | P3 | `.github/workflows/swift.yml` | ci | 144 | e7ba040c | macOS `swift test` + iOS Sim `xcodebuild` |
+| 45 | P3 | `README.md` | doc | 997 | df5d5f45 | Changelog + usage |
 | 46 | P3 | `spec.md` | doc | 78 | 4508df31 | Reliability spec (partially implemented) |
 | 47 | P3 | `MosaicKit-DeepDive.md` | doc | 199 | 1e67bef6 | Stale architecture |
-| 48 | P3 | `CLAUDE.md` | doc | 343 | 68fd1963 | Agent guide (partly stale) |
-| 49 | P3 | `AGENTS.md` | doc | 300 | 78b9f6dc | Agent guide (partly stale) |
+| 48 | P3 | `CLAUDE.md` | doc | 381 | 35b0221c | Agent guide (rewritten 2026-09-26; points to this doc; keep mirrored) |
+| 49 | P3 | `AGENTS.md` | doc | 381 | 968e513d | Agent guide (rewritten 2026-09-26; points to this doc; keep mirrored) |
 
 Excluded or low value: `Media.xcassets/**` (binary fixture), `Tests/MosaicKitTests/embeddedAsset/test_video.mp4`
 (87 s 8-bit H.264 video-only fixture), `scripts/**` + `Makefile` (xcodebuild agent scaffold for a
@@ -2527,10 +2527,12 @@ non-existent `.xcodeproj`), `tasks/TASKS.md` (empty backlog).
 ## Appendix C — State Block
 
 ```
-INDEX_VERSION: 6 (FINAL: all phases complete)
-SNAPSHOT: main@8f0c82f; Sources/ unchanged on the docs branch; 20/20 file anchors re-verified in the final pass
-RELATED PRs: #32 this doc (+README unreleased note); #33 iOS CI scheme + 8-bit fixture (green);
-             #34 ffmpeg watchdog (macOS green); #31 closed (duplicate of #33)
+INDEX_VERSION: 7 (all phases complete; maintenance refresh 2026-09-26)
+SNAPSHOT: main@eae1cde (after #36); Appendix A rows re-hashed for every file changed since 8f0c82f;
+          20/20 file anchors pass doc_check.py
+RELATED PRs (merged): #32 this doc (+README unreleased note); #33 iOS CI scheme + 8-bit fixture;
+             #34 ffmpeg watchdog (I-16); #35 review path filter; #36 fast animated tests;
+             #31 closed (duplicate of #33). Open: #37 CLAUDE.md/AGENTS.md rewrite + this refresh
 
 FILE_MAP_SUMMARY: Appendix A (49 files; P0 = 8, P1 = 15)
 ISSUE REGISTER:   §4.2 I-1 … I-25   (High: I-1, I-2; Medium: I-3 I-4 I-8 I-12 I-16 I-20 I-22 I-24)
