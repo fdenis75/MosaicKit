@@ -127,7 +127,7 @@ Every PR updates its row here (status) and the matching §4.2 / §6.1 entries in
 | ID | Status | PR |
 |---|---|---|
 | P-1 | done (baseline to record on `baseline/pre-s2-2026-09-26`) | #39 |
-| P-2 | in review | (this PR) |
+| P-2 | done (found I-26) | #40 |
 | S-1 | done | #38 |
 | S-2 | planned | |
 | S-3 | planned | |
