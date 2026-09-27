@@ -295,8 +295,12 @@ MOSAICKIT_SUITE_MODE=none swift test                    # CI mode: skip extended
   Optional: `MOSAICKIT_BENCHMARK_RUNS` (default 3), `MOSAICKIT_BENCHMARK_CONCURRENCY`
   (default `1,0`), `MOSAICKIT_BENCHMARK_JSON` (write results as JSON).
 
-- **Location:** tests live in `Tests/MosaicKitTests/`. The embedded fixture is
-  `embeddedAsset/test_video.mp4`, loaded with `Bundle.module`.
+- **Location:** tests live in `Tests/MosaicKitTests/`. Fixtures in `embeddedAsset/` are loaded
+  with `Bundle.module`:
+  - `test_video.mp4`: the 87 s main fixture;
+  - `rotated_portrait.mp4`: portrait phone-style clip (90° transform) for I-1;
+  - `*-config-*.json`: pinned configuration payloads. **Never edit them to make a test pass**;
+    add new config keys with `decodeIfPresent` instead (I-24).
 - **Fixture format:** keep test videos **8-bit 4:2:0**. iOS cannot decode 10-bit H.264 (I-22).
 - **`MOSAICKIT_SUITE_MODE`:** `none` skips media-folder and extended suites. That includes the
   108-run "create all versions" animated matrix. Prefer the `.enabled(if:)` trait over silently
@@ -304,8 +308,9 @@ MOSAICKIT_SUITE_MODE=none swift test                    # CI mode: skip extended
 - **New tests:**
   - Use `@Test` with `#expect` / `#require`, and `async throws` for async code.
   - Don't hard-code file paths.
-  - Keep per-test runtime small. The whole suite runs in about 40 s on macOS and about 4 min on
-    the iOS Simulator; keep it that way.
+  - Keep per-test runtime small. The whole suite runs in about 40 s on macOS (tests run in
+    parallel, so the ~20 s preview smoke test overlaps the mosaic tests) and 4–7 min on the iOS
+    Simulator (mostly the HEIC animated-export test); keep it that way.
 
 ---
 

@@ -1,0 +1,27 @@
+{
+  "compressionQuality" : 0.7,
+  "density" : {
+    "extractsMultiplier" : 0.25,
+    "factor" : 0.5,
+    "name" : "XL",
+    "thumbnailCountDescription" : "low"
+  },
+  "enableAppLifecycleMonitor" : false,
+  "enableExportRetry" : false,
+  "exportMaxResolution" : "720p",
+  "exportMode" : "sjs",
+  "exportPresetName" : "AVAssetExportPresetHEVC1920x1080",
+  "ffmpegBinaryPath" : "/opt/homebrew/bin/ffmpeg",
+  "filenameTemplate" : "{name}-preview.{ext}",
+  "format" : "mov",
+  "fullPathInName" : false,
+  "includeAudio" : false,
+  "maximumPlaybackSpeed" : 1.5,
+  "minimumExtractDuration" : 2,
+  "outputDirectory" : "file:///tmp/MosaicKitLegacyPreviews/",
+  "outputDirectoryTemplate" : "{root}/previews",
+  "overwrite" : true,
+  "sJSExportPresetName" : "HEVC",
+  "showTimestampOverlay" : true,
+  "targetDuration" : 30
+}

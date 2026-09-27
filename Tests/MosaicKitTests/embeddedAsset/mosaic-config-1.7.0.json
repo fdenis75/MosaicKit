@@ -1,0 +1,85 @@
+{
+  "animatedFormat" : "gif",
+  "backgroundColor" : {
+    "alpha" : 1,
+    "blue" : 0.2,
+    "green" : 0.1,
+    "red" : 0.05
+  },
+  "compressionQuality" : 0.6,
+  "createOutputSubdirectory" : false,
+  "density" : {
+    "extractsMultiplier" : 4,
+    "factor" : 3,
+    "name" : "XS",
+    "thumbnailCountDescription" : "super high"
+  },
+  "filenameTemplate" : "{name}-{width}.{ext}",
+  "format" : "jpeg",
+  "fullPathInName" : true,
+  "gifFps" : 12,
+  "gifMode" : "withMosaic",
+  "gifSize" : "large",
+  "includeMetadata" : true,
+  "layout" : {
+    "aspectRatio" : "21:9",
+    "layoutType" : "classic",
+    "spacing" : 6,
+    "visual" : {
+      "addBorder" : true,
+      "addShadow" : true,
+      "borderColor" : "black",
+      "borderWidth" : 2,
+      "shadowSettings" : {
+        "offset" : [
+          0,
+          -2
+        ],
+        "opacity" : 0.5,
+        "radius" : 4
+      }
+    }
+  },
+  "outputDirectoryTemplate" : "{root}/{density}",
+  "outputdirectory" : "file:///tmp/MosaicKitLegacy/",
+  "overlay" : {
+    "colorDNA" : {
+      "height" : 32,
+      "position" : "top",
+      "show" : true,
+      "style" : "gradient"
+    },
+    "frameLabel" : {
+      "backgroundStyle" : "fullWidth",
+      "format" : "frameIndex",
+      "position" : "topLeft",
+      "show" : true,
+      "textColor" : {
+        "alpha" : 1,
+        "blue" : 0,
+        "green" : 1,
+        "red" : 1
+      }
+    },
+    "header" : {
+      "fields" : [
+        { "type" : "title" },
+        { "type" : "duration" },
+        { "type" : "resolution" },
+        { "swatchCount" : 5, "type" : "colorPalette" },
+        { "label" : "Series", "type" : "custom", "value" : "Pilot" }
+      ],
+      "height" : { "type" : "fixed", "value" : 80 }
+    },
+    "watermark" : {
+      "content" : { "text" : "© MosaicKit", "type" : "text" },
+      "opacity" : 0.4,
+      "position" : "bottomRight",
+      "scale" : 0.1
+    }
+  },
+  "overwrite" : true,
+  "useAccurateTimestamps" : true,
+  "useMovieColorsForBg" : false,
+  "width" : 10000
+}

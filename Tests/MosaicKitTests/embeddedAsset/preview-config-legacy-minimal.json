@@ -1,0 +1,9 @@
+{
+  "compressionQuality" : 0.8,
+  "density" : { "factor" : 1 },
+  "format" : "mp4",
+  "fullPathInName" : false,
+  "includeAudio" : true,
+  "targetDuration" : 60,
+  "useNativeExport" : false
+}
