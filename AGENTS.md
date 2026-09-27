@@ -308,8 +308,9 @@ MOSAICKIT_SUITE_MODE=none swift test                    # CI mode: skip extended
 - **New tests:**
   - Use `@Test` with `#expect` / `#require`, and `async throws` for async code.
   - Don't hard-code file paths.
-  - Keep per-test runtime small. The whole suite runs in about 40 s on macOS and about 4 min on
-    the iOS Simulator; keep it that way.
+  - Keep per-test runtime small. The whole suite runs in about 40 s on macOS (tests run in
+    parallel, so the ~20 s preview smoke test overlaps the mosaic tests) and 4–7 min on the iOS
+    Simulator (mostly the HEIC animated-export test); keep it that way.
 
 ---
 
