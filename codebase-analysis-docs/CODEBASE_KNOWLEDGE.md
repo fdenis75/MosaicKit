@@ -64,6 +64,7 @@ AVAssetExportSession, SJS, or an external ffmpeg for encoding.
 | Medium | **I-20** `.nochange` animation holds all frames in memory |
 | Medium | **I-22** 10-bit H.264 is undecodable on iOS (fixture fixed in #33) |
 | Medium | **I-24** strict `MosaicConfiguration` decoding breaks older saved configs |
+| Medium | **I-26** native preview export can stall intermittently (seen once in macOS CI; cause unknown) |
 
 **Most valuable platform addition:** iOS/macOS 27
 `AVAssetExportSession.configureForResumableExport()`, which lets interrupted preview exports
@@ -1336,6 +1337,8 @@ backbone. Read `LayoutProcessor` algorithms, `ThumbnailProcessor` header/label r
     macOS and the iOS Simulator. `PreviewCombinationTests` and `PreviewCoordinatorTests` use
     hard-coded `/Volumes/Ext-Photos5/...` media. Cancellation suites skip in
     `MOSAICKIT_SUITE_MODE=none`. SJS and ffmpeg exports still have no end-to-end test.
+    The smoke test stalled once in its first four macOS CI runs (I-26); on failure it reports
+    the export's timestamped progress trail.
 
 ### F9 — Preview export backends
 
@@ -1761,6 +1764,7 @@ robustness, performance, or cosmetic.
 | I-23 | Deps / logging | `swift-log` is declared in `Package.swift` but never imported. The OSLog subsystem is `com.mosaicKit` in most files but `com.mosaickit` in the preview files, which splits Console filtering. | **Fixed (S-1, #38)**: dependency removed; subsystem unified on `com.mosaicKit` | Low | `grep` finds no `import Logging`; `Logger(subsystem:)` strings | Remove the dependency (or adopt it). Unify the subsystem string. Fix the CLAUDE.md logging guidance. |
 | I-24 | Codable | `MosaicConfiguration.init(from:)` requires most keys (`decode`), so configs persisted by older versions fail to decode when a field is added. | Confirmed (static) | Medium (upgrade risk) | `MosaicConfiguration.swift` decoder | Use `decodeIfPresent ?? default` for every key added after 1.0 (rule 2). Add a decode-old-payload test per new field. **Test:** `LegacyConfigurationDecodingTests` (P-2) decodes pinned 1.7.0 and minimal payloads, plus a 1.3.2 payload (pre-`gifFps`) that fails today and is wrapped in `withKnownIssue` until S-5; never edit those fixtures to make it pass. |
 | I-25 | Hygiene | Dead or misleading code: `generateallcombinations` ignores the caller's config; unused private helpers in `MetalMosaicGenerator` (`extractFramesWithVideoToolbox`, `calculateExtractionTimes`, `calculateAspectRatio`); unused `MosaicFrameSource`/`makeFrameSource`, `prioritizeVideos`, `VideoError`, `LibraryError`; never-emitted statuses. | **Partly fixed (S-1, #38)**: the unused private helpers and `MosaicFrameSource` are removed. Remaining (public API) → deprecate in S-6 (D1). | Low | §2.12, §5.4 | Remove, or document as intentionally unused (`MosaicFrameSource` has history, §2.6). |
+| I-26 | F8/F9 | **Native preview export can stall with no progress on the macOS CI runner.** `PreviewExportSmokeTests` stalled once in 4 macOS runs of identical code (run 36323934052 on #40: `exportStalled(elapsedSeconds: 120)`; the other runs finished the export in about 20 s). The export never reported progress and never returned, so the 120 s watchdog fired. | **Open (cause unknown)**: diagnostics added in P-2 (the test reports its timestamped progress trail on failure) | Medium (CI reliability; possibly a real hang for users) | CI log of run 36323934052; `exportWithNativeSession` in `PreviewVideoGenerator.swift` | Read the progress trail of the next failure (stuck in `.pending`/`.waiting`, or flat at some percentage). Suspects: `allowsParallelizedExport = true` (macOS only) on a 3-vCPU VM, and encoder contention with the tests running in parallel. S-4 reworks this watchdog and must address it. |
 
 ### 4.3 Performance: hotspots & budgets
 
@@ -2444,6 +2448,7 @@ with the code.
 | 9 | Fix or deprecate `.dynamic`; fix `.auto` units | I-8, I-9 | Broken layout options that are advertised in the README | M |
 | 10 | Housekeeping: `decodeIfPresent` for new keys, ~~remove dead code and swift-log, unify the log subsystem~~ (done in S-1, #38), render or remove `.colorPalette`, and resolve I-13 (4K vs 1080p docs) | I-10, I-13, I-23, I-24, I-25 | Lower maintenance cost and fewer surprises | S each |
 | 11 | Performance exploration (always benchmark against the batched path): CVPixelBuffer → Metal zero-copy path, GPU-side frame treatment, moving encoding off the generator actor, the VideoToolbox constant-quality factor for SJS | §4.3, §4.9 | Throughput is a hard requirement | L |
+| 12 | Root-cause the intermittent native export stall on macOS CI (progress trail from the smoke test), fixed with S-4's shared watchdog | I-26 | A stalled export fails users silently after 120 s and makes CI unreliable | S–M |
 
 ### 6.2 Open questions (still unresolved)
 
@@ -2543,7 +2548,7 @@ P1 = core feature, P2 = supporting, P3 = docs/infra.
 | 50 | P2 | `Tests/MosaicKitTests/BenchmarkTests.swift` | test | 231 | 3ac1e33b | Opt-in throughput benchmark (`MOSAICKIT_BENCHMARK`); gate for ⚡ plan steps |
 | 51 | P2 | `Tests/MosaicKitTests/LegacyConfigurationDecodingTests.swift` | test | 166 | 2806c7d5 | Pinned 1.3.2, 1.7.0 + minimal config payloads (I-24 guard) |
 | 52 | P2 | `Tests/MosaicKitTests/RotatedSourceTests.swift` | test | 57 | ecc0463c | Rotated portrait fixture; I-1 known issue |
-| 53 | P2 | `Tests/MosaicKitTests/PreviewExportSmokeTests.swift` | test | 56 | f4fb3b78 | Only end-to-end preview export in CI (native) |
+| 53 | P2 | `Tests/MosaicKitTests/PreviewExportSmokeTests.swift` | test | 88 | feebfa3e | Only end-to-end preview export in CI (native) |
 
 Excluded or low value: `Media.xcassets/**` (binary fixture), `Tests/MosaicKitTests/embeddedAsset/test_video.mp4`
 (87 s 8-bit H.264 video-only fixture), `scripts/**` + `Makefile` (xcodebuild agent scaffold for a
@@ -2569,7 +2574,7 @@ RELATED PRs (merged): #32 this doc (+README unreleased note); #33 iOS CI scheme 
              #31 closed (duplicate of #33). Open: #37 CLAUDE.md/AGENTS.md rewrite + this refresh
 
 FILE_MAP_SUMMARY: Appendix A (53 files; P0 = 8, P1 = 15)
-ISSUE REGISTER:   §4.2 I-1 … I-25   (High: I-1, I-2; Medium: I-3 I-4 I-8 I-12 I-16 I-20 I-22 I-24)
+ISSUE REGISTER:   §4.2 I-1 … I-26   (High: I-1, I-2; Medium: I-3 I-4 I-8 I-12 I-16 I-20 I-22 I-24 I-26)
 ROADMAP:          §6.1 → IMPLEMENTATION_PLAN.md (decisions §6.4)
 OPEN_QUESTIONS:   §6.2 (Q11 Q13 Q14 Q16 Q17)
 GLOSSARY:         §5.1

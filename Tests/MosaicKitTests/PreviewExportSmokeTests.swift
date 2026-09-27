@@ -1,5 +1,6 @@
 import Foundation
 import AVFoundation
+import Synchronization
 import Testing
 @testable import MosaicKit
 
@@ -13,6 +14,9 @@ import Testing
 ///
 /// It uses an H.264 preset (`AVAssetExportPresetMediumQuality`) because it is fast and
 /// available on the iOS Simulator; HEVC export there is slow software encoding.
+///
+/// On failure the test reports the full progress trail (status, progress and exporter message,
+/// timestamped), so an export that stalls (I-26) shows which state it was stuck in.
 struct PreviewExportSmokeTests {
 
     @Test("Native preview export produces a playable movie from the embedded video")
@@ -39,7 +43,17 @@ struct PreviewExportSmokeTests {
         )
         config.overwrite = true
 
-        let outputURL = try await PreviewVideoGenerator().generate(for: video, config: config)
+        let trail = ProgressTrail()
+        let generator = PreviewVideoGenerator()
+        await generator.setProgressHandler(for: video) { trail.append($0) }
+
+        let outputURL: URL
+        do {
+            outputURL = try await generator.generate(for: video, config: config)
+        } catch {
+            Issue.record("Preview export failed: \(error)\nProgress trail:\n\(trail.formatted)")
+            return
+        }
 
         #expect(FileManager.default.fileExists(atPath: outputURL.path))
         let size = try FileManager.default.attributesOfItem(atPath: outputURL.path)[.size] as? Int ?? 0
@@ -52,5 +66,23 @@ struct PreviewExportSmokeTests {
         #expect(duration <= config.targetDuration * 1.5, "Preview is \(duration) s for a \(config.targetDuration) s target")
         let videoTracks = try await asset.loadTracks(withMediaType: .video)
         #expect(!videoTracks.isEmpty, "Exported preview has no video track")
+    }
+}
+
+/// Timestamped record of every progress update, for failure diagnostics.
+private final class ProgressTrail: Sendable {
+    private let start = ContinuousClock.now
+    private let lines = Mutex<[String]>([])
+
+    func append(_ progress: PreviewGenerationProgress) {
+        let elapsed = start.duration(to: .now)
+        let seconds = Double(elapsed.components.seconds) + Double(elapsed.components.attoseconds) / 1e18
+        let line = "+\(String(format: "%6.1f", seconds))s  \(progress.status)  "
+            + "\(String(format: "%3.0f", progress.progress * 100))%  \(progress.message ?? "")"
+        lines.withLock { $0.append(line) }
+    }
+
+    var formatted: String {
+        lines.withLock { $0.isEmpty ? "(no progress reported)" : $0.joined(separator: "\n") }
     }
 }
