@@ -126,8 +126,8 @@ Every PR updates its row here (status) and the matching §4.2 / §6.1 entries in
 
 | ID | Status | PR |
 |---|---|---|
-| P-1 | done | #39 |
-| P-2 | planned | |
+| P-1 | done (baseline to record on `baseline/pre-s2-2026-09-26`) | #39 |
+| P-2 | in review | (this PR) |
 | S-1 | done | #38 |
 | S-2 | planned | |
 | S-3 | planned | |
@@ -168,3 +168,8 @@ PR title.
 | A-7 | 2026-09-26 | P-1 | Fixed scenarios, one discarded warm-up run, median of N; peak memory is process-wide `ru_maxrss` | Two-way | Stable, comparable numbers across PRs; the per-scenario memory figure is only meaningful with `--filter BenchmarkTests` |
 | A-8 | 2026-09-26 | S-1 review | Keep the swift-log removal despite the Codex P1 comment asking to retain it | Two-way | The comment cited the stale pre-#37 `AGENTS.md` rule; the code never imported `Logging` (I-23) |
 | A-9 | 2026-09-26 | P-1/S-1 | Merge #39 and #38 myself once CI is green on both platforms and every review thread is addressed (merge commits) | Two-way (revert commits) | Keeps the plan moving while the maintainer is away; nothing is released or tagged |
+| A-10 | 2026-09-27 | Baseline | Maintainer asked for a static branch to benchmark later: `baseline/pre-s2-2026-09-26` at `main@60d1731` (includes P-1 and S-1; S-1 changes no executed code). It is never updated. Every ⚡ PR compares against it until a newer baseline is recorded | Two-way (branch can be deleted) | Lets the benchmark baseline be run days later on the exact pre-S-2 code |
+| A-11 | 2026-09-27 | P-2c | The 1.7.0 payloads are hand-built from the `encode(to:)` implementations (the config models are unchanged from 1.7.0 through 1.7.4). No Swift toolchain here to generate them; CI is the check | Two-way | Same shape the encoder writes; non-default values exercise every field |
+| A-12 | 2026-09-27 | P-2c | Add "legacy-minimal" payloads containing only the keys each decoder requires today | Two-way | Makes any newly required key (I-24) fail CI immediately |
+| A-13 | 2026-09-27 | P-2b | The smoke test uses `AVAssetExportPresetMediumQuality` (H.264), 10 s target, no audio | Two-way | Fast and supported on the iOS Simulator; HEVC export there is slow software encoding |
+| A-14 | 2026-09-27 | P-2a | The I-1 test checks inspected dimensions and the resulting classic-layout cells inside `withKnownIssue`, plus a passing check that extracted frames are portrait | Two-way | Pins the root cause and the symptom; F-1 must remove the wrapper, because a known issue that stops reproducing fails the test |

@@ -288,7 +288,7 @@ work as the package stands. The files in `Examples/` are reference snippets only
 │   ├── VideoInputScanner.swift        scanVideos / discoverVideoSources / discoverVideos
 │   └── MosaicKit.docc/                DocC catalog (8 articles)
 ├── SourcesWebP/MosaicKitWebP.swift    → target "MosaicKitWebP" (DefaultMosaicKitWebPEncoder + register())
-├── Tests/MosaicKitTests/              Swift Testing suites (20 files) + embeddedAsset/test_video.mp4
+├── Tests/MosaicKitTests/              Swift Testing suites (23 files) + embeddedAsset/ (test_video.mp4, rotated_portrait.mp4, pinned config JSON)
 ├── Examples/                          5 illustrative .swift files (NOT wired as SPM targets)
 ├── Media.xcassets/                    test_video dataset (same fixture, for Xcode)
 ├── .github/workflows/                 swift.yml (macOS + iOS Simulator CI), claude*.yml
@@ -957,7 +957,7 @@ graph LR
     (`.process("Shaders")`), and `Bundle.module` locates `default.metallib`.
   - The test target embeds `embeddedAsset/test_video.mp4` (87 s, 8-bit H.264 High, 720p, video-only).
 - **Tests:**
-  - Swift Testing, 20 files. `CombinationTests` and `PreviewCombinationTests` are `.serialized`.
+  - Swift Testing, 23 files. `CombinationTests` and `PreviewCombinationTests` are `.serialized`.
   - Suites that need a media folder read `MOSAICKIT_SUITE_MODE` (`single` | `folder` | `none`;
     unrecognized values → `single`, missing → `none`) and skip in `none`.
   - `BenchmarkTests` (plan P-1, #39) is an opt-in throughput benchmark, enabled only by
@@ -1331,9 +1331,11 @@ backbone. Read `LayoutProcessor` algorithms, `ThumbnailProcessor` header/label r
   - `PreviewReliabilityRegressionTests`: late progress delivery, frame duration, ffmpeg
     diagnostics and kill.
   - `PreviewVideoGeneratorTests`: timestamp format.
-  - ⚠ **No end-to-end preview export runs in CI.** `PreviewCombinationTests` and
-    `PreviewCoordinatorTests` use hard-coded `/Volumes/Ext-Photos5/...` media. Cancellation
-    suites skip in `MOSAICKIT_SUITE_MODE=none`.
+  - `PreviewExportSmokeTests` (plan P-2b): **the only end-to-end preview export in CI**: a native
+    export (`AVAssetExportPresetMediumQuality`) of a 10 s preview from the embedded video, on
+    macOS and the iOS Simulator. `PreviewCombinationTests` and `PreviewCoordinatorTests` use
+    hard-coded `/Volumes/Ext-Photos5/...` media. Cancellation suites skip in
+    `MOSAICKIT_SUITE_MODE=none`. SJS and ffmpeg exports still have no end-to-end test.
 
 ### F9 — Preview export backends
 
@@ -1721,7 +1723,7 @@ none.
     - iOS runs `xcodebuild` on the `MosaicKit-Package` scheme with an 8-bit fixture (PR #33).
       Keep test fixtures **8-bit 4:2:0**, because iOS can't decode 10-bit H.264 (I-22).
     - Test code must compile on iOS (no macOS-only Foundation APIs outside `#if os(macOS)`).
-    - No preview export runs end-to-end in CI.
+    - Only one preview export runs end-to-end in CI (`PreviewExportSmokeTests`, native).
 15. **Docs drift:** `MosaicKit-DeepDive.md` is stale, and parts of the README are wrong (§1.9).
     `CLAUDE.md` and `AGENTS.md` were rewritten on 2026-09-26 and must stay mirrored. Update docs
     when you touch the corresponding area.
@@ -1734,7 +1736,7 @@ robustness, performance, or cosmetic.
 
 | ID | Area | Issue | Status | Severity | Evidence | Fix sketch |
 |---|---|---|---|---|---|---|
-| I-1 | F2/F3 | **Rotated (portrait phone) videos get landscape layout cells.** Frames arrive rotated and are then **stretched**. | Confirmed (API + static) | **High** | `AVAssetTrack.naturalSize` is untransformed; `VideoMetadataExtractor` stores it as width/height; `AVAssetImageGenerator.appliesPreferredTrackTransform = true` rotates frames; `renderFrame` scales each frame to the exact cell size (`scaleTexture` ignores aspect). The decoder's `maximumSize` also fits the rotated frame inside the landscape box, so it is downscaled **and** blurred. | Apply `preferredTransform` to `naturalSize` in the extractor (use abs of the transformed size), as `buildVideoComposition` already does. Note that `VideoInput.width/height` semantics change, which affects the header "Resolution" field. |
+| I-1 | F2/F3 | **Rotated (portrait phone) videos get landscape layout cells.** Frames arrive rotated and are then **stretched**. | Confirmed (API + static) | **High** | `AVAssetTrack.naturalSize` is untransformed; `VideoMetadataExtractor` stores it as width/height; `AVAssetImageGenerator.appliesPreferredTrackTransform = true` rotates frames; `renderFrame` scales each frame to the exact cell size (`scaleTexture` ignores aspect). The decoder's `maximumSize` also fits the rotated frame inside the landscape box, so it is downscaled **and** blurred. | Apply `preferredTransform` to `naturalSize` in the extractor (use abs of the transformed size), as `buildVideoComposition` already does. Note that `VideoInput.width/height` semantics change, which affects the header "Resolution" field. **Test:** `RotatedSourceTests` (P-2) documents it with `withKnownIssue`; F-1 must remove the wrapper. |
 | I-2 | F9 | **ffmpeg scale filter distorts** non-16:9 and portrait sources. | Confirmed (static) | **High** (ffmpeg users) | `ExportMaxResolution.scaleFilter` = `scale='min(W,iw)':'min(ih,H)'` clamps each axis independently. 3840×1600 → 1920×1080; 1080×1920 → 1080×1080. | `scale=w='min(W,iw)':h='min(H,ih)':force_original_aspect_ratio=decrease:force_divisible_by=2`, with W/H swapped for portrait (as `buildVideoComposition` does). |
 | I-3 | F9 | **ffmpeg HEVC forces `-r 30`** (and `-pix_fmt p010le`). | Confirmed (static); pix_fmt effect suspected | Medium | `buildArguments` adds `-r 30` for `.hevc` / `.hevcVideoToolbox`. | Drop `-r` (keep the source rate), or derive it from the composition's frame duration. Use `yuv420p10le` for libx265 and keep `p010le` only for VideoToolbox. |
 | I-4 | F12 | **No-overwrite publication is not atomic.** Zero-byte placeholder race; placeholder leaked if `rename` fails. | Confirmed (static) | Medium | `OutputTransaction.commit()`, §F12 | See the §F12 design note (strategy per destination). Minimum: delete the placeholder on rename failure, and treat zero-byte files as "not done" in skip-if-exists. **Decision D6 → plan F-4.** |
@@ -1757,7 +1759,7 @@ robustness, performance, or cosmetic.
 | I-21 | CI | iOS job used a scheme with no test action; the tests never compiled for iOS. | **Fixed (PR #33, merged)**; #31 closed as duplicate | — | CI logs | Scheme `MosaicKit-Package` + `URL.homeDirectory` in `CombinationTests` + `TEST_RUNNER_` suite-mode forwarding |
 | I-22 | F2/F3/F6/F8 + CI | **10-bit H.264 ("High 10") sources cannot be decoded on iOS.** Mosaic and animation jobs fail entirely because extraction is strict. The embedded test fixture is itself High 10, so the 10 embedded-media tests fail on the iOS Simulator (178 run, 10 fail). | Confirmed (fixture `avcC`: `profile_idc 110`, 10-bit luma/chroma; CI: VideoToolbox `err=-8969` on every frame) | Medium (iOS) | CI run on PR #33 @ 85c6d5e; local `avcC` parse | CI: **fixture re-encoded to 8-bit H.264 High in PR #33 (merged)**. Product (still open): detect unsupported codec/bit depth at inspection (`formatDescriptions`) and fail fast with a clear `VideoError`/`MosaicError`, or fall back to a software path. |
 | I-23 | Deps / logging | `swift-log` is declared in `Package.swift` but never imported. The OSLog subsystem is `com.mosaicKit` in most files but `com.mosaickit` in the preview files, which splits Console filtering. | **Fixed (S-1, #38)**: dependency removed; subsystem unified on `com.mosaicKit` | Low | `grep` finds no `import Logging`; `Logger(subsystem:)` strings | Remove the dependency (or adopt it). Unify the subsystem string. Fix the CLAUDE.md logging guidance. |
-| I-24 | Codable | `MosaicConfiguration.init(from:)` requires most keys (`decode`), so configs persisted by older versions fail to decode when a field is added. | Confirmed (static) | Medium (upgrade risk) | `MosaicConfiguration.swift` decoder | Use `decodeIfPresent ?? default` for every key added after 1.0 (rule 2). Add a decode-old-payload test per new field. |
+| I-24 | Codable | `MosaicConfiguration.init(from:)` requires most keys (`decode`), so configs persisted by older versions fail to decode when a field is added. | Confirmed (static) | Medium (upgrade risk) | `MosaicConfiguration.swift` decoder | Use `decodeIfPresent ?? default` for every key added after 1.0 (rule 2). Add a decode-old-payload test per new field. **Test:** `LegacyConfigurationDecodingTests` (P-2) decodes pinned 1.7.0 and minimal payloads; never edit those fixtures to make it pass. |
 | I-25 | Hygiene | Dead or misleading code: `generateallcombinations` ignores the caller's config; unused private helpers in `MetalMosaicGenerator` (`extractFramesWithVideoToolbox`, `calculateExtractionTimes`, `calculateAspectRatio`); unused `MosaicFrameSource`/`makeFrameSource`, `prioritizeVideos`, `VideoError`, `LibraryError`; never-emitted statuses. | **Partly fixed (S-1, #38)**: the unused private helpers and `MosaicFrameSource` are removed. Remaining (public API) → deprecate in S-6 (D1). | Low | §2.12, §5.4 | Remove, or document as intentionally unused (`MosaicFrameSource` has history, §2.6). |
 
 ### 4.3 Performance: hotspots & budgets
@@ -2536,9 +2538,12 @@ P1 = core feature, P2 = supporting, P3 = docs/infra.
 | 45 | P3 | `README.md` | doc | 998 | 149953d1 | Changelog + usage |
 | 46 | P3 | `spec.md` | doc | 78 | 4508df31 | Reliability spec (partially implemented) |
 | 47 | P3 | `MosaicKit-DeepDive.md` | doc | 199 | 1e67bef6 | Stale architecture |
-| 48 | P3 | `CLAUDE.md` | doc | 393 | af5f32dc | Agent guide (rewritten 2026-09-26; points to this doc; keep mirrored) |
-| 49 | P3 | `AGENTS.md` | doc | 393 | 64a87680 | Agent guide (rewritten 2026-09-26; points to this doc; keep mirrored) |
+| 48 | P3 | `CLAUDE.md` | doc | 397 | 46c1bd5d | Agent guide (rewritten 2026-09-26; points to this doc; keep mirrored) |
+| 49 | P3 | `AGENTS.md` | doc | 397 | 477b4c7b | Agent guide (rewritten 2026-09-26; points to this doc; keep mirrored) |
 | 50 | P2 | `Tests/MosaicKitTests/BenchmarkTests.swift` | test | 231 | 3ac1e33b | Opt-in throughput benchmark (`MOSAICKIT_BENCHMARK`); gate for ⚡ plan steps |
+| 51 | P2 | `Tests/MosaicKitTests/LegacyConfigurationDecodingTests.swift` | test | 138 | e97892f7 | Pinned 1.7.0 + minimal config payloads (I-24 guard) |
+| 52 | P2 | `Tests/MosaicKitTests/RotatedSourceTests.swift` | test | 57 | ecc0463c | Rotated portrait fixture; I-1 known issue |
+| 53 | P2 | `Tests/MosaicKitTests/PreviewExportSmokeTests.swift` | test | 56 | f4fb3b78 | Only end-to-end preview export in CI (native) |
 
 Excluded or low value: `Media.xcassets/**` (binary fixture), `Tests/MosaicKitTests/embeddedAsset/test_video.mp4`
 (87 s 8-bit H.264 video-only fixture), `scripts/**` + `Makefile` (xcodebuild agent scaffold for a
@@ -2563,7 +2568,7 @@ RELATED PRs (merged): #32 this doc (+README unreleased note); #33 iOS CI scheme 
              #34 ffmpeg watchdog (I-16); #35 review path filter; #36 fast animated tests;
              #31 closed (duplicate of #33). Open: #37 CLAUDE.md/AGENTS.md rewrite + this refresh
 
-FILE_MAP_SUMMARY: Appendix A (50 files; P0 = 8, P1 = 15)
+FILE_MAP_SUMMARY: Appendix A (53 files; P0 = 8, P1 = 15)
 ISSUE REGISTER:   §4.2 I-1 … I-25   (High: I-1, I-2; Medium: I-3 I-4 I-8 I-12 I-16 I-20 I-22 I-24)
 ROADMAP:          §6.1 → IMPLEMENTATION_PLAN.md (decisions §6.4)
 OPEN_QUESTIONS:   §6.2 (Q11 Q13 Q14 Q16 Q17)

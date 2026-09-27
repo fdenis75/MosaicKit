@@ -295,8 +295,12 @@ MOSAICKIT_SUITE_MODE=none swift test                    # CI mode: skip extended
   Optional: `MOSAICKIT_BENCHMARK_RUNS` (default 3), `MOSAICKIT_BENCHMARK_CONCURRENCY`
   (default `1,0`), `MOSAICKIT_BENCHMARK_JSON` (write results as JSON).
 
-- **Location:** tests live in `Tests/MosaicKitTests/`. The embedded fixture is
-  `embeddedAsset/test_video.mp4`, loaded with `Bundle.module`.
+- **Location:** tests live in `Tests/MosaicKitTests/`. Fixtures in `embeddedAsset/` are loaded
+  with `Bundle.module`:
+  - `test_video.mp4`: the 87 s main fixture;
+  - `rotated_portrait.mp4`: portrait phone-style clip (90° transform) for I-1;
+  - `*-config-*.json`: pinned configuration payloads. **Never edit them to make a test pass**;
+    add new config keys with `decodeIfPresent` instead (I-24).
 - **Fixture format:** keep test videos **8-bit 4:2:0**. iOS cannot decode 10-bit H.264 (I-22).
 - **`MOSAICKIT_SUITE_MODE`:** `none` skips media-folder and extended suites. That includes the
   108-run "create all versions" animated matrix. Prefer the `.enabled(if:)` trait over silently

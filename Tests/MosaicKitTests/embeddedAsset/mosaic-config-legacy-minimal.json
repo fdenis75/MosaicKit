@@ -1,0 +1,30 @@
+{
+  "animatedFormat" : "webp",
+  "backgroundColor" : { "alpha" : 1, "blue" : 0.5, "green" : 0.5, "red" : 0.5 },
+  "compressionQuality" : 0.4,
+  "density" : { "factor" : 1 },
+  "format" : "heif",
+  "fullPathInName" : false,
+  "gifFps" : 10,
+  "gifMode" : "disabled",
+  "gifSize" : "small",
+  "includeMetadata" : true,
+  "layout" : {
+    "aspectRatio" : "16:9",
+    "layoutType" : "custom",
+    "spacing" : 4,
+    "visual" : { "addBorder" : false, "addShadow" : true, "borderColor" : "white", "borderWidth" : 1 }
+  },
+  "overlay" : {
+    "colorDNA" : { "height" : 24, "position" : "bottom", "show" : false, "style" : "barcode" },
+    "frameLabel" : {
+      "backgroundStyle" : "pill", "format" : "timestamp", "position" : "bottomRight", "show" : true,
+      "textColor" : { "alpha" : 1, "blue" : 1, "green" : 1, "red" : 1 }
+    },
+    "header" : { "fields" : [ { "type" : "title" } ], "height" : { "type" : "auto" } }
+  },
+  "overwrite" : false,
+  "useAccurateTimestamps" : false,
+  "useMovieColorsForBg" : true,
+  "width" : 5120
+}
