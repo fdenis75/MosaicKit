@@ -13,6 +13,10 @@ import Testing
 /// - `*-legacy-minimal.json`: only the keys each decoder requires today. `MosaicConfiguration`
 ///   decodes most keys strictly (I-24), so adding a required key makes this test fail; add
 ///   new keys with `decodeIfPresent` plus a default instead (rules card #2).
+/// - `mosaic-config-1.3.2.json`: the shape 1.3.2 encoded, the last release before `gifFps`
+///   (added in 1.4.0) and `createOutputSubdirectory`. It does not decode today because
+///   `gifFps` is still required (I-24); plan step S-5 fixes that and must remove the
+///   `withKnownIssue` wrapper (Swift Testing fails the test once the issue stops reproducing).
 ///
 /// Never edit these fixtures to make a test pass: that would hide exactly the breakage
 /// they exist to catch.
@@ -75,6 +79,30 @@ struct LegacyConfigurationDecodingTests {
         #expect(config.createOutputSubdirectory) // key added after configs were persisted
         #expect(config.outputDirectoryTemplate == nil)
         #expect(config.filenameTemplate == nil)
+    }
+
+    @Test("A MosaicConfiguration saved by 1.3.2 (before gifFps) decodes with defaults (I-24)")
+    func mosaicConfiguration132Decodes() throws {
+        let data = try fixture("mosaic-config-1.3.2")
+
+        withKnownIssue("I-24: gifFps is decoded strictly, so pre-1.4.0 configs fail (fixed by plan step S-5)") {
+            let config = try JSONDecoder().decode(MosaicConfiguration.self, from: data)
+            #expect(config.width == 4000)
+            #expect(config.density == .s) // resolved from `factor` alone, as 1.3.2 wrote it
+            #expect(config.format == .png)
+            #expect(config.layout.aspectRatio == .standard)
+            #expect(config.layout.layoutType == .classic)
+            #expect(config.layout.visual.borderColor == .gray)
+            #expect(config.outputdirectory?.absoluteString == "file:///tmp/MosaicKit132/")
+            #expect(config.overlay.header.fields == [.title, .codec])
+            #expect(config.overlay.colorDNA.position == .top)
+            #expect(config.gifMode == .gifOnly)
+            #expect(config.animatedFormat == .heic)
+            #expect(config.overwrite)
+            #expect(config.filenameTemplate == "{name}.{ext}")
+            #expect(config.gifFps == 10) // keys added after 1.3.2 take their defaults
+            #expect(config.createOutputSubdirectory)
+        }
     }
 
     @Test("A decoded 1.7.0 MosaicConfiguration round-trips through the current encoder")

@@ -1,0 +1,31 @@
+{
+  "animatedFormat" : "heic",
+  "backgroundColor" : { "alpha" : 1, "blue" : 0.3, "green" : 0.2, "red" : 0.1 },
+  "compressionQuality" : 0.5,
+  "density" : { "factor" : 2 },
+  "filenameTemplate" : "{name}.{ext}",
+  "format" : "png",
+  "fullPathInName" : false,
+  "gifMode" : "gifOnly",
+  "gifSize" : "large",
+  "includeMetadata" : false,
+  "layout" : {
+    "aspectRatio" : "4:3",
+    "layoutType" : "classic",
+    "spacing" : 2,
+    "visual" : { "addBorder" : true, "addShadow" : false, "borderColor" : "gray", "borderWidth" : 2 }
+  },
+  "outputdirectory" : "file:///tmp/MosaicKit132/",
+  "overlay" : {
+    "colorDNA" : { "height" : 16, "position" : "top", "show" : true, "style" : "barcode" },
+    "frameLabel" : {
+      "backgroundStyle" : "none", "format" : "timestamp", "position" : "bottomLeft", "show" : true,
+      "textColor" : { "alpha" : 1, "blue" : 0, "green" : 1, "red" : 1 }
+    },
+    "header" : { "fields" : [ { "type" : "title" }, { "type" : "codec" } ], "height" : { "type" : "auto" } }
+  },
+  "overwrite" : true,
+  "useAccurateTimestamps" : true,
+  "useMovieColorsForBg" : false,
+  "width" : 4000
+}
