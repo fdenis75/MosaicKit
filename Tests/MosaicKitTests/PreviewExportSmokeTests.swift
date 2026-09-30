@@ -19,9 +19,10 @@ import Testing
 /// timestamped), so an export that stalls shows which state it was stuck in.
 ///
 /// I-26: under macOS background scheduling or a background QoS clamp the export can stall
-/// mid-encode for minutes, and this test fails intermittently on CI. The test leaves darwin
-/// background scheduling first and logs the scheduling state (including the main thread's QoS,
-/// which shows a clamp) so a CI stall can be attributed. The library itself never changes
+/// mid-encode for minutes. On the CI virtual machine it also stalls with normal scheduling
+/// (1 run in 10–30); that one case is recorded as a known issue, see the `catch` below. The
+/// test leaves darwin background scheduling first and logs the scheduling state (including the
+/// main thread's QoS, which shows a clamp) so a CI stall can be attributed. The library itself never changes
 /// its host's scheduling; apps handle this as described in the `PreviewExporting` article.
 struct PreviewExportSmokeTests {
 
@@ -60,7 +61,18 @@ struct PreviewExportSmokeTests {
         do {
             outputURL = try await generator.generate(for: video, config: config)
         } catch {
-            Issue.record("Preview export failed: \(error)\nLeft darwin background scheduling at start: \(wasBackground). At start: \(scheduling). Now: \(await ProcessScheduling.diagnostics())\nProgress trail:\n\(trail.formatted)")
+            let report = "Preview export failed: \(error)\nLeft darwin background scheduling at start: \(wasBackground). At start: \(scheduling). Now: \(await ProcessScheduling.diagnostics())\nProgress trail:\n\(trail.formatted)"
+            // I-26: on the CI virtual machine the native export intermittently freezes mid-encode
+            // (always at 60 %) with normal scheduling; a utility QoS cap alone does not reproduce
+            // it on real hardware. Only that stall, and only on a VM, is a known issue. On real
+            // Macs, and for any other error, the test fails.
+            if case PreviewError.exportStalled = error, ProcessScheduling.isVirtualMachine {
+                withKnownIssue("I-26: native export stall on a virtual machine", isIntermittent: true) {
+                    Issue.record(Comment(rawValue: report))
+                }
+            } else {
+                Issue.record(Comment(rawValue: report))
+            }
             return
         }
 

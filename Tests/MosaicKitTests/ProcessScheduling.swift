@@ -25,11 +25,16 @@ enum ProcessScheduling {
     /// a virtual machine, and its thermal state. A process cannot lift a QoS clamp itself.
     static func diagnostics() async -> String {
         let mainQoS = await MainActor.run { qos_class_self().rawValue }
+        return "darwinBackground=\(isBackground) mainThreadQoS=0x\(String(mainQoS, radix: 16)) "
+            + "virtualMachine=\(isVirtualMachine) thermalState=\(ProcessInfo.processInfo.thermalState.rawValue)"
+    }
+
+    /// Whether the process runs in a virtual machine (`kern.hv_vmm_present`), as on GitHub's
+    /// macOS runners.
+    static var isVirtualMachine: Bool {
         var vmm: Int32 = 0
         var size = MemoryLayout<Int32>.size
-        let isVM = sysctlbyname("kern.hv_vmm_present", &vmm, &size, nil, 0) == 0 && vmm == 1
-        return "darwinBackground=\(isBackground) mainThreadQoS=0x\(String(mainQoS, radix: 16)) "
-            + "virtualMachine=\(isVM) thermalState=\(ProcessInfo.processInfo.thermalState.rawValue)"
+        return sysctlbyname("kern.hv_vmm_present", &vmm, &size, nil, 0) == 0 && vmm == 1
     }
 
     /// Moves the process out of darwin background scheduling (like `taskpolicy -B`) and
