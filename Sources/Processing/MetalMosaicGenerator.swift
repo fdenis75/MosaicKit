@@ -147,10 +147,8 @@ public actor MetalMosaicGenerator: MosaicGeneratorProtocol {
                                 let layout = layoutProcessor.calculateLayout(originalAspectRatio: ratio,
                                     mosaicAspectRatio: config.layout.aspectRatio, thumbnailCount: count, mosaicWidth: config.width,
                                     density: config.density, layoutType: forIphone ? .iphone : config.layout.layoutType)
-                                let frames = try await thumbnailProcessor.extractFramesForGif(from: video.url, asset: asset,
-                                    count: layout.thumbCount, gifSize: config.gifSize, accurate: config.useAccurateTimestamps)
-                                try AnimatedGifGenerator.save(frames: frames, to: animationURL, format: config.animatedFormat,
-                                    frameDelay: 1.0 / config.gifFps, overwrite: false)
+                                // `config.overwrite` is false on this path.
+                                try await exportAnimation(for: video, asset: asset, layout: layout, config: config, to: animationURL)
                             }
                         }
                         return mosaicURL
@@ -158,138 +156,31 @@ public actor MetalMosaicGenerator: MosaicGeneratorProtocol {
                 }
             }
     
-            let videoURL = video.url
-
-            // Get video duration and calculate frame count
-            let asset = AVURLAsset(url: videoURL)
-            let duration: Double
-            if let known = video.duration { duration = known } else { duration = try await asset.load(.duration).seconds }
-            guard duration.isFinite, duration > 0, config.width > 0, config.width <= 16_384, (video.width ?? 1).isFinite, (video.height ?? 1).isFinite, (video.width ?? 1) > 0, (video.height ?? 1) > 0 else { throw MosaicError.invalidVideo("Invalid duration or dimensions") }
-            if duration < 5.0 {
-                throw MosaicError.invalidVideo("video too short")
-            }
-            let aspectRatio = (video.width ?? 1.0) / (video.height ?? 1.0)
-            attemptProgressHandler?(MosaicGenerationProgress(
-                video: video,
-                progress: 0.00,
-                status: .countingThumbnails
-            ))
-            let frameCount =  layoutProcessor.calculateThumbnailCount(
-                duration: duration,
-                width: config.width,
-                density: config.density,
-                layoutType: forIphone ? .iphone : config.layout.layoutType,
-                videoAR: aspectRatio
-            )
-            // Calculate layout
-            attemptProgressHandler?(MosaicGenerationProgress(
-                video: video,
-                progress: 0.00,
-                status: .computingLayout
-            ))
-            let layout =  layoutProcessor.calculateLayout(
-                originalAspectRatio: aspectRatio,
-                mosaicAspectRatio: config.layout.aspectRatio,
-                thumbnailCount: frameCount,
-                mosaicWidth: config.width,
-                density: config.density,
-                layoutType: forIphone ? .iphone : config.layout.layoutType
-            )
-            logger.debug("📐 Generation plan for \(video.title) - width: \(config.width), density: \(config.density.name), requested frames: \(frameCount), layout positions: \(layout.positions.count), mosaic size: \(Int(layout.mosaicSize.width))x\(Int(layout.mosaicSize.height))")
-
-            // MARK: - FIX: Create a mutable copy of config and use the static method
-            var mutableConfig = config // Create a mutable copy
-            mutableConfig.updateAspectRatio(new: AspectRatio.findNearest(to: layout.mosaicSize)) // Call on mutable copy using static method
+            let plan = try await planMosaic(for: video, config: config, forIphone: forIphone,
+                                            progressHandler: attemptProgressHandler)
+            let asset = plan.asset
+            let layout = plan.layout
+            let plannedConfig = plan.config
 
             let layoutTime = CFAbsoluteTimeGetCurrent()
             let executionTime = layoutTime - startTime
             logger.debug("layout process in \(executionTime) seconds")
 
             // Animation-only mode: skip mosaic entirely
-            if mutableConfig.gifMode == .gifOnly {
+            if plannedConfig.gifMode == .gifOnly {
                 let animURL = config.animatedOutputURL(for: video, referenceDate: referenceDate)
                 try FileManager.default.createDirectory(
                     at: animURL.deletingLastPathComponent(),
                     withIntermediateDirectories: true,
                     attributes: nil
                 )
-                let gifFrames = try await thumbnailProcessor.extractFramesForGif(
-                    from: videoURL,
-                    asset: asset,
-                    count: layout.thumbCount,
-                    gifSize: mutableConfig.gifSize,
-                    accurate: mutableConfig.useAccurateTimestamps
-                )
-                try AnimatedGifGenerator.save(frames: gifFrames, to: animURL, format: mutableConfig.animatedFormat, frameDelay: 1.0 / mutableConfig.gifFps, overwrite: mutableConfig.overwrite)
+                try await exportAnimation(for: video, asset: asset, layout: layout, config: plannedConfig, to: animURL)
                 logger.debug("💾 Animation-only saved to: \(animURL.path)")
                 return animURL
             }
 
-            // Capture progress handler before passing to async context
-            let currentProgressHandler = attemptProgressHandler
-
-            let overlayConfig = mutableConfig.overlay
-
-            // If metadata is enabled, create a header image with enhanced information
-            var metadataHeader: CGImage? = nil
-            if mutableConfig.includeMetadata {
-                metadataHeader = thumbnailProcessor.createMetadataHeader(
-                    for: video,
-                    width: Int(layout.mosaicSize.width),
-                    thumbnailHeight: layout.thumbnailSize.height,
-                    forIphone: forIphone,
-                    headerConfig: overlayConfig.header
-                ) as CGImage?
-            }
-
-            let colorCollector = overlayConfig.colorDNA.show ? FrameColorCollector() : nil
-            let processedStream = thumbnailProcessor.processedFramesStream(
-                from: videoURL, layout: layout, asset: asset,
-                accurate: mutableConfig.useAccurateTimestamps,
-                labelConfig: overlayConfig.frameLabel,
-                collectColor: { index, image in
-                    if let collector = colorCollector {
-                        await collector.store(OverlayProcessor.averageColor(of: image), at: index)
-                    }
-                }
-            )
-            
-            // Generate mosaic using Metal with streaming input
-            var mosaic = try await metalProcessor.generateMosaicStream(
-                stream: processedStream,
-                layout: layout,
-                metadata: VideoMetadata(
-                    codec: video.metadata.codec,
-                    bitrate: video.metadata.bitrate,
-                    custom: video.metadata.custom
-                ),
-                config: mutableConfig,
-                metadataHeader: metadataHeader,
-                forIphone: forIphone,
-                progressHandler: { @Sendable progress in
-                    let scaledProgress = 0.7 + (0.299 * progress)
-                    currentProgressHandler?(MosaicGenerationProgress(
-                        video: video,
-                        progress: scaledProgress,
-                        status: .creatingMosaic
-                    ))
-                }
-            )
-
-            // Apply Color DNA strip
-            if overlayConfig.colorDNA.show, let collector = colorCollector {
-                let frameColors = await collector.orderedColors(count: layout.thumbCount)
-                if let dnaImage = OverlayProcessor.applyColorDNA(
-                    to: mosaic, frameColors: frameColors, config: overlayConfig.colorDNA) {
-                    mosaic = dnaImage
-                }
-            }
-
-            // Apply watermark
-            if let wmConfig = overlayConfig.watermark,
-               let watermarked = OverlayProcessor.applyWatermark(to: mosaic, config: wmConfig) {
-                mosaic = watermarked
-            }
+            let mosaic = try await composeMosaic(for: video, plan: plan, forIphone: forIphone,
+                                                 progressHandler: attemptProgressHandler)
 
             attemptProgressHandler?(MosaicGenerationProgress(
                 video: video,
@@ -312,20 +203,13 @@ public actor MetalMosaicGenerator: MosaicGeneratorProtocol {
             ))
 
             // Generate animated image alongside the mosaic when requested
-            if mutableConfig.gifMode == .withMosaic {
+            if plannedConfig.gifMode == .withMosaic {
                 let animURL = config.animatedOutputURL(for: video, referenceDate: referenceDate)
 
-                if FileManager.default.fileExists(atPath: animURL.path) && !mutableConfig.overwrite {
+                if FileManager.default.fileExists(atPath: animURL.path) && !plannedConfig.overwrite {
                     logger.debug("⏭️ Animation already exists, skipping animation save: \(animURL.path)")
                 } else {
-                    let gifFrames = try await thumbnailProcessor.extractFramesForGif(
-                        from: videoURL,
-                        asset: asset,
-                        count: layout.thumbCount,
-                        gifSize: mutableConfig.gifSize,
-                        accurate: mutableConfig.useAccurateTimestamps
-                    )
-                    try AnimatedGifGenerator.save(frames: gifFrames, to: animURL, format: mutableConfig.animatedFormat, frameDelay: 1.0 / mutableConfig.gifFps, overwrite: mutableConfig.overwrite)
+                    try await exportAnimation(for: video, asset: asset, layout: layout, config: plannedConfig, to: animURL)
                     logger.debug("💾 Animation saved to: \(animURL.path)")
                 }
             }
@@ -396,58 +280,89 @@ public actor MetalMosaicGenerator: MosaicGeneratorProtocol {
         signposter.emitEvent("performMosaicImageGeneration")
         let intervalState = signposter.beginInterval("performMosaicImageGeneration")
         defer { signposter.endInterval("performMosaicImageGeneration", intervalState) }
-        let videoURL = video.url
-        let asset = AVURLAsset(url: videoURL)
-        let duration: Double
-            if let known = video.duration { duration = known } else { duration = try await asset.load(.duration).seconds }
-            guard duration.isFinite, duration > 0, config.width > 0, config.width <= 16_384, (video.width ?? 1).isFinite, (video.height ?? 1).isFinite, (video.width ?? 1) > 0, (video.height ?? 1) > 0 else { throw MosaicError.invalidVideo("Invalid duration or dimensions") }
-
-        if duration < 5.0 {
-            throw MosaicError.invalidVideo("video too short")
-        }
-
-        let aspectRatio = (video.width ?? 1.0) / (video.height ?? 1.0)
+        let plan = try await planMosaic(for: video, config: config, forIphone: forIphone,
+                                        progressHandler: attemptProgressHandler)
+        let mosaic = try await composeMosaic(for: video, plan: plan, forIphone: forIphone,
+                                             progressHandler: attemptProgressHandler)
 
         attemptProgressHandler?(MosaicGenerationProgress(
             video: video,
-            progress: 0.00,
-            status: .countingThumbnails
+            progress: 1.0,
+            status: .completed
         ))
 
+        try Task.checkCancellation()
+        return mosaic
+    }
+
+    // MARK: - Shared composition path (S-2)
+
+    /// Inputs of one mosaic composition, resolved once per attempt.
+    private struct MosaicPlan {
+        let asset: AVURLAsset
+        let layout: MosaicLayout
+        /// The caller's configuration with the aspect ratio snapped to the computed layout.
+        let config: MosaicConfiguration
+    }
+
+    /// Validates the source, reports `.countingThumbnails` and `.computingLayout`, and computes
+    /// the layout. Shared by `generate(for:config:forIphone:)` and
+    /// `generateMosaicImage(for:config:forIphone:)`.
+    private func planMosaic(
+        for video: VideoInput,
+        config: MosaicConfiguration,
+        forIphone: Bool,
+        progressHandler: (@Sendable (MosaicGenerationProgress) -> Void)?
+    ) async throws -> MosaicPlan {
+        let asset = AVURLAsset(url: video.url)
+        let duration: Double
+        if let known = video.duration { duration = known } else { duration = try await asset.load(.duration).seconds }
+        guard duration.isFinite, duration > 0, config.width > 0, config.width <= 16_384, (video.width ?? 1).isFinite, (video.height ?? 1).isFinite, (video.width ?? 1) > 0, (video.height ?? 1) > 0 else { throw MosaicError.invalidVideo("Invalid duration or dimensions") }
+        if duration < 5.0 {
+            throw MosaicError.invalidVideo("video too short")
+        }
+        let aspectRatio = (video.width ?? 1.0) / (video.height ?? 1.0)
+        let layoutType: LayoutType = forIphone ? .iphone : config.layout.layoutType
+
+        progressHandler?(MosaicGenerationProgress(video: video, progress: 0.00, status: .countingThumbnails))
         let frameCount = layoutProcessor.calculateThumbnailCount(
             duration: duration,
             width: config.width,
             density: config.density,
-            layoutType: forIphone ? .iphone : config.layout.layoutType,
+            layoutType: layoutType,
             videoAR: aspectRatio
         )
 
-
-        attemptProgressHandler?(MosaicGenerationProgress(
-            video: video,
-            progress: 0.00,
-            status: .computingLayout
-        ))
-
+        progressHandler?(MosaicGenerationProgress(video: video, progress: 0.00, status: .computingLayout))
         let layout = layoutProcessor.calculateLayout(
             originalAspectRatio: aspectRatio,
             mosaicAspectRatio: config.layout.aspectRatio,
             thumbnailCount: frameCount,
             mosaicWidth: config.width,
             density: config.density,
-            layoutType: forIphone ? .iphone : config.layout.layoutType
+            layoutType: layoutType
         )
+        logger.debug("📐 Generation plan for \(video.title) - width: \(config.width), density: \(config.density.name), requested frames: \(frameCount), layout positions: \(layout.positions.count), mosaic size: \(Int(layout.mosaicSize.width))x\(Int(layout.mosaicSize.height))")
 
-        var mutableConfig = config
-        mutableConfig.updateAspectRatio(new: AspectRatio.findNearest(to: layout.mosaicSize))
+        var adjustedConfig = config
+        adjustedConfig.updateAspectRatio(new: AspectRatio.findNearest(to: layout.mosaicSize))
+        return MosaicPlan(asset: asset, layout: layout, config: adjustedConfig)
+    }
 
-        let currentProgressHandler = attemptProgressHandler
+    /// Composes the mosaic image: metadata header, streamed frames through Metal (progress
+    /// `.creatingMosaic`, 0.7 → 0.999), then the ColorDNA strip and the watermark.
+    private func composeMosaic(
+        for video: VideoInput,
+        plan: MosaicPlan,
+        forIphone: Bool,
+        progressHandler: (@Sendable (MosaicGenerationProgress) -> Void)?
+    ) async throws -> CGImage {
+        let layout = plan.layout
+        let config = plan.config
+        let overlayConfig = config.overlay
 
-        let overlayConfig = mutableConfig.overlay
-
-        // Create metadata header if enabled
         var metadataHeader: CGImage? = nil
-        if mutableConfig.includeMetadata {
+        if config.includeMetadata {
             metadataHeader = thumbnailProcessor.createMetadataHeader(
                 for: video,
                 width: Int(layout.mosaicSize.width),
@@ -459,8 +374,8 @@ public actor MetalMosaicGenerator: MosaicGeneratorProtocol {
 
         let colorCollector = overlayConfig.colorDNA.show ? FrameColorCollector() : nil
         let processedStream = thumbnailProcessor.processedFramesStream(
-            from: videoURL, layout: layout, asset: asset,
-            accurate: mutableConfig.useAccurateTimestamps,
+            from: video.url, layout: layout, asset: plan.asset,
+            accurate: config.useAccurateTimestamps,
             labelConfig: overlayConfig.frameLabel,
             collectColor: { index, image in
                 if let collector = colorCollector {
@@ -468,8 +383,7 @@ public actor MetalMosaicGenerator: MosaicGeneratorProtocol {
                 }
             }
         )
-        
-        // Generate mosaic using Metal with streaming input
+
         var mosaic = try await metalProcessor.generateMosaicStream(
             stream: processedStream,
             layout: layout,
@@ -478,12 +392,12 @@ public actor MetalMosaicGenerator: MosaicGeneratorProtocol {
                 bitrate: video.metadata.bitrate,
                 custom: video.metadata.custom
             ),
-            config: mutableConfig,
+            config: config,
             metadataHeader: metadataHeader,
             forIphone: forIphone,
             progressHandler: { @Sendable progress in
                 let scaledProgress = 0.7 + (0.299 * progress)
-                currentProgressHandler?(MosaicGenerationProgress(
+                progressHandler?(MosaicGenerationProgress(
                     video: video,
                     progress: scaledProgress,
                     status: .creatingMosaic
@@ -491,7 +405,6 @@ public actor MetalMosaicGenerator: MosaicGeneratorProtocol {
             }
         )
 
-        // Apply Color DNA strip
         if overlayConfig.colorDNA.show, let collector = colorCollector {
             let frameColors = await collector.orderedColors(count: layout.thumbCount)
             if let dnaImage = OverlayProcessor.applyColorDNA(
@@ -500,20 +413,31 @@ public actor MetalMosaicGenerator: MosaicGeneratorProtocol {
             }
         }
 
-        // Apply watermark
         if let wmConfig = overlayConfig.watermark,
            let watermarked = OverlayProcessor.applyWatermark(to: mosaic, config: wmConfig) {
             mosaic = watermarked
         }
-
-        attemptProgressHandler?(MosaicGenerationProgress(
-            video: video,
-            progress: 1.0,
-            status: .completed
-        ))
-
-        try Task.checkCancellation()
         return mosaic
+    }
+
+    /// Extracts `layout.thumbCount` frames and writes the animated export to `url`, used by the
+    /// three animation sites in `generate(for:config:forIphone:)`.
+    private func exportAnimation(
+        for video: VideoInput,
+        asset: AVURLAsset,
+        layout: MosaicLayout,
+        config: MosaicConfiguration,
+        to url: URL
+    ) async throws {
+        let frames = try await thumbnailProcessor.extractFramesForGif(
+            from: video.url,
+            asset: asset,
+            count: layout.thumbCount,
+            gifSize: config.gifSize,
+            accurate: config.useAccurateTimestamps
+        )
+        try AnimatedGifGenerator.save(frames: frames, to: url, format: config.animatedFormat,
+                                      frameDelay: 1.0 / config.gifFps, overwrite: config.overwrite)
     }
 
     private func releaseProgressHandler(videoID: UUID, revision: UUID?) {

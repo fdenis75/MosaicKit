@@ -126,10 +126,10 @@ Every PR updates its row here (status) and the matching §4.2 / §6.1 entries in
 
 | ID | Status | PR |
 |---|---|---|
-| P-1 | done (baseline to record on `baseline/pre-s2-2026-09-26`) | #39 |
+| P-1 | done; baseline recorded 2026-09-30 (§8.1) | #39 |
 | P-2 | done (found I-26) | #40 |
 | S-1 | done | #38 |
-| S-2 | planned | |
+| S-2 | in review; waiting for the maintainer's after-run (§8.1) | (this PR) |
 | S-3 | planned | |
 | S-4 | planned | |
 | S-5 | planned | |
@@ -143,6 +143,30 @@ Every PR updates its row here (status) and the matching §4.2 / §6.1 entries in
 | F-6 | planned | |
 | F-7 | planned | |
 | F-8 | planned | |
+
+### 8.1 Benchmark baseline
+
+Recorded by the maintainer on 2026-09-30 from `baseline/pre-s2-2026-09-26` (`main@60d1731`), with
+the P-1 command and default settings (3 timed runs after one warm-up, concurrency `1` and
+`auto`). Every ⚡ PR repeats the run **on the same machine and the same 10 videos** and pastes
+both tables into its description. Treat a median change within about ±3 % as noise: single
+runs vary by up to 9 % (mosaic-10000-XS at concurrency 1), but the medians are far steadier.
+
+Input: 10 videos, 15.6 min of source, 1677 MB.
+
+| Scenario | Concurrency | Median (s) | Runs (s) | Source s/s | Input MB/s | Output MB | Peak RSS (MB) |
+|---|---|---|---|---|---|---|---|
+| mosaic-5120-M | 1 | 7.09 | 7.08, 7.09, 7.10 | 131.7 | 236.6 | 3.3 | 572 |
+| mosaic-5120-M | auto | 4.30 | 4.36, 4.29, 4.30 | 217.0 | 390.1 | 3.3 | 1335 |
+| mosaic-10000-XS | 1 | 23.61 | 25.05, 22.83, 23.61 | 39.5 | 71.0 | 13.0 | 1742 |
+| mosaic-10000-XS | auto | 18.24 | 18.59, 18.24, 17.52 | 51.2 | 91.9 | 13.0 | 1904 |
+| anim-gif-small | 1 | 10.59 | 10.59, 10.34, 10.62 | 88.2 | 158.4 | 45.9 | 1904 |
+| anim-gif-small | auto | 7.92 | 8.05, 7.92, 7.80 | 117.8 | 211.7 | 45.9 | 1904 |
+| anim-webp-small | 1 | 22.32 | 22.32, 21.97, 22.59 | 41.8 | 75.1 | 7.6 | 1904 |
+| anim-webp-small | auto | 19.80 | 19.80, 19.82, 19.63 | 47.1 | 84.7 | 7.6 | 1904 |
+
+Peak RSS is the process peak so far, so it only grows down the table; compare it row by row
+with the same row of the other run.
 
 ## 9. Decision log (autonomous work)
 
@@ -175,3 +199,6 @@ PR title.
 | A-14 | 2026-09-27 | P-2a | The I-1 test checks inspected dimensions and the resulting classic-layout cells inside `withKnownIssue`, plus a passing check that extracted frames are portrait | Two-way | Pins the root cause and the symptom; F-1 must remove the wrapper, because a known issue that stops reproducing fails the test |
 | A-15 | 2026-09-27 | P-2c | Add a pinned 1.3.2 `MosaicConfiguration` payload (last release before `gifFps`), shaped from the 1.3.2 models; it fails to decode today, so its test is wrapped in `withKnownIssue` for I-24 (review finding on #40) | Two-way | Proves I-24 on a real release shape; S-5 must remove the wrapper, because a known issue that stops reproducing fails the test |
 | A-16 | 2026-09-27 | P-2b | The native smoke test stalled once in 4 macOS runs of identical code. Keep the test as is (no retry, no quarantine, no longer timeout); make it report the timestamped progress trail on failure, and register the stall as I-26 for S-4 | Two-way | Hiding the stall would remove the only signal of a possible real hang; the trail turns the next occurrence into a diagnosis |
+| A-17 | 2026-09-30 | S-2 | Two shared helpers instead of one `composeMosaic`: `planMosaic` (validation, `.countingThumbnails`/`.computingLayout`, layout, aspect-snapped config) and `composeMosaic` (header, stream, Metal, ColorDNA, watermark), because `generate()` branches to `.gifOnly` between the two. `exportAnimation` takes the destination URL (every site already computes it for its existence check) and always passes `config.overwrite` (the backfill site used a literal `false`, but it only runs when `config.overwrite` is false). Side effect: `generateMosaicImage` now also logs the debug "Generation plan" line | Two-way | Same calls in the same order, so no output or progress change; ~76 fewer lines |
+| A-18 | 2026-09-30 | S-2 | Add `MosaicCompositionPathTests`: `generate` and `generateMosaicImage` must give the same mosaic size, and `generateMosaicImage` must end with `.completed` | Two-way | `generateMosaicImage` had no test; this is the net for the shared path |
+| A-19 | 2026-09-30 | S-2 | ⚡ PRs are not merged on green CI alone (A-9): they wait for the maintainer's after-run of the benchmark on the baseline machine | Two-way | The performance gate needs the maintainer's machine; CI cannot measure throughput |
