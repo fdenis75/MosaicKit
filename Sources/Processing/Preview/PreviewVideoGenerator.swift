@@ -1280,10 +1280,10 @@ struct PreviewGenerationLogic {
                 case .exportStalled: logger.error("SJS export stalled and was cancelled")
                 case .cancelled: logger.info("SJS export cancelled")
                 default:
-                    if let exportError {
-                        logger.error("SJS export failed: \(exportError.localizedDescription)")
-                        progressHandler(1.0, .failed, nil, exportError.localizedDescription)
-                    }
+                    // Export error or missing output: both report .failed, as before S-4.
+                    let message = exportError?.localizedDescription ?? failure.localizedDescription
+                    logger.error("SJS export failed: \(message)")
+                    progressHandler(1.0, .failed, nil, message)
                 }
                 throw failure
             }
