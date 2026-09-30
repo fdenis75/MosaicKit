@@ -121,9 +121,23 @@ public actor MosaicGeneratorCoordinator<Generator: MosaicGeneratorProtocol> {
     public let signposter = OSSignposter(subsystem: "com.mosaicKit", category: "mosaic-coordinator")
     public let mosaicGenerator: Generator
     public var concurrencyLimit: Int
-    public var activeTasks: [UUID: Task<MosaicGenerationResult, Error>] = [:]
-    private var activeImageTasks: [UUID: Task<MosaicGenerationImage, Error>] = [:]
+    /// Tracked tasks and progress handlers are keyed by attempt, not by video (I-15): two
+    /// concurrent jobs on the same video must not overwrite or remove each other's entries.
+    private var attemptTasks: [UUID: Task<MosaicGenerationResult, Error>] = [:]
+    private var attemptImageTasks: [UUID: Task<MosaicGenerationImage, Error>] = [:]
+    /// Video ID of each attempt, so `cancelGeneration(for:)` reaches every attempt on a video.
+    private var attemptSources: [UUID: UUID] = [:]
     private var progressHandlers: [UUID: (MosaicGenerationProgress) -> Void] = [:]
+
+    /// In-flight mosaic tasks keyed by video ID. With several concurrent attempts on one video
+    /// it holds one of them. Kept for source compatibility; tracking is per attempt.
+    public var activeTasks: [UUID: Task<MosaicGenerationResult, Error>] {
+        var tasks: [UUID: Task<MosaicGenerationResult, Error>] = [:]
+        for (attemptID, task) in attemptTasks {
+            if let videoID = attemptSources[attemptID] { tasks[videoID] = task }
+        }
+        return tasks
+    }
 
     /// Monotonic batch generation counter. `cancelAllGenerations()` bumps it so any
     /// in-flight batch loop notices, stops dequeuing queued videos, and throws
@@ -166,10 +180,9 @@ public actor MosaicGeneratorCoordinator<Generator: MosaicGeneratorProtocol> {
 
         logger.debug("🎯 Starting mosaic generation for video: \(video.title)")
 
-        // Safely unwrap video.id
         let videoID = video.id
-        // Store progress handler
-        progressHandlers[videoID] = progressHandler // Use unwrapped ID
+        let attemptID = UUID()
+        progressHandlers[attemptID] = progressHandler
 
         // Report initial progress
         progressHandler(MosaicGenerationProgress(
@@ -230,10 +243,12 @@ public actor MosaicGeneratorCoordinator<Generator: MosaicGeneratorProtocol> {
 
         // Store task; clean up in a defer so failed generations don't leave
         // stale entries behind.
-        activeTasks[videoID] = task // Use unwrapped ID
+        attemptTasks[attemptID] = task
+        attemptSources[attemptID] = videoID
         defer {
-            activeTasks[videoID] = nil // Use unwrapped ID
-            progressHandlers[videoID] = nil // Use unwrapped ID
+            attemptTasks[attemptID] = nil
+            attemptSources[attemptID] = nil
+            progressHandlers[attemptID] = nil
         }
 
         // Wait for task to complete, propagating caller cancellation (e.g. a batch
@@ -257,8 +272,8 @@ public actor MosaicGeneratorCoordinator<Generator: MosaicGeneratorProtocol> {
         logger.debug("Starting mosaic image generation for video: \(video.title)")
 
         let videoID = video.id
-        // Store progress handler
-        progressHandlers[videoID] = progressHandler
+        let attemptID = UUID()
+        progressHandlers[attemptID] = progressHandler
 
         // Report initial progress
         progressHandler(MosaicGenerationProgress(
@@ -315,10 +330,12 @@ public actor MosaicGeneratorCoordinator<Generator: MosaicGeneratorProtocol> {
             }
         }
 
-        activeImageTasks[videoID] = task
+        attemptImageTasks[attemptID] = task
+        attemptSources[attemptID] = videoID
         defer {
-            activeImageTasks[videoID] = nil
-            progressHandlers[videoID] = nil
+            attemptImageTasks[attemptID] = nil
+            attemptSources[attemptID] = nil
+            progressHandlers[attemptID] = nil
         }
 
         // Propagate caller cancellation into the tracked task.
@@ -356,122 +373,42 @@ public actor MosaicGeneratorCoordinator<Generator: MosaicGeneratorProtocol> {
         progressHandler: @escaping @Sendable (MosaicGenerationProgress) -> Void
     ) async throws -> [MosaicGenerationResult] {
         logger.debug("🎬 Starting mosaic generation for \(fileURLs.count) file URLs")
-        let signpostID = signposter.makeSignpostID()
-        let globalState = signposter.beginInterval("Starting mosaic Generation for batch", id: signpostID)
-        defer { signposter.endInterval("Starting mosaic Generation for batch", globalState) }
-
-        let concurrencyState = signposter.beginInterval("Concurrency setup", id: signpostID)
-        var effectiveConcurrencyLimit: Int
-        if self.concurrencyLimit == 0 {
-            let processorCount = ProcessInfo.processInfo.activeProcessorCount
-            let systemMemory = ProcessInfo.processInfo.physicalMemory
-            let memoryGB = Double(systemMemory) / 1_073_741_824.0
-            let cpuBasedLimit = max(2, processorCount / 2)
-            let memoryPerTask = Double(config.width) * config.density.factor / 2000.0
-            let memoryBasedLimit = max(2, Int(memoryGB / memoryPerTask))
-            effectiveConcurrencyLimit = min(memoryBasedLimit, cpuBasedLimit)
-            logger.debug("⚙️ Using dynamic concurrency limit of \(effectiveConcurrencyLimit) (CPU cores: \(processorCount), Memory: \(Int(memoryGB))GB)")
-        } else {
-            effectiveConcurrencyLimit = self.concurrencyLimit
-            logger.debug("⚙️ Using configured concurrency limit: \(effectiveConcurrencyLimit)")
-        }
-        signposter.endInterval("Concurrency setup", concurrencyState)
-
         let epoch = batchEpoch
-        var results: [MosaicGenerationResult] = []
-        var completed = 0
-        var successCount = 0
-        var failureCount = 0
-        var activeTaskCount = 0
+        let signpostVideoID = signposter.makeSignpostID()
+        return try await runBatch(fileURLs, config: config, epoch: epoch,
+                                  describe: { $0.lastPathComponent },
+                                  job: { @Sendable (fileURL: URL) async throws -> MosaicGenerationResult in
+            try Task.checkCancellation()
 
-        return try await withThrowingTaskGroup(of: MosaicGenerationResult.self) { group in
-            let signpostVideoID = signposter.makeSignpostID()
-            for (urlIndex, fileURL) in fileURLs.enumerated() {
-                if self.concurrencyLimit != 0 && effectiveConcurrencyLimit != self.concurrencyLimit {
-                    signposter.emitEvent("applying change of concurrency", id: signpostID,
-                                        "Active: \(activeTaskCount)/\(effectiveConcurrencyLimit)")
-                    effectiveConcurrencyLimit = self.concurrencyLimit
-                }
-
-                while activeTaskCount >= effectiveConcurrencyLimit {
-                    logger.debug("Threshold reached: \(activeTaskCount)/\(effectiveConcurrencyLimit), waiting for task completion")
-                    signposter.emitEvent("Waiting for slot", id: signpostID,
-                                        "Active: \(activeTaskCount)/\(effectiveConcurrencyLimit)")
-                    if let result = try await group.next() {
-                        results.append(result)
-                        completed += 1
-                        activeTaskCount -= 1
-                        signposter.emitEvent("Result arrived", id: signpostID)
-                        if result.isSuccess { successCount += 1 } else { failureCount += 1 }
-                        let overallProgress = Double(completed) / Double(fileURLs.count)
-                        logger.debug("🔄 Progress: \(Int(overallProgress * 100))% (\(completed)/\(fileURLs.count) complete)")
-                    }
-                }
-
-                // Stop dequeuing if cancelAllGenerations() arrived after this batch started
-                if batchEpoch != epoch {
-                    logger.debug("❌ Batch cancelled — stopping before \(fileURL.lastPathComponent)")
-                    group.cancelAll()
+            let videoProcessState = self.signposter.beginInterval("processing video", id: signpostVideoID,
+                                                                   "URL: \(fileURL.lastPathComponent)")
+            do {
+                // Create VideoInput here to avoid blocking the main loop
+                let video = await VideoInput(url: fileURL)
+                self.logger.debug("starting generation for \(fileURL.lastPathComponent)")
+                let result = try await self.generateMosaicForBatch(
+                    for: video,
+                    config: config,
+                    forIphone: forIphone,
+                    progressHandler: progressHandler,
+                    epoch: epoch
+                )
+                self.signposter.endInterval("processing video", videoProcessState,
+                                             "URL: \(fileURL.lastPathComponent)")
+                self.logger.debug("finished generation for \(fileURL.lastPathComponent)")
+                return result
+            } catch {
+                self.signposter.endInterval("processing video", videoProcessState,
+                                             "Error URL: \(fileURL.lastPathComponent)")
+                // A batch-wide cancel tears the whole group down; a single-video
+                // cancel or ordinary failure only affects this video's result.
+                if await self.batchWasCancelled(epoch) {
                     throw CancellationError()
                 }
-
-                activeTaskCount += 1
-                signposter.emitEvent("Task Added to Group", id: signpostID,
-                                     "URL: \(fileURL.lastPathComponent), Index: \(urlIndex), Active: \(activeTaskCount)/\(effectiveConcurrencyLimit)")
-
-                group.addTask(priority: .medium) { @Sendable in
-                    try Task.checkCancellation()
-
-                    let videoProcessState = self.signposter.beginInterval("processing video", id: signpostVideoID,
-                                                                           "URL: \(fileURL.lastPathComponent)")
-                    do {
-                        // Create VideoInput here to avoid blocking the main loop
-                        let video = await VideoInput(url: fileURL)
-                        self.logger.debug("starting generation for \(fileURL.lastPathComponent)")
-                        let result = try await self.generateMosaicForBatch(
-                            for: video,
-                            config: config,
-                            forIphone: forIphone,
-                            progressHandler: progressHandler,
-                            epoch: epoch
-                        )
-                        self.signposter.endInterval("processing video", videoProcessState,
-                                                     "URL: \(fileURL.lastPathComponent)")
-                        self.logger.debug("finished generation for \(fileURL.lastPathComponent)")
-                        return result
-                    } catch {
-                        self.signposter.endInterval("processing video", videoProcessState,
-                                                     "Error URL: \(fileURL.lastPathComponent)")
-                        // A batch-wide cancel tears the whole group down; a single-video
-                        // cancel or ordinary failure only affects this video's result.
-                        if await self.batchWasCancelled(epoch) {
-                            throw CancellationError()
-                        }
-                        let video = await VideoInput(url: fileURL)
-                        return MosaicGenerationResult(video: video, error: error)
-                    }
-                }
+                let video = await VideoInput(url: fileURL)
+                return MosaicGenerationResult(video: video, error: error)
             }
-
-            while let result = try await group.next() {
-                self.logger.debug("result arrived")
-                results.append(result)
-                completed += 1
-                activeTaskCount -= 1
-                if result.isSuccess { successCount += 1 } else { failureCount += 1 }
-                let overallProgress = Double(completed) / Double(fileURLs.count)
-                logger.debug("🔄 Progress: \(Int(overallProgress * 100))% (\(completed)/\(fileURLs.count) complete)")
-
-                if batchEpoch != epoch {
-                    logger.debug("❌ Batch cancelled during drain")
-                    group.cancelAll()
-                    throw CancellationError()
-                }
-            }
-
-            logger.debug("✅ Mosaic generation completed - Success: \(successCount), Failed: \(failureCount), Total: \(fileURLs.count)")
-            return results
-        }
+        })
     }
     /// Generate mosaics for all videos in a smart folder
     /// - Parameters:
@@ -501,22 +438,21 @@ public actor MosaicGeneratorCoordinator<Generator: MosaicGeneratorProtocol> {
     public func cancelGeneration(for video: VideoInput) async {
         logger.debug("❌ Cancelling mosaic generation for video: \(video.title)")
 
-        // Safely unwrap video.id
-         let videoID = video.id
-
-        // Cancel task
-        activeTasks[videoID]?.cancel()
-        activeTasks[videoID] = nil
-        activeImageTasks[videoID]?.cancel()
-        activeImageTasks[videoID] = nil
-
-        // Report cancellation
-        progressHandlers[videoID]?(MosaicGenerationProgress(
-            video: video,
-            progress: 0.0,
-            status: .cancelled
-        ))
-        progressHandlers[videoID] = nil
+        // Cancel every attempt on this video and report the cancellation to its handler
+        let attempts = attemptSources.filter { $0.value == video.id }.map(\.key)
+        for attemptID in attempts {
+            attemptTasks[attemptID]?.cancel()
+            attemptTasks[attemptID] = nil
+            attemptImageTasks[attemptID]?.cancel()
+            attemptImageTasks[attemptID] = nil
+            attemptSources[attemptID] = nil
+            progressHandlers[attemptID]?(MosaicGenerationProgress(
+                video: video,
+                progress: 0.0,
+                status: .cancelled
+            ))
+            progressHandlers[attemptID] = nil
+        }
 
         // Cancel in generator - direct await instead of fire-and-forget Task
         await mosaicGenerator.cancel(for: video)
@@ -535,12 +471,13 @@ public actor MosaicGeneratorCoordinator<Generator: MosaicGeneratorProtocol> {
         batchEpoch += 1
 
         // Cancel all tasks
-        for (_, task) in activeTasks { task.cancel() }
-        for (_, task) in activeImageTasks { task.cancel() }
+        for (_, task) in attemptTasks { task.cancel() }
+        for (_, task) in attemptImageTasks { task.cancel() }
 
         // Clear state
-        activeTasks.removeAll()
-        activeImageTasks.removeAll()
+        attemptTasks.removeAll()
+        attemptImageTasks.removeAll()
+        attemptSources.removeAll()
         progressHandlers.removeAll()
 
         // Cancel in generator - direct await instead of fire-and-forget Task
@@ -605,168 +542,153 @@ public actor MosaicGeneratorCoordinator<Generator: MosaicGeneratorProtocol> {
         progressHandler: @escaping @Sendable (MosaicGenerationProgress) -> Void
     ) async throws -> [MosaicGenerationResult] {
         logger.debug("🎬 Starting mosaic generation for \(videos.count) videos")
+        let epoch = batchEpoch
+        let signpostVideoID = signposter.makeSignpostID()
+        return try await runBatch(videos, config: config, epoch: epoch,
+                                  describe: { $0.title },
+                                  willEnqueue: { video in
+            progressHandler(MosaicGenerationProgress(
+                video: video,
+                progress: 0.0,
+                status: .queued
+            ))
+        }, job: { @Sendable (video: VideoInput) async throws -> MosaicGenerationResult in
+            let videoProcessstate = self.signposter.beginInterval("processing video", id: signpostVideoID, "Video: \(video.title)")
+            do {
+                // Check for cancellation at start
+                try Task.checkCancellation()
+
+                self.logger.debug("starting generation")
+                let result = try await self.generateMosaicForBatch(
+                    for: video,
+                    config: config,
+                    forIphone: forIphone,
+                    progressHandler: progressHandler,
+                    epoch: epoch
+                )
+                self.logger.debug("finished generation")
+                self.signposter.endInterval("processing video", videoProcessstate, "Video: \(video.title)")
+                return result
+            } catch {
+                self.signposter.endInterval("processing video", videoProcessstate, "Error Video: \(video.title)")
+                // A batch-wide cancel (or cancellation of the batch call itself)
+                // tears the whole group down; a single-video cancel or ordinary
+                // failure only affects this video's result. Report the terminal
+                // .cancelled state before rethrowing so videos still shown as
+                // .queued don't linger in that state.
+                if await self.batchWasCancelled(epoch) || Task.isCancelled {
+                    progressHandler(MosaicGenerationProgress(
+                        video: video,
+                        progress: 0.0,
+                        status: .cancelled,
+                        error: error
+                    ))
+                    throw CancellationError()
+                }
+                return MosaicGenerationResult(video: video, error: error)
+            }
+        })
+    }
+
+    // MARK: - Batch runner (S-3)
+
+    /// Concurrency for a new batch: `concurrencyLimit`, or when it is 0 an automatic limit
+    /// from half the cores and an estimate of per-job memory for `config`.
+    private func initialConcurrencyLimit(for config: MosaicConfiguration) -> Int {
+        let configured = concurrencyLimit
+        guard configured == 0 else {
+            logger.debug("⚙️ Using configured concurrency limit: \(configured)")
+            return configured
+        }
+        let processorCount = ProcessInfo.processInfo.activeProcessorCount
+        let memoryGB = Double(ProcessInfo.processInfo.physicalMemory) / 1_073_741_824.0
+        // Half the cores, to avoid oversubscription; per-job memory estimate in GB.
+        let cpuBasedLimit = max(2, processorCount / 2)
+        let memoryPerTask = Double(config.width) * config.density.factor / 2000.0
+        let memoryBasedLimit = max(2, Int(memoryGB / memoryPerTask))
+        let limit = min(memoryBasedLimit, cpuBasedLimit)
+        logger.debug("⚙️ Using dynamic concurrency limit of \(limit) (CPU cores: \(processorCount), Memory: \(Int(memoryGB))GB)")
+        return limit
+    }
+
+    /// The sliding-window loop shared by `generateMosaicsforbatch` and
+    /// `generateMosaicsForFiles`.
+    ///
+    /// - At most the effective limit of jobs run at once; a new job starts each time one
+    ///   finishes. Results come back in completion order.
+    /// - A non-zero limit set with `setConcurrencyLimit(_:)` mid-batch applies before the next
+    ///   job starts; setting 0 keeps the current limit.
+    /// - Once `cancelAllGenerations()` bumps `batchEpoch`, the batch starts no more jobs and
+    ///   throws `CancellationError` (checked before each job starts and after each finishes).
+    private func runBatch<Item: Sendable>(
+        _ items: [Item],
+        config: MosaicConfiguration,
+        epoch: Int,
+        describe: (Item) -> String,
+        willEnqueue: (Item) -> Void = { _ in },
+        job: @escaping @Sendable (Item) async throws -> MosaicGenerationResult
+    ) async throws -> [MosaicGenerationResult] {
         let signpostID = signposter.makeSignpostID()
-        // Use class-level signposter for performance tracking
         let globalState = signposter.beginInterval("Starting mosaic Generation for batch", id: signpostID)
         defer { signposter.endInterval("Starting mosaic Generation for batch", globalState) }
+
         let concurrencyState = signposter.beginInterval("Concurrency setup", id: signpostID)
-        // Determine the effective concurrency limit for this batch
-        // If concurrencyLimit is 0, calculate dynamically based on system resources
-        var effectiveConcurrencyLimit: Int
-        if self.concurrencyLimit == 0 {
-            // Dynamically adjust concurrency based on system capabilities
-            let processorCount = ProcessInfo.processInfo.activeProcessorCount
-            let systemMemory = ProcessInfo.processInfo.physicalMemory
-            let memoryGB = Double(systemMemory) / 1_073_741_824.0 // Convert to GB
-            
-            // Calculate optimal concurrency with balanced approach:
-            // - Don't oversubscribe CPU (use half of available cores)
-            // - Account for memory-intensive operations (realistic estimate per task)
-            let cpuBasedLimit = max(2, processorCount / 2) // Use half of cores to avoid oversubscription
-            let memoryPerTask = Double(config.width) * config.density.factor / 2000.0 // More realistic memory estimate in GB
-            let memoryBasedLimit = max(2, Int(memoryGB / memoryPerTask))
-            effectiveConcurrencyLimit = min(memoryBasedLimit, cpuBasedLimit)
-            
-           
-        
-            logger.debug("⚙️ Using dynamic concurrency limit of \(effectiveConcurrencyLimit) (CPU cores: \(processorCount), Memory: \(Int(memoryGB))GB)")
-        } else {
-            // Use the configured concurrency limit (set via init or setConcurrencyLimit)
-            effectiveConcurrencyLimit = self.concurrencyLimit
-
-            logger.debug("⚙️ Using configured concurrency limit: \(effectiveConcurrencyLimit)")
-        }
+        var effectiveConcurrencyLimit = initialConcurrencyLimit(for: config)
         signposter.endInterval("Concurrency setup", concurrencyState)
-        // Prioritize videos based on various factors
-        let prioritizedVideos = videos
-        
-        // Use DiscardingTaskGroup for better memory management (Swift 5.9+)
-        // This automatically frees resources as tasks complete instead of accumulating results
-        let epoch = batchEpoch
-        var results: [MosaicGenerationResult] = []
-        var completed = 0
-        var successCount = 0
-        var failureCount = 0
-        var activeTasks = 0
 
+        let total = items.count
         return try await withThrowingTaskGroup(of: MosaicGenerationResult.self) { group in
-            let signpostVideoID = signposter.makeSignpostID()
-            for (videoIndex, video) in prioritizedVideos.enumerated() {
-                if self.concurrencyLimit != 0 && effectiveConcurrencyLimit != self.concurrencyLimit {
-                    signposter.emitEvent("applying change of concurrency",id: signpostID,
-                                         "Active: \(activeTasks)/\(effectiveConcurrencyLimit)")
-                    effectiveConcurrencyLimit = self.concurrencyLimit
-                    signposter.emitEvent("New effective concurent: ",id: signpostID,
-                                         
-                                        "effective: (effectiveConcurrencyLimit)")
-                }
-                // Wait for a slot to become available by getting next completed result
-                while activeTasks >= effectiveConcurrencyLimit {
-                    logger.debug("Threshold reached: \(activeTasks)/\(effectiveConcurrencyLimit), waiting for task completion")
-                    signposter.emitEvent("Waiting for slot", id: signpostID,
-                                         "Active: \(activeTasks)/\(effectiveConcurrencyLimit)")
+            var results: [MosaicGenerationResult] = []
+            var successCount = 0
+            var failureCount = 0
+            var activeTaskCount = 0
 
-                    // group.next() properly suspends until a result is available - no polling needed
+            for (index, item) in items.enumerated() {
+                let configured = concurrencyLimit
+                if configured != 0 && effectiveConcurrencyLimit != configured {
+                    signposter.emitEvent("applying change of concurrency", id: signpostID,
+                                         "Active: \(activeTaskCount)/\(effectiveConcurrencyLimit)")
+                    effectiveConcurrencyLimit = configured
+                }
+
+                // Wait for a slot: group.next() suspends until a job finishes.
+                while activeTaskCount >= effectiveConcurrencyLimit {
+                    logger.debug("Threshold reached: \(activeTaskCount)/\(effectiveConcurrencyLimit), waiting for task completion")
+                    signposter.emitEvent("Waiting for slot", id: signpostID,
+                                         "Active: \(activeTaskCount)/\(effectiveConcurrencyLimit)")
                     if let result = try await group.next() {
                         results.append(result)
-                        completed += 1
-                        activeTasks -= 1
+                        activeTaskCount -= 1
                         signposter.emitEvent("Result arrived", id: signpostID)
-
-                        if result.isSuccess {
-                            successCount += 1
-                        } else {
-                            failureCount += 1
-                        }
-
-                        // Report aggregated progress (useful for UI progress indicators)
-                        let overallProgress = Double(completed) / Double(videos.count)
-                        logger.debug("🔄 Progress: \(Int(overallProgress * 100))% (\(completed)/\(videos.count) complete)")
+                        if result.isSuccess { successCount += 1 } else { failureCount += 1 }
+                        let completed = results.count
+                        logger.debug("🔄 Progress: \(Int(Double(completed) / Double(total) * 100))% (\(completed)/\(total) complete)")
                     }
                 }
-                
+
+                let name = describe(item)
                 // Stop dequeuing if cancelAllGenerations() arrived after this batch started
                 if batchEpoch != epoch {
-                    logger.debug("❌ Batch cancelled — stopping before \(video.title)")
+                    logger.debug("❌ Batch cancelled — stopping before \(name)")
                     group.cancelAll()
                     throw CancellationError()
                 }
 
-                logger.debug("Adding tasks")
-                progressHandler(MosaicGenerationProgress(
-                    video: video,
-                    progress: 0.0,
-                    status: .queued
-                ))
-                // Emit signpost event when adding task to group
-                activeTasks += 1
-
-                signposter.emitEvent("Task Added to Group",
-                                     "Video: \(video.title), Index: \(videoIndex), Active: \(activeTasks)/\(effectiveConcurrencyLimit)")
-               // let videoProcessstate = signposter.beginInterval("processing video", "Video: \(video.title)")
+                willEnqueue(item)
+                activeTaskCount += 1
+                signposter.emitEvent("Task Added to Group", id: signpostID,
+                                     "Item: \(name), Index: \(index), Active: \(activeTaskCount)/\(effectiveConcurrencyLimit)")
                 group.addTask(priority: .medium) { @Sendable in
-                    // Create individual progress handler to track this video
-                    let videoProgressHandler: @Sendable (MosaicGenerationProgress) -> Void = { progress in
-                        progressHandler(progress)
-                    }
-                    let videoProcessstate = self.signposter.beginInterval("processing video",id: signpostVideoID,  "Video: \(video.title)")
-                    do {
-                        // Check for cancellation at start
-                        try Task.checkCancellation()
-
-                        self.logger.debug("starting generation")
-                        let result = try await self.generateMosaicForBatch(
-                            for: video,
-                            config: config,
-                            forIphone: forIphone,
-                            progressHandler: videoProgressHandler,
-                            epoch: epoch
-                        )
-                        self.logger.debug("finished generation")
-                        self.signposter.endInterval("processing video", videoProcessstate,"Video: \(video.title)")
-
-                        return result
-
-                    } catch {
-                        self.signposter.endInterval("processing video", videoProcessstate,"Error Video: \(video.title)")
-                        // A batch-wide cancel (or cancellation of the batch call itself)
-                        // tears the whole group down; a single-video cancel or ordinary
-                        // failure only affects this video's result. Report the terminal
-                        // .cancelled state before rethrowing so videos still shown as
-                        // .queued don't linger in that state.
-                        if await self.batchWasCancelled(epoch) || Task.isCancelled {
-                            progressHandler(MosaicGenerationProgress(
-                                video: video,
-                                progress: 0.0,
-                                status: .cancelled,
-                                error: error
-                            ))
-                            throw CancellationError()
-                        }
-                        return MosaicGenerationResult(video: video, error: error)
-                    }
+                    try await job(item)
                 }
             }
-            
-            
+
             while let result = try await group.next() {
-                self.logger.debug("wainting results")
-
                 results.append(result)
-                completed += 1
-                activeTasks -= 1
-                //self.logger.debug("ersult new active task value: \(activeTasks)")
-                self.logger.debug("result arrived")
-
-                if result.isSuccess {
-                    successCount += 1
-                } else {
-                    failureCount += 1
-                }
-
-                // Report aggregated progress (useful for UI progress indicators)
-                let overallProgress = Double(completed) / Double(videos.count)
-                logger.debug("🔄 Progress: \(Int(overallProgress * 100))% (\(completed)/\(videos.count) complete)")
+                activeTaskCount -= 1
+                if result.isSuccess { successCount += 1 } else { failureCount += 1 }
+                let completed = results.count
+                logger.debug("🔄 Progress: \(Int(Double(completed) / Double(total) * 100))% (\(completed)/\(total) complete)")
 
                 if batchEpoch != epoch {
                     logger.debug("❌ Batch cancelled during drain")
@@ -774,14 +696,11 @@ public actor MosaicGeneratorCoordinator<Generator: MosaicGeneratorProtocol> {
                     throw CancellationError()
                 }
             }
-            
-            
-            
-            // Log final results
-            logger.debug("✅ Mosaic generation completed - Success: \(successCount), Failed: \(failureCount), Total: \(videos.count)")
+
+            logger.debug("✅ Mosaic generation completed - Success: \(successCount), Failed: \(failureCount), Total: \(total)")
             return results
         }
-        }
+    }
     
             
         

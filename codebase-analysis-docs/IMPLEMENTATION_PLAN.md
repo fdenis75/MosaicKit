@@ -130,7 +130,7 @@ Every PR updates its row here (status) and the matching §4.2 / §6.1 entries in
 | P-2 | done (found I-26) | #40 |
 | S-1 | done | #38 |
 | S-2 | done; benchmark gate passed (§8.1) | #41 |
-| S-3 | planned | |
+| S-3 | done; A/B/A benchmark gate passed (§8.1) | #42 |
 | S-4 | planned | |
 | S-5 | planned | |
 | S-6 | planned | |
@@ -185,6 +185,27 @@ the refactor changes no work, so these deltas show day-to-day variance.
 | anim-webp-small | 1 | 22.32 | 21.92 | −1.8 % | 21.92, 21.92, 22.14 |
 | anim-webp-small | auto | 19.80 | 19.51 | −1.5 % | 19.51, 19.52, 19.45 |
 
+**S-3 A/B/A run** (2026-09-30, same machine, one session, 4 videos / 6.2 min of source /
+671 MB; A = `main@f9c0405`, B = PR #42). Medians in seconds; peak RSS in MB (process maximum,
+so it only grows down each table).
+
+| Scenario | Concurrency | A1 | B | A2 | B vs mean(A) | Peak RSS A1 / B / A2 |
+|---|---|---|---|---|---|---|
+| mosaic-5120-M | 1 | 2.87 | 2.85 | 2.85 | −0.3 % | 567 / 566 / 569 |
+| mosaic-5120-M | auto | 1.94 | 1.94 | 1.98 | −1.0 % | 1078 / 1247 / 1010 |
+| mosaic-10000-XS | 1 | 9.45 | 8.73 | 8.86 | −4.6 % | 1713 / 1679 / 1457 |
+| mosaic-10000-XS | auto | 6.66 | 6.11 | 6.81 | −9.3 % | 1790 / 2179 / 1882 |
+| anim-gif-small | 1 | 4.16 | 4.18 | 4.14 | +0.7 % | 1790 / 2179 / 1882 |
+| anim-gif-small | auto | 3.41 | 3.23 | 3.25 | −3.0 % | 1790 / 2179 / 1882 |
+| anim-webp-small | 1 | 8.49 | 8.72 | 8.71 | +1.4 % | 1790 / 2179 / 1882 |
+| anim-webp-small | auto | 7.99 | 7.97 | 8.27 | −2.0 % | 1790 / 2179 / 1882 |
+
+Throughput: no row regresses (worst +1.4 % against the mean of A, +2.7 % against the faster
+A). Peak RSS: B was higher in both `auto` mosaic rows (+16–23 %) in its single run. S-3 does
+not change how many jobs run at once or what they hold, and identical code has moved about
+20 % in these rows before, so this is recorded to recheck on the next ⚡ run rather than
+treated as a regression.
+
 ## 9. Decision log (autonomous work)
 
 The maintainer asked for autonomous progress while unavailable (2026-09-26), with every decision
@@ -220,3 +241,7 @@ PR title.
 | A-18 | 2026-09-30 | S-2 | Add `MosaicCompositionPathTests`: `generate` and `generateMosaicImage` must give the same mosaic size, and `generateMosaicImage` must end with `.completed` | Two-way | `generateMosaicImage` had no test; this is the net for the shared path |
 | A-19 | 2026-09-30 | S-2 | ⚡ PRs are not merged on green CI alone (A-9): they wait for the maintainer's after-run of the benchmark on the baseline machine | Two-way | The performance gate needs the maintainer's machine; CI cannot measure throughput |
 | A-20 | 2026-09-30 | S-2 | Benchmark gate passed: no median regressed beyond noise (worst +2.8 %, mosaic-5120-M/auto, 0.12 s over 10 videos; S-2 changes no work). Future hot-path PRs use back-to-back A/B/A runs in one session and a ±5 % noise band, because day-to-day variance reached 14 % | Two-way | Different-day runs of identical code moved one scenario by −14 %, so a ±3 % band across sessions would be meaningless |
+| A-21 | 2026-09-30 | S-3 | One private generic `runBatch` inside each coordinator (not one helper shared across both actors). Each keeps its own limit rule (mosaic: a non-zero limit applies before the next dequeue; preview: `effectiveConcurrencyLimit` re-read before each dequeue and while waiting), priorities (`.medium`; preview composition `.utility`), `.queued` events and epoch checks. The child-task bodies move unchanged into `job` closures. Only logs and signposts change wording | Two-way | The coordinators differ in limit semantics and result types; one runner per actor keeps each exactly as it was and avoids cross-actor isolation plumbing |
+| A-22 | 2026-09-30 | S-3 / I-15 | Mosaic coordinator tracks tasks, handlers and sources per attempt. The public stored `activeTasks` becomes a read-only computed view keyed by video ID (one of the attempts when several run on one video) | Two-way | Actor properties can't be written from outside the actor, so every existing external use (reads) keeps working |
+| A-23 | 2026-09-30 | S-3 | Add `BatchRunnerTests`: a fake `MosaicGeneratorProtocol` generator that only sleeps checks the mosaic runner (limit, `.queued`, results, `cancelAllGenerations`) and I-15 in milliseconds; a composition-only preview batch checks the preview runner. The generator-level `setProgressHandler(for:)` stays keyed by video (noted in the I-15 row) | Two-way | The existing batch suites need a media folder and are skipped in CI, so the runners had no CI coverage |
+| A-24 | 2026-09-30 | S-3 | A/B/A benchmark gate passed (B within ±5 % of both A runs; worst +1.4 % against their mean). Merge. B's higher peak RSS in the two `auto` mosaic rows (one run, +16–23 %) is recorded in §8.1 and rechecked on the next ⚡ PR's run, not treated as a regression | Two-way | Throughput is the gate; S-3 does not change concurrency or per-job memory, and RSS peaks already varied about 20 % on identical code |
