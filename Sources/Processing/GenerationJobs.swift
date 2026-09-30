@@ -1,6 +1,7 @@
 import Foundation
 
 /// Stable identity for one submitted generation operation.
+@available(*, deprecated, message: "Unused by MosaicKit; job cancellation and retry are incomplete (I-14). Removed in MosaicKit 2.0. Use MosaicGeneratorCoordinator or PreviewGeneratorCoordinator.")
 public struct GenerationJobID: Hashable, Codable, Sendable, CustomStringConvertible {
     public let rawValue: UUID
     public init(_ rawValue: UUID = UUID()) { self.rawValue = rawValue }
@@ -8,15 +9,18 @@ public struct GenerationJobID: Hashable, Codable, Sendable, CustomStringConverti
 }
 
 /// Identity of one execution attempt. A retry always receives a new value.
+@available(*, deprecated, message: "Unused by MosaicKit; job cancellation and retry are incomplete (I-14). Removed in MosaicKit 2.0. Use MosaicGeneratorCoordinator or PreviewGeneratorCoordinator.")
 public struct GenerationAttemptID: Hashable, Codable, Sendable {
     public let rawValue: UUID
     public init(_ rawValue: UUID = UUID()) { self.rawValue = rawValue }
 }
 
+@available(*, deprecated, message: "Unused by MosaicKit; job cancellation and retry are incomplete (I-14). Removed in MosaicKit 2.0. Use MosaicGeneratorCoordinator or PreviewGeneratorCoordinator.")
 public enum GenerationJobState: String, Codable, Sendable {
     case queued, running, pausing, paused, retryScheduled, cancelling, succeeded, failed, cancelled
 }
 
+@available(*, deprecated, message: "Unused by MosaicKit; job cancellation and retry are incomplete (I-14). Removed in MosaicKit 2.0. Use MosaicGeneratorCoordinator or PreviewGeneratorCoordinator.")
 public struct GenerationJobSnapshot: Codable, Sendable {
     public let id: GenerationJobID
     public let attempt: GenerationAttemptID
@@ -33,6 +37,7 @@ public struct GenerationJobSnapshot: Codable, Sendable {
 
 /// A small actor-backed controller for applications that need explicit lifecycle control.
 /// Existing generator/coordinator methods remain available and can be adapted to this API.
+@available(*, deprecated, message: "Unused by MosaicKit; job cancellation and retry are incomplete (I-14). Removed in MosaicKit 2.0. Use MosaicGeneratorCoordinator or PreviewGeneratorCoordinator.")
 public actor GenerationJobController {
     public typealias Operation = @Sendable () async throws -> URL
     private struct Record { var snapshot: GenerationJobSnapshot; var task: Task<URL, Error>?; var operation: Operation }

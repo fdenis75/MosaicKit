@@ -66,6 +66,7 @@ public actor MetalMosaicGenerator: MosaicGeneratorProtocol {
         self.metalProcessor = try MetalImageProcessor()
     }
     
+    @available(*, deprecated, message: "Ignores most of the configuration it is given. Removed in MosaicKit 2.0. Call generate(for:config:forIphone:) once per configuration.")
     public func generateallcombinations(for video: VideoInput, config: MosaicConfiguration) async throws -> [URL] {
         signposter.emitEvent("generateallcombinations")
         let intervalState = signposter.beginInterval("generateallcombinations")

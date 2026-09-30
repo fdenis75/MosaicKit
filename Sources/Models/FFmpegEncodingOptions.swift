@@ -223,6 +223,7 @@ public struct FFmpegEncodingOptions: Codable, Sendable, Hashable {
     ///
     /// Falls back to software H.264 (`libx264`) via ``from(quality:format:)`` if you
     /// need cross-platform compatibility without VideoToolbox.
+    @available(*, deprecated, message: "Unused by MosaicKit. Removed in MosaicKit 2.0. Use from(quality:format:), or build FFmpegEncodingOptions with videoCodec .hevcVideoToolbox.")
     public static func forPreview(quality: Double) -> FFmpegEncodingOptions {
         if quality >= 0.7 {
             return FFmpegEncodingOptions(

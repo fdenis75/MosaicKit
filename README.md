@@ -24,6 +24,7 @@ A high-performance Swift package for generating video mosaics with Metal-acceler
 - **Mosaic frame extraction reverted to the batched pipeline** — the pull-based, bounded frame source introduced in 1.7.0 made mosaic generation 30–45 % slower, so extraction is back to batched `AVAssetImageGenerator` requests feeding pipelined 20-frame Metal command buffers (#28, #29). The 1.7.0 "pull-based bounded stream" bullet below no longer describes the current implementation.
 - **Older saved configurations decode again** — `MosaicConfiguration` now decodes JSON saved by every release since 1.0.0. Keys added later (`overlay`, the animation keys, `overwrite`, `gifFps`) fall back to the initializer defaults instead of failing the decode.
 - **Logging** — the unused `swift-log` dependency is removed, and every component now logs under the OSLog subsystem `com.mosaicKit`. Console filters on `com.mosaickit` (lowercase, previously used by the preview components) no longer match.
+- **Deprecations (removed in 2.0)** — public API that MosaicKit itself no longer uses now carries `@available(*, deprecated)` with a replacement in its message: `GenerationJobController` and its job types (`GenerationJobID`, `GenerationAttemptID`, `GenerationJobState`, `GenerationJobSnapshot`), whose cancel and retry are incomplete; `generateallcombinations(for:config:)` (on `MetalMosaicGenerator` and `MosaicGeneratorProtocol`), which ignores most of its configuration; the array-based `ThumbnailProcessor` helpers (`extractThumbnails`, `extractFramesStream`, `extractThumbnailsUI`, `generateMosaic`, the legacy `createMetadataHeader(metadata:…)`); `MetalImageProcessor.generateMosaic(from:…)`; `MosaicLayout.drawMosaicASCIIArt()`; `FFmpegEncodingOptions.forPreview(quality:)`; and `PreviewGeneratorCoordinator.getConcurrencyLimit()` / `getActiveGenerationCount()`. They still work unchanged.
 
 ## New in 1.7.0
 
@@ -626,7 +627,11 @@ Cancellation semantics (mosaic and preview coordinators alike):
   sessions (native, SJS, and ffmpeg) and animated-image encoding all observe
   cancellation.
 
-### Explicit job lifecycle
+### Explicit job lifecycle (deprecated)
+
+> `GenerationJobController` is deprecated and will be removed in MosaicKit 2.0. A job cancelled
+> before it runs stays in `.cancelling` and cannot be retried. Use the coordinators'
+> `cancelGeneration(for:)` / `cancelAllGenerations()` and their progress handlers instead.
 
 For applications that persist work in a queue or need controls independent of a video URL, use
 `GenerationJobController`. Each submission receives a stable `GenerationJobID`; retries receive a

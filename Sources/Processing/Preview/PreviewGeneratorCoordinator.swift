@@ -225,11 +225,13 @@ public actor PreviewGeneratorCoordinator {
     }
 
     /// Get current concurrency limit
+    @available(*, deprecated, message: "Unused by MosaicKit. Removed in MosaicKit 2.0. Keep the value you pass to init(concurrencyLimit:) or setConcurrencyLimit(_:).")
     public func getConcurrencyLimit() -> Int {
         return concurrencyLimit
     }
 
     /// Get number of active generations
+    @available(*, deprecated, message: "Unused by MosaicKit. Removed in MosaicKit 2.0. Count in-flight work from your progress handlers.")
     public func getActiveGenerationCount() -> Int {
         return activeTasks.count + activeCompositionTasks.count
     }
