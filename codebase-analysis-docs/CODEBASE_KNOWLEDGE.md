@@ -289,7 +289,7 @@ work as the package stands. The files in `Examples/` are reference snippets only
 │   ├── VideoInputScanner.swift        scanVideos / discoverVideoSources / discoverVideos
 │   └── MosaicKit.docc/                DocC catalog (8 articles)
 ├── SourcesWebP/MosaicKitWebP.swift    → target "MosaicKitWebP" (DefaultMosaicKitWebPEncoder + register())
-├── Tests/MosaicKitTests/              Swift Testing suites (25 files) + embeddedAsset/ (test_video.mp4, rotated_portrait.mp4, pinned config JSON)
+├── Tests/MosaicKitTests/              Swift Testing suites (26 files) + embeddedAsset/ (test_video.mp4, rotated_portrait.mp4, pinned config JSON)
 ├── Examples/                          5 illustrative .swift files (NOT wired as SPM targets)
 ├── Media.xcassets/                    test_video dataset (same fixture, for Xcode)
 ├── .github/workflows/                 swift.yml (macOS + iOS Simulator CI), claude*.yml
@@ -686,7 +686,7 @@ Full sequence including the coordinator retry: `codebase-analysis-docs/assets/pr
 #### Stage-by-stage table
 
 The body is `PreviewGenerationLogic.generate`
-[[F:Sources/Processing/Preview/PreviewVideoGenerator.swift#255-392#5c3c660f]].
+[[F:Sources/Processing/Preview/PreviewVideoGenerator.swift#260-395#f459c3b8]].
 
 | # | Stage | Code | Key facts |
 |---|---|---|---|
@@ -696,20 +696,27 @@ The body is `PreviewGenerationLogic.generate`
 | 3 | Parameters | `PreviewConfiguration.extractCount(forVideoDuration:)` / `calculateExtractParameters` | `count = base(density) + k·ln(duration)`, with k = 8 if duration > 30 min, else 4. Base counts: XXL 4, XL 8, L 12, **M 16**, S 24, XS 32, XXS 48; custom = 16 × factor. `extractDuration = targetDuration / count`. If `minimumExtractDuration` is set and not met, playback speeds up (capped by `maximumPlaybackSpeed`). |
 | 4 | Timestamps | `calculateExtractTimestamps` | Same 20/60/20 weighting over 5–95 % as mosaics. Starts are clamped so each extract fits. Near-duplicates (< 10 ms apart) are removed, so the actual count can be **lower** than planned. |
 | 5 | ffmpeg preflight | `FFmpegEncoder.validate(binaryPath:)` | Resolves symlinks, then checks the file exists and is executable. Runs **before** composition. |
-| 6 | Compose | `composeVideoSegments` [[F:Sources/Processing/Preview/PreviewVideoGenerator.swift#599-766#5c3c660f]] | One composition video track (source `preferredTransform` copied) plus an optional audio track. For each segment: insert video, then audio, then `composition.scaleTimeRange` if speed ≠ 1. Segments are validated. Audio mix uses `.timeDomain` pitch correction only when speed ≠ 1. Overlay cues (first ≤ 1 s of each extract) are collected. |
-| 7 | Video composition | `buildVideoComposition` [[F:Sources/Processing/Preview/PreviewVideoGenerator.swift#768-855#5c3c660f]] | Target size = the preset's forced size (native) or the ffmpeg `maxResolution`; otherwise the `exportMaxResolution` cap, swapped for portrait. Only downscales. Returns **`nil`** when no scaling and no overlays are needed, so no render pass happens. Always uses the legacy `AVMutableVideoComposition` path on purpose (the code comment explains that the new Configuration API drops the scale transform). |
-| 8a | Export `.native` | `exportWithNativeSession` [[F:Sources/Processing/Preview/PreviewVideoGenerator.swift#1453-1607#5c3c660f]] — **`@MainActor`** | `AVAssetExportSession(preset: effectiveExportPreset)`, `allowsParallelizedExport` (macOS), `shouldOptimizeForNetworkUse`. Progress comes from `states(updateInterval: 5)`. The export itself runs in `Task.detached(priority: .userInitiated)`. |
-| 8b | Export `.sjs` | `exportWithSJSSession` [[F:Sources/Processing/Preview/PreviewVideoGenerator.swift#1110-1325#5c3c660f]] | `SJSAssetExportSession.ExportSession`. Codec and bitrate come from `videoSettings(for: compressionQuality, …)` or the `SjSExportPreset`. The render size is capped by `exportMaxResolution`. Runs as a **stored** detached task so it can be cancelled (SJS has no `cancelExport`). |
+| 6 | Compose | `composeVideoSegments` [[F:Sources/Processing/Preview/PreviewVideoGenerator.swift#604-771#f459c3b8]] | One composition video track (source `preferredTransform` copied) plus an optional audio track. For each segment: insert video, then audio, then `composition.scaleTimeRange` if speed ≠ 1. Segments are validated. Audio mix uses `.timeDomain` pitch correction only when speed ≠ 1. Overlay cues (first ≤ 1 s of each extract) are collected. |
+| 7 | Video composition | `buildVideoComposition` [[F:Sources/Processing/Preview/PreviewVideoGenerator.swift#773-860#f459c3b8]] | Target size = the preset's forced size (native) or the ffmpeg `maxResolution`; otherwise the `exportMaxResolution` cap, swapped for portrait. Only downscales. Returns **`nil`** when no scaling and no overlays are needed, so no render pass happens. Always uses the legacy `AVMutableVideoComposition` path on purpose (the code comment explains that the new Configuration API drops the scale transform). |
+| 8a | Export `.native` | `exportWithNativeSession` [[F:Sources/Processing/Preview/PreviewVideoGenerator.swift#1425-1544#f459c3b8]] — **`@MainActor`** | `AVAssetExportSession(preset: effectiveExportPreset)`, `allowsParallelizedExport` (macOS), `shouldOptimizeForNetworkUse`. Progress comes from `states(updateInterval: 5)`. The export itself runs in `Task.detached(priority: .userInitiated)`. |
+| 8b | Export `.sjs` | `exportWithSJSSession` [[F:Sources/Processing/Preview/PreviewVideoGenerator.swift#1115-1297#f459c3b8]] | `SJSAssetExportSession.ExportSession`. Codec and bitrate come from `videoSettings(for: compressionQuality, …)` or the `SjSExportPreset`. The render size is capped by `exportMaxResolution`. Runs as a **stored** detached task so it can be cancelled (SJS has no `cancelExport`). |
 | 8c | Export `.ffmpeg` | `FFmpegEncoder.encode` (`@MainActor`) → `exportPassthrough` → `runFFmpeg` | Temp dir: `ffmpegTempFolder`, or `$TMPDIR/MosaicKitFFmpeg/<UUID>/` (auto-deleted). Requires **≥ 500 MB** free on the temp volume. Stage 1 exports a `.mov` (Passthrough preset, or **HighestQuality when an audio mix exists**; the `videoComposition` is intentionally not applied). Stage 2 runs `Process` with the arguments from `FFmpegEncodingOptions.buildArguments` (no shell). Progress is parsed from `time=` in stderr; the last 8 KB of stderr is kept for errors. |
 | 9 | Commit | `OutputTransaction` (all three exporters) | Staging file sits next to the final file (same volume, so the rename is atomic). |
 
-**Stall/cancel watchdogs** (these are the cause of `PreviewError.exportStalled`):
+**Stall/cancel watchdogs** (these are the cause of `PreviewError.exportStalled`). Since S-4 the
+native, SJS and passthrough exports share `ExportWatchdog`: a `DispatchSourceTimer` on its own
+serial queue (not a `Task`, so a saturated cooperative pool cannot delay it, I-16), plus one
+outcome mapper, `failure(error:outputURL:…)`, checked in the order stall → cancellation (the
+caller's check or a `CancellationError`) → export error → missing output file.
 
 | Exporter | Poll interval | Stall timeout | Action taken |
 |---|---|---|---|
-| native / SJS | 1 s | 120 s (macOS) / 60 s (iOS) without progress change | `cancelExport()` / `exportTask.cancel()` |
-| ffmpeg passthrough | 1 s | 120 s | `cancelExport()` |
-| ffmpeg process | 2 s | 120 s without progress, or **3600 s** total | `SIGTERM`, then `SIGKILL` after 2 s if still running |
+| native / SJS | 0.5 s (`ExportWatchdog`) | 120 s (macOS) / 60 s (iOS) without progress change | `cancelExport()` / `exportTask.cancel()` |
+| ffmpeg passthrough | 0.5 s (`ExportWatchdog`) | 120 s (macOS only) | `cancelExport()` |
+| ffmpeg process | 0.5 s (own `DispatchSourceTimer`, #34) | 120 s without progress, or **3600 s** total | `SIGTERM`, then `SIGKILL` after 2 s if still running |
+
+Progress is still recorded from `Task`s (`exportSession.states`, SJS `progressStream`). A false
+stall would need the cooperative pool starved for the whole stall budget, not seconds.
 
 **Progress mapping:**
 
@@ -961,7 +968,7 @@ graph LR
     (`.process("Shaders")`), and `Bundle.module` locates `default.metallib`.
   - The test target embeds `embeddedAsset/test_video.mp4` (87 s, 8-bit H.264 High, 720p, video-only).
 - **Tests:**
-  - Swift Testing, 25 files. `CombinationTests` and `PreviewCombinationTests` are `.serialized`.
+  - Swift Testing, 26 files. `CombinationTests` and `PreviewCombinationTests` are `.serialized`.
   - Suites that need a media folder read `MOSAICKIT_SUITE_MODE` (`single` | `folder` | `none`;
     unrecognized values → `single`, missing → `none`) and skip in `none`.
   - `BenchmarkTests` (plan P-1, #39) is an opt-in throughput benchmark, enabled only by
@@ -1764,7 +1771,7 @@ robustness, performance, or cosmetic.
 | I-13 | F8 | Default `exportMaxResolution` is **1080p**; the README (1.6.2) and code comments say 4K. | Confirmed (static) | Low | `_exportMaxResolutionRaw = "1080p"` in three places | Decide the intended default and align code and docs. **Decision D3 (keep 1080p) → plan S-5.** |
 | I-14 | F11 | **A `GenerationJobController` job cancelled before it runs is stuck in `.cancelling`** and cannot be retried. Records never freed; no tests. | Confirmed (static) | Low–Medium | `cancel` sets `.cancelling`; only `value(for:)` moves it to `.cancelled` | In `cancel`, if `task == nil`, go directly to `.cancelled`. Add `remove(_:)`. Add tests. **Decision D1: deprecate `GenerationJobController` (won't fix) → plan S-6.** |
 | I-15 | F10 | **Mosaic coordinator keys state by `video.id`.** Concurrent jobs on the same input clobber each other's cancellation and progress. | **Fixed (S-3)**: tasks, handlers and sources keyed per attempt; `activeTasks` is a read-only view by video ID. **Test:** `BatchRunnerTests` "Cancelling a video cancels every concurrent attempt on it" | Low | `attemptTasks[attemptID]`, `attemptSources`, `progressHandlers[attemptID]` | The generator's own `setProgressHandler(for:)` is still keyed by video; two concurrent attempts on one video can swap per-stage progress handlers there (cancellation is unaffected). |
-| I-16 | F3/F9 | **Slow ffmpeg cancellation under load** (16–20 s instead of ~4 s). This makes `ffmpegCancellationKillsUncooperativeProcess` fail intermittently in CI. | **Fixed (PR #34, merged)** | Medium | CI logs on PR #32/#33; the watchdog is a `Task` that polls every 2 s and escalates with `Task.sleep` | **Fixed in PR #34**: `DispatchSourceTimer` watchdog on a dedicated queue plus termination from `onCancel`. macOS CI is green, including this test. The native/SJS/passthrough watchdogs still poll from `Task`s (follow-up). |
+| I-16 | F3/F9 | **Slow ffmpeg cancellation under load** (16–20 s instead of ~4 s). This makes `ffmpegCancellationKillsUncooperativeProcess` fail intermittently in CI. | **Fixed (PR #34, merged)** | Medium | CI logs on PR #32/#33; the watchdog is a `Task` that polls every 2 s and escalates with `Task.sleep` | **Fixed in PR #34**: `DispatchSourceTimer` watchdog on a dedicated queue plus termination from `onCancel`. macOS CI is green, including this test. The native/SJS/passthrough watchdogs moved to the same `DispatchSourceTimer` approach in S-4 (`ExportWatchdog`). |
 | I-17 | F1 | `discoverVideos` fails the whole scan on one undecodable file. The extension list includes formats AVFoundation rarely decodes (mkv, webm, avi, wmv, flv, asf). | Confirmed (static) | Low–Medium | `discoverVideos` rethrows the first inspection error | Collect per-file failures (a result type), or skip them with a report. |
 | I-18 | F5 | ColorDNA height decoded as 0 (bypassing the init clamp) → strip **silently skipped**. Watermark image load failure → **silently omitted**. | Confirmed (static) | Low | `OverlayProcessor` returns `nil`; the generator keeps the un-annotated image | Validate DNA height ≥ 8. Surface overlay failures (log at least, or throw in strict mode). |
 | I-19 | F2 | `VideoInput(url:)` (legacy) swallows inspection errors and returns metadata-less inputs. `generateMosaicsForFiles` uses it. | Confirmed (static) | Low | `VideoInput.init(url:…) async` | Prefer `VideoInput(from:)` or `VideoSource.inspect()` in new code. |
@@ -1774,7 +1781,7 @@ robustness, performance, or cosmetic.
 | I-23 | Deps / logging | `swift-log` is declared in `Package.swift` but never imported. The OSLog subsystem is `com.mosaicKit` in most files but `com.mosaickit` in the preview files, which splits Console filtering. | **Fixed (S-1, #38)**: dependency removed; subsystem unified on `com.mosaicKit` | Low | `grep` finds no `import Logging`; `Logger(subsystem:)` strings | Remove the dependency (or adopt it). Unify the subsystem string. Fix the CLAUDE.md logging guidance. |
 | I-24 | Codable | `MosaicConfiguration.init(from:)` requires most keys (`decode`), so configs persisted by older versions fail to decode when a field is added. | Confirmed (static) | Medium (upgrade risk) | `MosaicConfiguration.swift` decoder | Use `decodeIfPresent ?? default` for every key added after 1.0 (rule 2). Add a decode-old-payload test per new field. **Test:** `LegacyConfigurationDecodingTests` (P-2) decodes pinned 1.7.0 and minimal payloads, plus a 1.3.2 payload (pre-`gifFps`) that fails today and is wrapped in `withKnownIssue` until S-5; never edit those fixtures to make it pass. |
 | I-25 | Hygiene | Dead or misleading code: `generateallcombinations` ignores the caller's config; unused private helpers in `MetalMosaicGenerator` (`extractFramesWithVideoToolbox`, `calculateExtractionTimes`, `calculateAspectRatio`); unused `MosaicFrameSource`/`makeFrameSource`, `prioritizeVideos`, `VideoError`, `LibraryError`; never-emitted statuses. | **Partly fixed (S-1, #38)**: the unused private helpers and `MosaicFrameSource` are removed. Remaining (public API) → deprecate in S-6 (D1). | Low | §2.12, §5.4 | Remove, or document as intentionally unused (`MosaicFrameSource` has history, §2.6). |
-| I-26 | F8/F9 | **Native preview export can stall with no progress on the macOS CI runner.** `PreviewExportSmokeTests` stalled once in 4 macOS runs of identical code (run 36323934052 on #40: `exportStalled(elapsedSeconds: 120)`; the other runs finished the export in about 20 s). The export never reported progress and never returned, so the 120 s watchdog fired. | **Open (cause unknown)**: diagnostics added in P-2 (the test reports its timestamped progress trail on failure) | Medium (CI reliability; possibly a real hang for users) | CI log of run 36323934052; `exportWithNativeSession` in `PreviewVideoGenerator.swift` | Read the progress trail of the next failure (stuck in `.pending`/`.waiting`, or flat at some percentage). Suspects: `allowsParallelizedExport = true` (macOS only) on a 3-vCPU VM, and encoder contention with the tests running in parallel. S-4 reworks this watchdog and must address it. |
+| I-26 | F8/F9 | **Native preview export can stall with no progress on the macOS CI runner.** `PreviewExportSmokeTests` stalled once in 4 macOS runs of identical code (run 36323934052 on #40: `exportStalled(elapsedSeconds: 120)`; the other runs finished the export in about 20 s). The export never reported progress and never returned, so the 120 s watchdog fired. | **Open (cause unknown)**: diagnostics added in P-2 (the test reports its timestamped progress trail on failure). Seen once more on 2026-09-30 on the maintainer's Mac, in the first local test run after a fresh build (S-4 code, 162 s); the trail was not captured, and 3 cold and 21 warm reruns (15 preview-only, 6 full suite) passed. S-4 moved the watchdog off the cooperative pool and logs the progress value at which an export stalls | Medium (CI reliability; possibly a real hang for users) | CI log of run 36323934052; `exportWithNativeSession` in `PreviewVideoGenerator.swift` | Read the progress trail of the next failure (stuck in `.pending`/`.waiting`, or flat at some percentage). Suspects: `allowsParallelizedExport = true` (macOS only) on a 3-vCPU VM, and encoder contention with the tests running in parallel. S-4 reworks this watchdog and must address it. |
 
 ### 4.3 Performance: hotspots & budgets
 
@@ -2458,7 +2465,7 @@ with the code.
 | 9 | Fix or deprecate `.dynamic`; fix `.auto` units | I-8, I-9 | Broken layout options that are advertised in the README | M |
 | 10 | Housekeeping: `decodeIfPresent` for new keys, ~~remove dead code and swift-log, unify the log subsystem~~ (done in S-1, #38), render or remove `.colorPalette`, and resolve I-13 (4K vs 1080p docs) | I-10, I-13, I-23, I-24, I-25 | Lower maintenance cost and fewer surprises | S each |
 | 11 | Performance exploration (always benchmark against the batched path): CVPixelBuffer → Metal zero-copy path, GPU-side frame treatment, moving encoding off the generator actor, the VideoToolbox constant-quality factor for SJS | §4.3, §4.9 | Throughput is a hard requirement | L |
-| 12 | Root-cause the intermittent native export stall on macOS CI (progress trail from the smoke test), fixed with S-4's shared watchdog | I-26 | A stalled export fails users silently after 120 s and makes CI unreliable | S–M |
+| 12 | Root-cause the intermittent native export stall on macOS CI (progress trail from the smoke test), S-4 moved the watchdog off the cooperative pool and logs the progress value at the stall; the root cause is still open | I-26 | A stalled export fails users silently after 120 s and makes CI unreliable | S–M |
 
 ### 6.2 Open questions (still unresolved)
 
@@ -2510,7 +2517,7 @@ P1 = core feature, P2 = supporting, P3 = docs/infra.
 | 2 | P0 | `Sources/Processing/MetalMosaicGenerator.swift` | code | 645 | 8f2055d8 | Mosaic entry actor; pipeline orchestration; shared `planMosaic`/`composeMosaic`/`exportAnimation` @L298; `saveMosaic` @L523 |
 | 3 | P0 | `Sources/Processing/MosaicGeneratorProtocol.swift` | code | 55 | 6997a51a | Actor protocol |
 | 4 | P0 | `Sources/Processing/MosaicGeneratorCoordinator.swift` | code | 730 | 62277ee6 | Batch actor (per-attempt tracking, `runBatch`), progress/result/status types, factory funcs at the end |
-| 5 | P0 | `Sources/Processing/Preview/PreviewVideoGenerator.swift` | code | 1609 | 5c3c660f | Preview actor + `PreviewGenerationLogic` (compose @L599, export paths @L1088/1110/1453) |
+| 5 | P0 | `Sources/Processing/Preview/PreviewVideoGenerator.swift` | code | 1546 | f459c3b8 | Preview actor + `PreviewGenerationLogic` (compose @L604, export paths @L1093/1115/1425) |
 | 6 | P0 | `Sources/Processing/Preview/PreviewGeneratorCoordinator.swift` | code | 490 | f77a7373 | Preview batch (`runBatch`), concurrency cap 2 @L400, retry @L423 |
 | 7 | P0 | `Sources/Models/MosaicConfiguration.swift` | model | 689 | 82390038 | Config + path templating + format enums |
 | 8 | P0 | `Sources/Models/PreviewConfiguration.swift` | model | 819 | cfcba13c | Config + extract math + path templating |
@@ -2523,7 +2530,7 @@ P1 = core feature, P2 = supporting, P3 = docs/infra.
 | 15 | P1 | `Sources/Processing/OutputTransaction.swift` | code | 62 | e5da241b | Atomic commit |
 | 16 | P1 | `Sources/Processing/MosaicFrameSource.swift` | code | 0 | — | **Removed in S-1 (#38)** (reverted 1.7.0 pull-based frame source) |
 | 17 | P1 | `Sources/Models/ConfigurationValidation.swift` | model | 102 | 83f12470 | All `validate()` |
-| 18 | P1 | `Sources/Processing/Preview/FFmpegEncoder.swift` | code | 440 | 84b44eaa | ffmpeg pipeline (macOS) |
+| 18 | P1 | `Sources/Processing/Preview/FFmpegEncoder.swift` | code | 422 | d99fd279 | ffmpeg pipeline (macOS) |
 | 19 | P1 | `Sources/Processing/OverlayProcessor.swift` | code | 302 | 47e12c52 | DNA strip, watermark |
 | 20 | P1 | `Sources/Models/OverlayConfiguration.swift` | model | 329 | 50177235 | Overlay configs |
 | 21 | P1 | `Sources/Processing/AnimatedGifGenerator.swift` | code | 141 | bd92de71 | Animated writer |
@@ -2561,6 +2568,8 @@ P1 = core feature, P2 = supporting, P3 = docs/infra.
 | 53 | P2 | `Tests/MosaicKitTests/PreviewExportSmokeTests.swift` | test | 88 | feebfa3e | Only end-to-end preview export in CI (native) |
 | 54 | P2 | `Tests/MosaicKitTests/MosaicCompositionPathTests.swift` | test | 62 | c8ec289f | `generate` vs `generateMosaicImage` equivalence (S-2) |
 | 55 | P2 | `Tests/MosaicKitTests/BatchRunnerTests.swift` | test | 189 | a9e1715d | Batch runners (fake mosaic generator) + I-15 + preview composition batch (S-3) |
+| 56 | P1 | `Sources/Processing/Preview/ExportWatchdog.swift` | code | 139 | bbdf71b8 | Shared stall/cancel watchdog + outcome mapper for native, SJS and passthrough exports (S-4) |
+| 57 | P2 | `Tests/MosaicKitTests/ExportWatchdogTests.swift` | test | 164 | 1ddbd7ee | Watchdog stall/cancel/invalidate + outcome mapping order (S-4) |
 
 Excluded or low value: `Media.xcassets/**` (binary fixture), `Tests/MosaicKitTests/embeddedAsset/test_video.mp4`
 (87 s 8-bit H.264 video-only fixture), `scripts/**` + `Makefile` (xcodebuild agent scaffold for a
@@ -2585,7 +2594,7 @@ RELATED PRs (merged): #32 this doc (+README unreleased note); #33 iOS CI scheme 
              #34 ffmpeg watchdog (I-16); #35 review path filter; #36 fast animated tests;
              #31 closed (duplicate of #33). Open: #37 CLAUDE.md/AGENTS.md rewrite + this refresh
 
-FILE_MAP_SUMMARY: Appendix A (55 files; P0 = 8, P1 = 15)
+FILE_MAP_SUMMARY: Appendix A (57 files; P0 = 8, P1 = 15)
 ISSUE REGISTER:   §4.2 I-1 … I-26   (High: I-1, I-2; Medium: I-3 I-4 I-8 I-12 I-16 I-20 I-22 I-24 I-26)
 ROADMAP:          §6.1 → IMPLEMENTATION_PLAN.md (decisions §6.4)
 OPEN_QUESTIONS:   §6.2 (Q11 Q13 Q14 Q16 Q17)
