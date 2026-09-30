@@ -289,7 +289,7 @@ work as the package stands. The files in `Examples/` are reference snippets only
 │   ├── VideoInputScanner.swift        scanVideos / discoverVideoSources / discoverVideos
 │   └── MosaicKit.docc/                DocC catalog (8 articles)
 ├── SourcesWebP/MosaicKitWebP.swift    → target "MosaicKitWebP" (DefaultMosaicKitWebPEncoder + register())
-├── Tests/MosaicKitTests/              Swift Testing suites (24 files) + embeddedAsset/ (test_video.mp4, rotated_portrait.mp4, pinned config JSON)
+├── Tests/MosaicKitTests/              Swift Testing suites (25 files) + embeddedAsset/ (test_video.mp4, rotated_portrait.mp4, pinned config JSON)
 ├── Examples/                          5 illustrative .swift files (NOT wired as SPM targets)
 ├── Media.xcassets/                    test_video dataset (same fixture, for Xcode)
 ├── .github/workflows/                 swift.yml (macOS + iOS Simulator CI), claude*.yml
@@ -585,7 +585,7 @@ Full version with more edges: `codebase-analysis-docs/assets/component-map.mmd`.
 | Component | Kind / isolation | Owned mutable state | Talks to |
 |---|---|---|---|
 | `MetalMosaicGenerator` | `actor` | `generationTasks[videoID][attemptID]`, `imageGenerationTasks`, `progressHandlers[videoID]` + revision UUIDs, perf counters | `LayoutProcessor`, `ThumbnailProcessor(config: .default)`, `MetalImageProcessor`, `OverlayProcessor`, `AnimatedGifGenerator`, `OutputTransaction` |
-| `MosaicGeneratorCoordinator<Generator>` | generic `actor` | `activeTasks[videoID]`, `activeImageTasks[videoID]`, `progressHandlers[videoID]`, `batchEpoch`, `concurrencyLimit` | one shared `Generator` instance |
+| `MosaicGeneratorCoordinator<Generator>` | generic `actor` | `attemptTasks[attemptID]`, `attemptImageTasks[attemptID]`, `attemptSources[attemptID] = videoID`, `progressHandlers[attemptID]` (per attempt since S-3, I-15), `batchEpoch`, `concurrencyLimit` | one shared `Generator` instance |
 | `PreviewVideoGenerator` | `actor` | `progressHandlers[videoID]`, `cancellationTokens[attemptID] = (sourceID, token)` | `PreviewGenerationLogic` |
 | `PreviewGenerationLogic` | `struct` of static funcs; `generate` is nonisolated, `generateComposition` is **`@MainActor`** | none | AVFoundation, `SJSAssetExportSession`, `FFmpegEncoder`, `OutputTransaction` |
 | `PreviewGeneratorCoordinator` | `actor` | `activeTasks[attemptID]`, `activeCompositionTasks[attemptID]`, `taskSources[attemptID] = videoID`, `batchEpoch`, `concurrencyLimit` | one `PreviewVideoGenerator`, `AppLifecycleMonitor.shared` |
@@ -737,13 +737,13 @@ It returns an `AVPlayerItem` with `videoComposition` and `audioMix` attached.
 
 | Aspect | `MosaicGeneratorCoordinator` | `PreviewGeneratorCoordinator` | `GenerationJobController` |
 |---|---|---|---|
-| Admission | Sliding window over `withThrowingTaskGroup`: add until `active ≥ limit`, then `group.next()` | Same pattern | None. Work starts lazily when `value(for:)` is awaited. |
+| Admission | Sliding window over `withThrowingTaskGroup` in one private `runBatch`, shared by both batch entry points (S-3): add until `active ≥ limit`, then `group.next()` | Same pattern, in its own `runBatch` (S-3) | None. Work starts lazily when `value(for:)` is awaited. |
 | Auto limit (`concurrencyLimit == 0`) | `min(max(2, activeCores/2), max(2, RAM_GB / (width·density.factor/2000)))`, computed **once per batch** | `min(max(2, cores−1), max(2, RAM_GB/0.5), 2)`, so **≤ 2**, re-read on every loop iteration | — |
 | Mid-batch limit change | Applied only if a non-zero explicit limit was set | Always re-read | — |
 | Task priority | single: `.userInitiated`; batch child: `.medium` | batch file: `.medium`; batch composition: `.utility`; single: inherits | inherits |
-| Tracking key | **`video.id`**, so two concurrent jobs for the same `VideoInput` overwrite each other's entry | **attempt UUID** plus `taskSources` (safe) | `GenerationJobID` / `GenerationAttemptID` |
+| Tracking key | **attempt UUID** plus `attemptSources` (since S-3, I-15). The public `activeTasks` is a read-only view keyed by video ID | **attempt UUID** plus `taskSources` (safe) | `GenerationJobID` / `GenerationAttemptID` |
 | Batch cancel | `batchEpoch += 1`. The loop checks it before each dequeue and after each result; children re-check before starting. | Same | `cancelAll()` cancels every record |
-| Retry | none | `executeWithBackgroundRetry`: up to **3 attempts**, 1 s sleep, only for `exportStalled` or `AVFoundationErrorDomain −11847` (operation interrupted) [[F:Sources/Processing/Preview/PreviewGeneratorCoordinator.swift#462-513#4fafa592]] | explicit `retry(_:)` (new attempt ID) |
+| Retry | none | `executeWithBackgroundRetry`: up to **3 attempts**, 1 s sleep, only for `exportStalled` or `AVFoundationErrorDomain −11847` (operation interrupted) [[F:Sources/Processing/Preview/PreviewGeneratorCoordinator.swift#423-473#f77a7373]] | explicit `retry(_:)` (new attempt ID) |
 | Foreground gate | none | `AppLifecycleMonitor.waitUntilForeground()` before each attempt. It is **compiled only for non-macOS** (`#if !os(macOS)`) and only when `enableAppLifecycleMonitor`. | none |
 | File-URL batch | `generateMosaicsForFiles` builds `VideoInput(url:)` lazily inside each child (a non-throwing init; metadata may be missing) | — | — |
 
@@ -961,7 +961,7 @@ graph LR
     (`.process("Shaders")`), and `Bundle.module` locates `default.metallib`.
   - The test target embeds `embeddedAsset/test_video.mp4` (87 s, 8-bit H.264 High, 720p, video-only).
 - **Tests:**
-  - Swift Testing, 24 files. `CombinationTests` and `PreviewCombinationTests` are `.serialized`.
+  - Swift Testing, 25 files. `CombinationTests` and `PreviewCombinationTests` are `.serialized`.
   - Suites that need a media folder read `MOSAICKIT_SUITE_MODE` (`single` | `folder` | `none`;
     unrecognized values → `single`, missing → `none`) and skip in `none`.
   - `BenchmarkTests` (plan P-1, #39) is an opt-in throughput benchmark, enabled only by
@@ -1007,7 +1007,8 @@ graph LR
    the key, or an explicit `nil`.)*
 6. `MosaicGeneratorCoordinator` tracks tasks and handlers by `video.id`, so concurrent jobs for
    the same input can clobber each other's cancellation and progress. The preview coordinator
-   was fixed to use attempt IDs; the mosaic one was not.
+   was fixed to use attempt IDs; the mosaic one was not. *(Fixed in S-3: per-attempt keys,
+   I-15.)*
 7. `VideoError` and `LibraryError` are dead. `MetalProcessorError` lacks `LocalizedError`.
 8. `prioritizeVideos` is dead. `GenerationJobState.pausing` and `.retryScheduled` are never
    entered.
@@ -1426,11 +1427,15 @@ backbone. Read `LayoutProcessor` algorithms, `ThumbnailProcessor` header/label r
 - **Edge cases:**
   - `generateMosaicsForFiles` inspects each file with the non-throwing `VideoInput(url:)`
     inside the task. Unreadable files become failed results with metadata-less inputs.
-  - Mosaic tracking keyed by `video.id` (§2.12 item 6).
+  - Two concurrent jobs on the same video are tracked separately (per-attempt keys since S-3,
+    I-15), so `cancelGeneration(for:)` cancels both and each handler gets `.cancelled`.
   - A mosaic result for a video cancelled individually is a `.failure` with a
     `CancellationError`, and handlers get `.cancelled`.
 - **Tests:** `MosaicCancellationTests` and `PreviewCancellationTests` (4 scenarios each; skipped
   in CI). `MosaicGeneratorCoordinatorTests` (single video on the embedded asset).
+  `BatchRunnerTests` (S-3, runs in CI): a fake mosaic generator checks the concurrency limit,
+  `.queued` events, one result per input, `cancelAllGenerations()` and I-15; a composition-only
+  preview batch checks the preview runner.
 
 ### F11 — Explicit job lifecycle
 
@@ -1758,7 +1763,7 @@ robustness, performance, or cosmetic.
 | I-12 | F8 | **Preview skip-if-exists never matches** with default naming (run timestamp in the filename). | Confirmed (static) | Medium | `PreviewConfiguration.generateFilename` | Drop the run timestamp from the default name (it could be a `{time}` token instead). This is a naming change (rule 4). **Decision D2 → plan F-3.** |
 | I-13 | F8 | Default `exportMaxResolution` is **1080p**; the README (1.6.2) and code comments say 4K. | Confirmed (static) | Low | `_exportMaxResolutionRaw = "1080p"` in three places | Decide the intended default and align code and docs. **Decision D3 (keep 1080p) → plan S-5.** |
 | I-14 | F11 | **A `GenerationJobController` job cancelled before it runs is stuck in `.cancelling`** and cannot be retried. Records never freed; no tests. | Confirmed (static) | Low–Medium | `cancel` sets `.cancelling`; only `value(for:)` moves it to `.cancelled` | In `cancel`, if `task == nil`, go directly to `.cancelled`. Add `remove(_:)`. Add tests. **Decision D1: deprecate `GenerationJobController` (won't fix) → plan S-6.** |
-| I-15 | F10 | **Mosaic coordinator keys state by `video.id`.** Concurrent jobs on the same input clobber each other's cancellation and progress. | Confirmed (static) | Low | `activeTasks[videoID]`, `progressHandlers[videoID]` | Use per-attempt keys, as `PreviewGeneratorCoordinator` does. |
+| I-15 | F10 | **Mosaic coordinator keys state by `video.id`.** Concurrent jobs on the same input clobber each other's cancellation and progress. | **Fixed (S-3)**: tasks, handlers and sources keyed per attempt; `activeTasks` is a read-only view by video ID. **Test:** `BatchRunnerTests` "Cancelling a video cancels every concurrent attempt on it" | Low | `attemptTasks[attemptID]`, `attemptSources`, `progressHandlers[attemptID]` | The generator's own `setProgressHandler(for:)` is still keyed by video; two concurrent attempts on one video can swap per-stage progress handlers there (cancellation is unaffected). |
 | I-16 | F3/F9 | **Slow ffmpeg cancellation under load** (16–20 s instead of ~4 s). This makes `ffmpegCancellationKillsUncooperativeProcess` fail intermittently in CI. | **Fixed (PR #34, merged)** | Medium | CI logs on PR #32/#33; the watchdog is a `Task` that polls every 2 s and escalates with `Task.sleep` | **Fixed in PR #34**: `DispatchSourceTimer` watchdog on a dedicated queue plus termination from `onCancel`. macOS CI is green, including this test. The native/SJS/passthrough watchdogs still poll from `Task`s (follow-up). |
 | I-17 | F1 | `discoverVideos` fails the whole scan on one undecodable file. The extension list includes formats AVFoundation rarely decodes (mkv, webm, avi, wmv, flv, asf). | Confirmed (static) | Low–Medium | `discoverVideos` rethrows the first inspection error | Collect per-file failures (a result type), or skip them with a report. |
 | I-18 | F5 | ColorDNA height decoded as 0 (bypassing the init clamp) → strip **silently skipped**. Watermark image load failure → **silently omitted**. | Confirmed (static) | Low | `OverlayProcessor` returns `nil`; the generator keeps the un-annotated image | Validate DNA height ≥ 8. Surface overlay failures (log at least, or throw in strict mode). |
@@ -2065,7 +2070,7 @@ def dynamic(n,W,ar):
 |---|---|---|
 | `MetalMosaicGenerator` | `actor`, `MosaicGeneratorProtocol` | `init(layoutProcessor: LayoutProcessor = LayoutProcessor()) throws` (throws `MetalProcessorError` without Metal) · `generate(for:config:forIphone:) throws -> URL` · `generateMosaicImage(for:config:forIphone:) throws -> CGImage` · `generateallcombinations(for:config:) throws -> [URL]` · `cancel(for:)` · `cancelAll()` · `setProgressHandler(for:handler:)` (one-shot per generation) · `getPerformanceMetrics() -> [String: Any]` |
 | `MosaicGeneratorProtocol` | `protocol …: Actor` | Same seven requirements as above (`forIphone` has no default at the protocol level) |
-| `MosaicGeneratorCoordinator<Generator: MosaicGeneratorProtocol>` | generic `actor` | `init(mosaicGenerator:concurrencyLimit: = 0)` · `setConcurrencyLimit(_:)` · `generateMosaic(for:config:forIphone:progressHandler:) throws -> MosaicGenerationResult` · `generateMosaicImage(…) throws -> MosaicGenerationImage` · `generateMosaicsforbatch(videos:config:forIphone:progressHandler:) throws -> [MosaicGenerationResult]` · `generateMosaicsForFiles(_:config:forIphone:progressHandler:) throws -> [MosaicGenerationResult]` · `cancelGeneration(for:)` · `cancelAllGenerations()`. Public stored: `logger`, `signposter`, `mosaicGenerator`, `concurrencyLimit`, `activeTasks` |
+| `MosaicGeneratorCoordinator<Generator: MosaicGeneratorProtocol>` | generic `actor` | `init(mosaicGenerator:concurrencyLimit: = 0)` · `setConcurrencyLimit(_:)` · `generateMosaic(for:config:forIphone:progressHandler:) throws -> MosaicGenerationResult` · `generateMosaicImage(…) throws -> MosaicGenerationImage` · `generateMosaicsforbatch(videos:config:forIphone:progressHandler:) throws -> [MosaicGenerationResult]` · `generateMosaicsForFiles(_:config:forIphone:progressHandler:) throws -> [MosaicGenerationResult]` · `cancelGeneration(for:)` · `cancelAllGenerations()`. Public stored: `logger`, `signposter`, `mosaicGenerator`, `concurrencyLimit`. Public computed: `activeTasks` (read-only view by video ID since S-3) |
 | `createDefaultMosaicCoordinator(concurrencyLimit: = 0) throws` / `createMosaicCoordinatorWithMetal(…)` | free funcs | Return `MosaicGeneratorCoordinator<MetalMosaicGenerator>` |
 | `PreviewVideoGenerator` | `actor` | `init()` · `generate(for:config:progressHandler:) throws -> URL` · `generateComposition(for:config:progressHandler:) throws -> AVPlayerItem` · `setProgressHandler(for:handler:)` · `cancel(for:)` · `cancelAll()` |
 | `PreviewGeneratorCoordinator` | `actor` | `init(concurrencyLimit: = 0)` · `generatePreview(for:config:progressHandler:) throws -> URL` · `generatePreviewComposition(…) throws -> AVPlayerItem` · `generatePreviewsForBatch(videos:config:progressHandler:) throws -> [PreviewGenerationResult]` · `generatePreviewCompositionsForBatch(…) throws -> [PreviewCompositionResult]` · `cancelGeneration(for:)` · `cancelAllGenerations()` · `setConcurrencyLimit(_:)` · `getConcurrencyLimit()` · `getActiveGenerationCount()` · `getPerformanceMetrics()` |
@@ -2504,9 +2509,9 @@ P1 = core feature, P2 = supporting, P3 = docs/infra.
 | 1 | P0 | `Package.swift` | config | 61 | 721e2854 | Products, targets, deps, platforms |
 | 2 | P0 | `Sources/Processing/MetalMosaicGenerator.swift` | code | 645 | 8f2055d8 | Mosaic entry actor; pipeline orchestration; shared `planMosaic`/`composeMosaic`/`exportAnimation` @L298; `saveMosaic` @L523 |
 | 3 | P0 | `Sources/Processing/MosaicGeneratorProtocol.swift` | code | 55 | 6997a51a | Actor protocol |
-| 4 | P0 | `Sources/Processing/MosaicGeneratorCoordinator.swift` | code | 811 | 29e05ad2 | Batch actor, progress/result/status types, factory funcs @L796/804 |
+| 4 | P0 | `Sources/Processing/MosaicGeneratorCoordinator.swift` | code | 730 | 62277ee6 | Batch actor (per-attempt tracking, `runBatch`), progress/result/status types, factory funcs at the end |
 | 5 | P0 | `Sources/Processing/Preview/PreviewVideoGenerator.swift` | code | 1609 | 5c3c660f | Preview actor + `PreviewGenerationLogic` (compose @L599, export paths @L1088/1110/1453) |
-| 6 | P0 | `Sources/Processing/Preview/PreviewGeneratorCoordinator.swift` | code | 529 | 4fafa592 | Preview batch, concurrency cap 2 @L439, retry @L462 |
+| 6 | P0 | `Sources/Processing/Preview/PreviewGeneratorCoordinator.swift` | code | 490 | f77a7373 | Preview batch (`runBatch`), concurrency cap 2 @L400, retry @L423 |
 | 7 | P0 | `Sources/Models/MosaicConfiguration.swift` | model | 689 | 82390038 | Config + path templating + format enums |
 | 8 | P0 | `Sources/Models/PreviewConfiguration.swift` | model | 819 | cfcba13c | Config + extract math + path templating |
 | 9 | P1 | `Sources/Processing/ThumbnailProcessor.swift` | code | 1576 | 49eec98a | Frame stream @L138, GIF frames @L75, header @L594/857 |
@@ -2555,6 +2560,7 @@ P1 = core feature, P2 = supporting, P3 = docs/infra.
 | 52 | P2 | `Tests/MosaicKitTests/RotatedSourceTests.swift` | test | 57 | ecc0463c | Rotated portrait fixture; I-1 known issue |
 | 53 | P2 | `Tests/MosaicKitTests/PreviewExportSmokeTests.swift` | test | 88 | feebfa3e | Only end-to-end preview export in CI (native) |
 | 54 | P2 | `Tests/MosaicKitTests/MosaicCompositionPathTests.swift` | test | 62 | c8ec289f | `generate` vs `generateMosaicImage` equivalence (S-2) |
+| 55 | P2 | `Tests/MosaicKitTests/BatchRunnerTests.swift` | test | 189 | 6c51d24d | Batch runners (fake mosaic generator) + I-15 + preview composition batch (S-3) |
 
 Excluded or low value: `Media.xcassets/**` (binary fixture), `Tests/MosaicKitTests/embeddedAsset/test_video.mp4`
 (87 s 8-bit H.264 video-only fixture), `scripts/**` + `Makefile` (xcodebuild agent scaffold for a
@@ -2579,7 +2585,7 @@ RELATED PRs (merged): #32 this doc (+README unreleased note); #33 iOS CI scheme 
              #34 ffmpeg watchdog (I-16); #35 review path filter; #36 fast animated tests;
              #31 closed (duplicate of #33). Open: #37 CLAUDE.md/AGENTS.md rewrite + this refresh
 
-FILE_MAP_SUMMARY: Appendix A (54 files; P0 = 8, P1 = 15)
+FILE_MAP_SUMMARY: Appendix A (55 files; P0 = 8, P1 = 15)
 ISSUE REGISTER:   §4.2 I-1 … I-26   (High: I-1, I-2; Medium: I-3 I-4 I-8 I-12 I-16 I-20 I-22 I-24 I-26)
 ROADMAP:          §6.1 → IMPLEMENTATION_PLAN.md (decisions §6.4)
 OPEN_QUESTIONS:   §6.2 (Q11 Q13 Q14 Q16 Q17)

@@ -114,97 +114,34 @@ public actor PreviewGeneratorCoordinator {
         progressHandler: (@Sendable (PreviewGenerationProgress) -> Void)? = nil
     ) async throws -> [PreviewCompositionResult] {
         logger.info("Starting batch preview composition generation for \(videos.count) videos")
-
-        var batchConcurrencyLimit = self.effectiveConcurrencyLimit
-        logger.info("Using concurrency limit: \(batchConcurrencyLimit)")
-
         let epoch = batchEpoch
-        var results: [PreviewCompositionResult] = []
-        var completed = 0
-        var successCount = 0
-        var failureCount = 0
-        var activeTasks = 0
-
-        return try await withThrowingTaskGroup(of: PreviewCompositionResult.self) { group in
-
-            for video in videos {
-                // Pick up any concurrency limit change made mid-batch (e.g. via
-                // Settings while this batch is running) before deciding whether
-                // to wait for a slot.
-                let currentLimit = self.effectiveConcurrencyLimit
-                if currentLimit != batchConcurrencyLimit {
-                    logger.debug("Applying concurrency limit change mid-batch: \(batchConcurrencyLimit) -> \(currentLimit)")
-                    batchConcurrencyLimit = currentLimit
-                }
-
-                // Wait for available slot by collecting a completed task
-                while activeTasks >= batchConcurrencyLimit {
-                    if let result = try await group.next() {
-                        results.append(result)
-                        completed += 1
-                        activeTasks -= 1
-                        if result.isSuccess { successCount += 1 } else { failureCount += 1 }
-                        logger.debug("Progress: \(completed)/\(videos.count) complete")
-                    }
-                    batchConcurrencyLimit = self.effectiveConcurrencyLimit
-                }
-
-                // Stop dequeuing if cancelAllGenerations() arrived after this batch started
-                if batchEpoch != epoch {
-                    logger.info("Batch composition cancelled — stopping before \(video.title)")
-                    group.cancelAll()
+        return try await runBatch(videos, kind: "composition", epoch: epoch, priority: .utility,
+                                  progressHandler: progressHandler, isSuccess: { $0.isSuccess },
+                                  job: { @Sendable (video: VideoInput) async throws -> PreviewCompositionResult in
+            do {
+                try Task.checkCancellation()
+                let playerItem = try await self.runTrackedCompositionGeneration(for: video, config: config, batchEpoch: epoch, progressHandler: progressHandler)
+                return PreviewCompositionResult.success(video: video, playerItem: playerItem)
+            } catch {
+                // A batch-wide cancel (or cancellation of the batch call itself)
+                // tears the whole group down; a single-video cancel or ordinary
+                // failure only affects this video's result. Report the terminal
+                // .cancelled state before rethrowing — batch handlers are not
+                // registered in `progressHandlers`, so cancelAllGenerations()
+                // cannot report it and the UI would stay at .queued/.encoding.
+                if await self.batchWasCancelled(epoch) || Task.isCancelled {
+                    progressHandler?(.cancelled(for: video))
                     throw CancellationError()
                 }
-
-                // Queue video for processing
-                progressHandler?(.queued(for: video))
-                activeTasks += 1
-
-                group.addTask(priority: .utility) { @Sendable in
-                    do {
-                        try Task.checkCancellation()
-                        let playerItem = try await self.runTrackedCompositionGeneration(for: video, config: config, batchEpoch: epoch, progressHandler: progressHandler)
-                        return PreviewCompositionResult.success(video: video, playerItem: playerItem)
-                    } catch {
-                        // A batch-wide cancel (or cancellation of the batch call itself)
-                        // tears the whole group down; a single-video cancel or ordinary
-                        // failure only affects this video's result. Report the terminal
-                        // .cancelled state before rethrowing — batch handlers are not
-                        // registered in `progressHandlers`, so cancelAllGenerations()
-                        // cannot report it and the UI would stay at .queued/.encoding.
-                        if await self.batchWasCancelled(epoch) || Task.isCancelled {
-                            progressHandler?(.cancelled(for: video))
-                            throw CancellationError()
-                        }
-                        if Self.isCancellation(error) {
-                            progressHandler?(.cancelled(for: video))
-                        } else {
-                            progressHandler?(.failed(for: video, error: error))
-                            self.logger.error("Composition failed for: \(video.title) - \(error.localizedDescription)")
-                        }
-                        return PreviewCompositionResult.failure(video: video, error: error)
-                    }
+                if Self.isCancellation(error) {
+                    progressHandler?(.cancelled(for: video))
+                } else {
+                    progressHandler?(.failed(for: video, error: error))
+                    self.logger.error("Composition failed for: \(video.title) - \(error.localizedDescription)")
                 }
+                return PreviewCompositionResult.failure(video: video, error: error)
             }
-
-            // Collect remaining results
-            while let result = try await group.next() {
-                results.append(result)
-                completed += 1
-                activeTasks -= 1
-                if result.isSuccess { successCount += 1 } else { failureCount += 1 }
-                logger.debug("Progress: \(completed)/\(videos.count) complete")
-
-                if batchEpoch != epoch {
-                    logger.info("Batch composition cancelled during drain")
-                    group.cancelAll()
-                    throw CancellationError()
-                }
-            }
-
-            logger.info("Batch composition completed - Success: \(successCount), Failed: \(failureCount), Total: \(videos.count)")
-            return results
-        }
+        })
     }
 
     /// Generate previews for multiple videos with concurrency management
@@ -219,97 +156,34 @@ public actor PreviewGeneratorCoordinator {
         progressHandler: (@Sendable (PreviewGenerationProgress) -> Void)? = nil
     ) async throws -> [PreviewGenerationResult] {
         logger.info("Starting batch preview generation for \(videos.count) videos")
-
-        var batchConcurrencyLimit = self.effectiveConcurrencyLimit
-        logger.info("Using concurrency limit: \(batchConcurrencyLimit)")
-
         let epoch = batchEpoch
-        var results: [PreviewGenerationResult] = []
-        var completed = 0
-        var successCount = 0
-        var failureCount = 0
-        var activeTasks = 0
-
-        return try await withThrowingTaskGroup(of: PreviewGenerationResult.self) { group in
-
-            for video in videos {
-                // Pick up any concurrency limit change made mid-batch (e.g. via
-                // Settings while this batch is running) before deciding whether
-                // to wait for a slot.
-                let currentLimit = self.effectiveConcurrencyLimit
-                if currentLimit != batchConcurrencyLimit {
-                    logger.debug("Applying concurrency limit change mid-batch: \(batchConcurrencyLimit) -> \(currentLimit)")
-                    batchConcurrencyLimit = currentLimit
-                }
-
-                // Wait for available slot by collecting a completed task
-                while activeTasks >= batchConcurrencyLimit {
-                    if let result = try await group.next() {
-                        results.append(result)
-                        completed += 1
-                        activeTasks -= 1
-                        if result.isSuccess { successCount += 1 } else { failureCount += 1 }
-                        logger.debug("Progress: \(completed)/\(videos.count) complete")
-                    }
-                    batchConcurrencyLimit = self.effectiveConcurrencyLimit
-                }
-
-                // Stop dequeuing if cancelAllGenerations() arrived after this batch started
-                if batchEpoch != epoch {
-                    logger.info("Batch generation cancelled — stopping before \(video.title)")
-                    group.cancelAll()
+        return try await runBatch(videos, kind: "generation", epoch: epoch, priority: .medium,
+                                  progressHandler: progressHandler, isSuccess: { $0.isSuccess },
+                                  job: { @Sendable (video: VideoInput) async throws -> PreviewGenerationResult in
+            do {
+                try Task.checkCancellation()
+                let outputURL = try await self.runTrackedGeneration(for: video, config: config, batchEpoch: epoch, progressHandler: progressHandler)
+                return PreviewGenerationResult.success(video: video, outputURL: outputURL)
+            } catch {
+                // A batch-wide cancel (or cancellation of the batch call itself)
+                // tears the whole group down; a single-video cancel or ordinary
+                // failure only affects this video's result. Report the terminal
+                // .cancelled state before rethrowing — batch handlers are not
+                // registered in `progressHandlers`, so cancelAllGenerations()
+                // cannot report it and the UI would stay at .queued/.encoding.
+                if await self.batchWasCancelled(epoch) || Task.isCancelled {
+                    progressHandler?(.cancelled(for: video))
                     throw CancellationError()
                 }
-
-                // Queue video for processing
-                progressHandler?(.queued(for: video))
-                activeTasks += 1
-
-                group.addTask(priority: .medium) { @Sendable in
-                    do {
-                        try Task.checkCancellation()
-                        let outputURL = try await self.runTrackedGeneration(for: video, config: config, batchEpoch: epoch, progressHandler: progressHandler)
-                        return PreviewGenerationResult.success(video: video, outputURL: outputURL)
-                    } catch {
-                        // A batch-wide cancel (or cancellation of the batch call itself)
-                        // tears the whole group down; a single-video cancel or ordinary
-                        // failure only affects this video's result. Report the terminal
-                        // .cancelled state before rethrowing — batch handlers are not
-                        // registered in `progressHandlers`, so cancelAllGenerations()
-                        // cannot report it and the UI would stay at .queued/.encoding.
-                        if await self.batchWasCancelled(epoch) || Task.isCancelled {
-                            progressHandler?(.cancelled(for: video))
-                            throw CancellationError()
-                        }
-                        if Self.isCancellation(error) {
-                            progressHandler?(.cancelled(for: video))
-                        } else {
-                            progressHandler?(.failed(for: video, error: error))
-                            self.logger.error("Generation failed for: \(video.title) - \(error.localizedDescription)")
-                        }
-                        return PreviewGenerationResult.failure(video: video, error: error)
-                    }
+                if Self.isCancellation(error) {
+                    progressHandler?(.cancelled(for: video))
+                } else {
+                    progressHandler?(.failed(for: video, error: error))
+                    self.logger.error("Generation failed for: \(video.title) - \(error.localizedDescription)")
                 }
+                return PreviewGenerationResult.failure(video: video, error: error)
             }
-
-            // Collect remaining results
-            while let result = try await group.next() {
-                results.append(result)
-                completed += 1
-                activeTasks -= 1
-                if result.isSuccess { successCount += 1 } else { failureCount += 1 }
-                logger.debug("Progress: \(completed)/\(videos.count) complete")
-
-                if batchEpoch != epoch {
-                    logger.info("Batch generation cancelled during drain")
-                    group.cancelAll()
-                    throw CancellationError()
-                }
-            }
-
-            logger.info("Batch generation completed - Success: \(successCount), Failed: \(failureCount), Total: \(videos.count)")
-            return results
-        }
+        })
     }
 
     /// Cancel generation for a specific video
@@ -420,6 +294,93 @@ public actor PreviewGeneratorCoordinator {
             try await task.value
         } onCancel: {
             task.cancel()
+        }
+    }
+
+    /// The sliding-window loop shared by `generatePreviewsForBatch` and
+    /// `generatePreviewCompositionsForBatch` (S-3).
+    ///
+    /// - At most `effectiveConcurrencyLimit` jobs run at once; a new job starts each time one
+    ///   finishes. Results come back in completion order.
+    /// - The limit is re-read before each job starts and after each result while waiting for
+    ///   a slot, so `setConcurrencyLimit(_:)` applies mid-batch.
+    /// - Each video is reported `.queued` just before its job is added.
+    /// - Once `cancelAllGenerations()` bumps `batchEpoch`, the batch starts no more jobs and
+    ///   throws `CancellationError` (checked before each job starts and after each finishes).
+    private func runBatch<Result: Sendable>(
+        _ videos: [VideoInput],
+        kind: String,
+        epoch: Int,
+        priority: TaskPriority,
+        progressHandler: (@Sendable (PreviewGenerationProgress) -> Void)?,
+        isSuccess: (Result) -> Bool,
+        job: @escaping @Sendable (VideoInput) async throws -> Result
+    ) async throws -> [Result] {
+        var batchConcurrencyLimit = effectiveConcurrencyLimit
+        logger.info("Using concurrency limit: \(batchConcurrencyLimit)")
+
+        let total = videos.count
+        return try await withThrowingTaskGroup(of: Result.self) { group in
+            var results: [Result] = []
+            var successCount = 0
+            var failureCount = 0
+            var activeTasks = 0
+
+            for video in videos {
+                // Pick up any concurrency limit change made mid-batch (e.g. via
+                // Settings while this batch is running) before deciding whether
+                // to wait for a slot.
+                let currentLimit = effectiveConcurrencyLimit
+                if currentLimit != batchConcurrencyLimit {
+                    logger.debug("Applying concurrency limit change mid-batch: \(batchConcurrencyLimit) -> \(currentLimit)")
+                    batchConcurrencyLimit = currentLimit
+                }
+
+                // Wait for available slot by collecting a completed task
+                while activeTasks >= batchConcurrencyLimit {
+                    if let result = try await group.next() {
+                        results.append(result)
+                        activeTasks -= 1
+                        if isSuccess(result) { successCount += 1 } else { failureCount += 1 }
+                        let completed = results.count
+                        logger.debug("Progress: \(completed)/\(total) complete")
+                    }
+                    batchConcurrencyLimit = effectiveConcurrencyLimit
+                }
+
+                // Stop dequeuing if cancelAllGenerations() arrived after this batch started
+                if batchEpoch != epoch {
+                    let title = video.title
+                    logger.info("Batch \(kind, privacy: .public) cancelled — stopping before \(title)")
+                    group.cancelAll()
+                    throw CancellationError()
+                }
+
+                // Queue video for processing
+                progressHandler?(.queued(for: video))
+                activeTasks += 1
+                group.addTask(priority: priority) { @Sendable in
+                    try await job(video)
+                }
+            }
+
+            // Collect remaining results
+            while let result = try await group.next() {
+                results.append(result)
+                activeTasks -= 1
+                if isSuccess(result) { successCount += 1 } else { failureCount += 1 }
+                let completed = results.count
+                logger.debug("Progress: \(completed)/\(total) complete")
+
+                if batchEpoch != epoch {
+                    logger.info("Batch \(kind, privacy: .public) cancelled during drain")
+                    group.cancelAll()
+                    throw CancellationError()
+                }
+            }
+
+            logger.info("Batch \(kind, privacy: .public) completed - Success: \(successCount), Failed: \(failureCount), Total: \(total)")
+            return results
         }
     }
 

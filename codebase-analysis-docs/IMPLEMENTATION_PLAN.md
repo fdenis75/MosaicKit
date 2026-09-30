@@ -130,7 +130,7 @@ Every PR updates its row here (status) and the matching §4.2 / §6.1 entries in
 | P-2 | done (found I-26) | #40 |
 | S-1 | done | #38 |
 | S-2 | done; benchmark gate passed (§8.1) | #41 |
-| S-3 | planned | |
+| S-3 | in review; waiting for the maintainer's A/B/A benchmark (§8.1) | (this PR) |
 | S-4 | planned | |
 | S-5 | planned | |
 | S-6 | planned | |
@@ -220,3 +220,6 @@ PR title.
 | A-18 | 2026-09-30 | S-2 | Add `MosaicCompositionPathTests`: `generate` and `generateMosaicImage` must give the same mosaic size, and `generateMosaicImage` must end with `.completed` | Two-way | `generateMosaicImage` had no test; this is the net for the shared path |
 | A-19 | 2026-09-30 | S-2 | ⚡ PRs are not merged on green CI alone (A-9): they wait for the maintainer's after-run of the benchmark on the baseline machine | Two-way | The performance gate needs the maintainer's machine; CI cannot measure throughput |
 | A-20 | 2026-09-30 | S-2 | Benchmark gate passed: no median regressed beyond noise (worst +2.8 %, mosaic-5120-M/auto, 0.12 s over 10 videos; S-2 changes no work). Future hot-path PRs use back-to-back A/B/A runs in one session and a ±5 % noise band, because day-to-day variance reached 14 % | Two-way | Different-day runs of identical code moved one scenario by −14 %, so a ±3 % band across sessions would be meaningless |
+| A-21 | 2026-09-30 | S-3 | One private generic `runBatch` inside each coordinator (not one helper shared across both actors). Each keeps its own limit rule (mosaic: a non-zero limit applies before the next dequeue; preview: `effectiveConcurrencyLimit` re-read before each dequeue and while waiting), priorities (`.medium`; preview composition `.utility`), `.queued` events and epoch checks. The child-task bodies move unchanged into `job` closures. Only logs and signposts change wording | Two-way | The coordinators differ in limit semantics and result types; one runner per actor keeps each exactly as it was and avoids cross-actor isolation plumbing |
+| A-22 | 2026-09-30 | S-3 / I-15 | Mosaic coordinator tracks tasks, handlers and sources per attempt. The public stored `activeTasks` becomes a read-only computed view keyed by video ID (one of the attempts when several run on one video) | Two-way | Actor properties can't be written from outside the actor, so every existing external use (reads) keeps working |
+| A-23 | 2026-09-30 | S-3 | Add `BatchRunnerTests`: a fake `MosaicGeneratorProtocol` generator that only sleeps checks the mosaic runner (limit, `.queued`, results, `cancelAllGenerations`) and I-15 in milliseconds; a composition-only preview batch checks the preview runner. The generator-level `setProgressHandler(for:)` stays keyed by video (noted in the I-15 row) | Two-way | The existing batch suites need a media folder and are skipped in CI, so the runners had no CI coverage |
