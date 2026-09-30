@@ -49,6 +49,7 @@ struct ExportStressTests {
                 .sorted { $0.path < $1.path }
             sources = []
             for file in files { sources.append(try await VideoInput(from: file)) }
+            try #require(!sources.isEmpty, "No mp4/mov/m4v files in MOSAICKIT_STRESS_SOURCE=\(folder)")
             print("ExportStress sources: \(sources.map { "\($0.url.lastPathComponent) \(Int($0.duration ?? 0))s \(Int($0.width ?? 0))x\(Int($0.height ?? 0))" })")
         }
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("ExportStress-\(UUID().uuidString)")
@@ -64,7 +65,11 @@ struct ExportStressTests {
                     group.addTask { await Self.runExport(source.withID(UUID()), root: root, label: "r\(round)e\(i)[\(source.url.lastPathComponent)]", stallLimit: stallLimit, stats: stats) }
                 }
                 for j in 0..<loadJobs {
-                    group.addTask { try? await Self.runLoad(base.withID(UUID()), root: root, index: j) }
+                    group.addTask {
+                        // A failed load job means less encoder load than intended: count it.
+                        do { try await Self.runLoad(base.withID(UUID()), root: root, index: j) }
+                        catch { stats.loadFailure("round \(round) load \(j): \(error)") }
+                    }
                 }
                 try await group.waitForAll()
             }
@@ -130,11 +135,16 @@ private final class LastProgress: Sendable {
 }
 
 private final class Stats: Sendable {
-    private let state = Mutex<(ok: Int, stalls: [String], failures: [String])>((0, [], []))
+    private let state = Mutex<(ok: Int, stalls: [String], failures: [String], loadFailures: [String])>((0, [], [], []))
     func success() { state.withLock { $0.ok += 1 } }
     func stall(_ s: String) { state.withLock { $0.stalls.append(s) } }
     func failure(_ s: String) { state.withLock { $0.failures.append(s) } }
+    func loadFailure(_ s: String) { state.withLock { $0.loadFailures.append(s) } }
     func wasStalled(_ label: String) -> Bool { state.withLock { $0.stalls.contains { $0.hasPrefix(label + " ") } } }
-    var summary: String { state.withLock { "ok \($0.ok), stalls \($0.stalls.count), other failures \($0.failures.count)" } }
-    var stallDetails: [String] { state.withLock { $0.stalls + $0.failures.map { "FAIL " + $0 } } }
+    var summary: String {
+        state.withLock { "ok \($0.ok), stalls \($0.stalls.count), other failures \($0.failures.count), load failures \($0.loadFailures.count)" }
+    }
+    var stallDetails: [String] {
+        state.withLock { $0.stalls + $0.failures.map { "FAIL " + $0 } + $0.loadFailures.map { "LOAD FAIL " + $0 } }
+    }
 }

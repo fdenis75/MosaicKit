@@ -2575,7 +2575,7 @@ P1 = core feature, P2 = supporting, P3 = docs/infra.
 | 56 | P1 | `Sources/Processing/Preview/ExportWatchdog.swift` | code | 139 | bbdf71b8 | Shared stall/cancel watchdog + outcome mapper for native, SJS and passthrough exports (S-4) |
 | 57 | P2 | `Tests/MosaicKitTests/ExportWatchdogTests.swift` | test | 164 | 1ddbd7ee | Watchdog stall/cancel/invalidate + outcome mapping order (S-4) |
 | 58 | P2 | `Tests/MosaicKitTests/ConfigurationInitializerTests.swift` | test | 90 | 2b40144c | Secondary/deprecated config initializers keep their values; 1080p default (S-5) |
-| 59 | P2 | `Tests/MosaicKitTests/ExportStressTests.swift` | test | 140 | 8b4dc2a6 | Opt-in export stress (`MOSAICKIT_STRESS`); found the I-26 cause |
+| 59 | P2 | `Tests/MosaicKitTests/ExportStressTests.swift` | test | 150 | 96d6633d | Opt-in export stress (`MOSAICKIT_STRESS`); found the I-26 cause |
 | 60 | P2 | `Tests/MosaicKitTests/ProcessScheduling.swift` | test | 37 | 28e45c57 | Test helper: detect/leave macOS background scheduling (I-26) |
 
 Excluded or low value: `Media.xcassets/**` (binary fixture), `Tests/MosaicKitTests/embeddedAsset/test_video.mp4`
