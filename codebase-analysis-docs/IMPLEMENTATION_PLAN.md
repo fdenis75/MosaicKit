@@ -129,7 +129,7 @@ Every PR updates its row here (status) and the matching §4.2 / §6.1 entries in
 | P-1 | done; baseline recorded 2026-09-30 (§8.1) | #39 |
 | P-2 | done (found I-26) | #40 |
 | S-1 | done | #38 |
-| S-2 | in review; waiting for the maintainer's after-run (§8.1) | (this PR) |
+| S-2 | done; benchmark gate passed (§8.1) | #41 |
 | S-3 | planned | |
 | S-4 | planned | |
 | S-5 | planned | |
@@ -149,8 +149,11 @@ Every PR updates its row here (status) and the matching §4.2 / §6.1 entries in
 Recorded by the maintainer on 2026-09-30 from `baseline/pre-s2-2026-09-26` (`main@60d1731`), with
 the P-1 command and default settings (3 timed runs after one warm-up, concurrency `1` and
 `auto`). Every ⚡ PR repeats the run **on the same machine and the same 10 videos** and pastes
-both tables into its description. Treat a median change within about ±3 % as noise: single
-runs vary by up to 9 % (mosaic-10000-XS at concurrency 1), but the medians are far steadier.
+both tables into its description. Runs on different days vary more than runs within one session:
+the S-2 after-run below makes identical calls but moved mosaic-10000-XS/auto by −14 %. So a
+single before/after pair only rules out large regressions. For a PR that really changes a hot
+path, run baseline and PR back to back in one session (A, B, A) and compare the medians of the
+same session; treat differences within about ±5 % as noise.
 
 Input: 10 videos, 15.6 min of source, 1677 MB.
 
@@ -167,6 +170,20 @@ Input: 10 videos, 15.6 min of source, 1677 MB.
 
 Peak RSS is the process peak so far, so it only grows down the table; compare it row by row
 with the same row of the other run.
+
+**S-2 after-run** (2026-09-30, same machine and videos, PR #41). No regression beyond noise;
+the refactor changes no work, so these deltas show day-to-day variance.
+
+| Scenario | Concurrency | Baseline median (s) | S-2 median (s) | Change | S-2 runs (s) |
+|---|---|---|---|---|---|
+| mosaic-5120-M | 1 | 7.09 | 7.12 | +0.4 % | 7.00, 7.12, 7.13 |
+| mosaic-5120-M | auto | 4.30 | 4.42 | +2.8 % | 4.42, 4.41, 4.46 |
+| mosaic-10000-XS | 1 | 23.61 | 22.36 | −5.3 % | 22.36, 22.00, 22.37 |
+| mosaic-10000-XS | auto | 18.24 | 15.73 | −13.8 % | 16.45, 15.73, 15.61 |
+| anim-gif-small | 1 | 10.59 | 10.71 | +1.1 % | 10.73, 10.61, 10.71 |
+| anim-gif-small | auto | 7.92 | 7.77 | −1.9 % | 7.85, 7.72, 7.77 |
+| anim-webp-small | 1 | 22.32 | 21.92 | −1.8 % | 21.92, 21.92, 22.14 |
+| anim-webp-small | auto | 19.80 | 19.51 | −1.5 % | 19.51, 19.52, 19.45 |
 
 ## 9. Decision log (autonomous work)
 
@@ -202,3 +219,4 @@ PR title.
 | A-17 | 2026-09-30 | S-2 | Two shared helpers instead of one `composeMosaic`: `planMosaic` (validation, `.countingThumbnails`/`.computingLayout`, layout, aspect-snapped config) and `composeMosaic` (header, stream, Metal, ColorDNA, watermark), because `generate()` branches to `.gifOnly` between the two. `exportAnimation` takes the destination URL (every site already computes it for its existence check) and always passes `config.overwrite` (the backfill site used a literal `false`, but it only runs when `config.overwrite` is false). Side effect: `generateMosaicImage` now also logs the debug "Generation plan" line | Two-way | Same calls in the same order, so no output or progress change; ~76 fewer lines |
 | A-18 | 2026-09-30 | S-2 | Add `MosaicCompositionPathTests`: `generate` and `generateMosaicImage` must give the same mosaic size, and `generateMosaicImage` must end with `.completed` | Two-way | `generateMosaicImage` had no test; this is the net for the shared path |
 | A-19 | 2026-09-30 | S-2 | ⚡ PRs are not merged on green CI alone (A-9): they wait for the maintainer's after-run of the benchmark on the baseline machine | Two-way | The performance gate needs the maintainer's machine; CI cannot measure throughput |
+| A-20 | 2026-09-30 | S-2 | Benchmark gate passed: no median regressed beyond noise (worst +2.8 %, mosaic-5120-M/auto, 0.12 s over 10 videos; S-2 changes no work). Future hot-path PRs use back-to-back A/B/A runs in one session and a ±5 % noise band, because day-to-day variance reached 14 % | Two-way | Different-day runs of identical code moved one scenario by −14 %, so a ±3 % band across sessions would be meaningless |
