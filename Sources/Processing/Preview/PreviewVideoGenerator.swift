@@ -37,6 +37,11 @@ final class ExportProgressTracker: Sendable {
     var secondsSinceLastProgress: TimeInterval {
         _state.withLock { Date().timeIntervalSince($0.time) }
     }
+
+    /// The last recorded progress value (0…1), or 0 before any was recorded.
+    var lastValue: Double {
+        _state.withLock { max($0.value, 0) }
+    }
 }
 
 /// Serializes callback delivery and prevents late exporter events after completion.
@@ -1186,18 +1191,10 @@ struct PreviewGenerationLogic {
             
             logger.info("SJS export: format=\(config.format.rawValue), q.uality=, audioBitrate=\(audioBitrate)")
 
-            // Stall detection: cancel if no progress for the timeout period.
-            // macOS doubles the budget because a backgrounded process can legitimately
-            // pause for >60 s before the ProcessInfo activity assertion resumes it.
-            #if os(macOS)
-            let stallTimeout: TimeInterval = 120
-            #else
-            let stallTimeout: TimeInterval = 60
-            #endif
+            // Stall detection: ExportWatchdog (S-4) cancels the export when progress stops.
             let progressTracker = ExportProgressTracker()
             progressTracker.recordProgress(0)
-            let stallDetected = CancellationToken()
-            
+
             // Start progress monitoring task
             let progressTask = Task {
                 for await progress in exporter.progressStream {
@@ -1251,77 +1248,52 @@ struct PreviewGenerationLogic {
                 }
             }
 
-            // Stall + cancellation monitor for SJS export
-            let stallMonitor = Task {
-                while !Task.isCancelled {
-                    if cancellationCheck() {
-                        logger.warning("Cancellation requested, cancelling SJS export")
-                        exportTask.cancel()
-                        break
-                    }
-                    let elapsed = progressTracker.secondsSinceLastProgress
-                    if elapsed >= stallTimeout {
-                        logger.error("SJS export stalled: no progress for \(Int(elapsed))s, cancelling")
-                        stallDetected.cancel()
-                        exportTask.cancel()
-                        progressTask.cancel()
-                        await progressTask.value
-                        break
-                    }
-                    try? await Task.sleep(nanoseconds: 1_000_000_000) // check every 1s
-                }
+            // Stall + cancellation watchdog (S-4). SJS has no cancelExport(): cancelling the
+            // stored export task is how the export is stopped.
+            let watchdog = ExportWatchdog(label: "SJS", progress: progressTracker,
+                                          isCancellationRequested: cancellationCheck) { reason in
+                exportTask.cancel()
+                if reason == .stalled { progressTask.cancel() }
             }
-            defer { stallMonitor.cancel() }
+            defer { watchdog.invalidate() }
 
+            var exportError: Error?
             do {
                 try await withTaskCancellationHandler {
                     try await exportTask.value
                 } onCancel: {
                     exportTask.cancel()
                 }
-
-                progressTask.cancel()
-                await progressTask.value
-
-                if stallDetected.isCancelled {
-                    try? FileManager.default.removeItem(at: outputURL)
-                    throw PreviewError.exportStalled(elapsedSeconds: Int(progressTracker.secondsSinceLastProgress))
-                }
-
-                if cancellationCheck() {
-                    try? FileManager.default.removeItem(at: outputURL)
-                    throw PreviewError.cancelled
-                }
-                
-                // Verify output file exists
-                guard FileManager.default.fileExists(atPath: outputURL.path) else {
-                    throw PreviewError.encodingFailed("Export completed but output file not found", nil)
-                }
-                
-                let fileSize = (try? FileManager.default.attributesOfItem(atPath: outputURL.path)[.size] as? Int64) ?? 0
-                logger.info("SJS export completed: \(outputURL.lastPathComponent) (\(String(format: "%.2f", Double(fileSize) / 1_048_576.0)) MB)")
-                
-                if cancellationCheck() { throw PreviewError.cancelled }
-                try transaction.commit()
-                return finalURL
-                
             } catch {
-                progressTask.cancel()
-                await progressTask.value
+                exportError = error
+            }
+            watchdog.invalidate()
+            progressTask.cancel()
+            await progressTask.value
+
+            if let failure = watchdog.failure(error: exportError, outputURL: outputURL,
+                                              failedMessage: "Export failed",
+                                              missingOutputMessage: "Export completed but output file not found") {
                 // Clean up partial output file on failure
                 try? FileManager.default.removeItem(at: outputURL)
-                if stallDetected.isCancelled {
-                    logger.error("SJS export stalled and was cancelled")
-                    throw PreviewError.exportStalled(elapsedSeconds: Int(progressTracker.secondsSinceLastProgress))
+                switch failure {
+                case .exportStalled: logger.error("SJS export stalled and was cancelled")
+                case .cancelled: logger.info("SJS export cancelled")
+                default:
+                    if let exportError {
+                        logger.error("SJS export failed: \(exportError.localizedDescription)")
+                        progressHandler(1.0, .failed, nil, exportError.localizedDescription)
+                    }
                 }
-                if error is CancellationError || cancellationCheck() {
-                    logger.info("SJS export cancelled")
-                    throw PreviewError.cancelled
-                }
-                logger.error("SJS export failed: \(error.localizedDescription)")
-                progressHandler(1.0, .failed, nil, error.localizedDescription)
-                throw PreviewError.encodingFailed("Export failed", error)
+                throw failure
             }
+
+            let fileSize = (try? FileManager.default.attributesOfItem(atPath: outputURL.path)[.size] as? Int64) ?? 0
+            logger.info("SJS export completed: \(outputURL.lastPathComponent) (\(String(format: "%.2f", Double(fileSize) / 1_048_576.0)) MB)")
+
+            if cancellationCheck() { throw PreviewError.cancelled }
+            try transaction.commit()
+            return finalURL
         }
     
         
@@ -1507,14 +1479,7 @@ struct PreviewGenerationLogic {
             exportSession.audioMix = mix
         }
 
-        // Stall detection: cancel if no progress for the timeout period.
-        // macOS doubles the budget because a backgrounded process can legitimately
-        // pause for >60 s before the ProcessInfo activity assertion resumes it.
-        #if os(macOS)
-        let stallTimeout: TimeInterval = 120
-        #else
-        let stallTimeout: TimeInterval = 60
-        #endif
+        // Stall detection: ExportWatchdog (S-4) cancels the export when progress stops.
         let progressTracker = ExportProgressTracker()
         progressTracker.recordProgress(0)
 
@@ -1541,59 +1506,31 @@ struct PreviewGenerationLogic {
 
         if cancellationCheck() { throw PreviewError.cancelled }
 
-        // Cancellation + stall monitoring
-        let stallDetected = CancellationToken()
-        let cancellationMonitor = Task {
-            while !Task.isCancelled {
-                if cancellationCheck() {
-                    logger.warning("Cancellation requested, cancelling export")
-                    exportSession.cancelExport()
-                    return
-                }
-                let elapsed = progressTracker.secondsSinceLastProgress
-                if elapsed >= stallTimeout {
-                    logger.error("Export stalled: no progress for \(Int(elapsed))s, cancelling")
-                    stallDetected.cancel()
-                    exportSession.cancelExport()
-                    return
-                }
-                try? await Task.sleep(nanoseconds: 1_000_000_000) // check every 1s
-            }
+        // Cancellation + stall watchdog (S-4)
+        nonisolated(unsafe) let sessionRef = exportSession
+        let watchdog = ExportWatchdog(label: "native", progress: progressTracker,
+                                      isCancellationRequested: cancellationCheck) { _ in
+            sessionRef.cancelExport()
         }
-        defer { cancellationMonitor.cancel() }
+        defer { watchdog.invalidate() }
 
         // Perform the export — detached at userInitiated priority so the export is
         // not deprioritized when the calling process goes to the background.
+        var exportError: Error?
         do {
-            nonisolated(unsafe) let sessionRef = exportSession
             try await Task.detached(priority: .userInitiated) {
                 try await sessionRef.export(to: outputURL, as: config.format.avFileType)
             }.value
         } catch {
-            if stallDetected.isCancelled {
-                try? FileManager.default.removeItem(at: outputURL)
-                throw PreviewError.exportStalled(elapsedSeconds: Int(progressTracker.secondsSinceLastProgress))
-            }
-            if cancellationCheck() {
-                try? FileManager.default.removeItem(at: outputURL)
-                throw PreviewError.cancelled
-            }
-            try? FileManager.default.removeItem(at: outputURL)
-            throw PreviewError.encodingFailed("Export failed", error)
+            exportError = error
         }
+        watchdog.invalidate()
 
-        if stallDetected.isCancelled {
+        if let failure = watchdog.failure(error: exportError, outputURL: outputURL,
+                                          failedMessage: "Export failed",
+                                          missingOutputMessage: "Export completed but output file not found") {
             try? FileManager.default.removeItem(at: outputURL)
-            throw PreviewError.exportStalled(elapsedSeconds: Int(progressTracker.secondsSinceLastProgress))
-        }
-
-        if cancellationCheck() {
-            try? FileManager.default.removeItem(at: outputURL)
-            throw PreviewError.cancelled
-        }
-
-        guard FileManager.default.fileExists(atPath: outputURL.path) else {
-            throw PreviewError.encodingFailed("Export completed but output file not found", nil)
+            throw failure
         }
 
         let fileSize = (try? FileManager.default.attributesOfItem(atPath: outputURL.path)[.size] as? Int64) ?? 0

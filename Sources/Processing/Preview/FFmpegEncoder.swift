@@ -209,10 +209,8 @@ enum FFmpegEncoder {
         // videoComposition is intentionally NOT set: applying it would force re-encoding,
         // defeating the purpose of a passthrough export.
 
-        let stallTimeout: TimeInterval = 120
         let progressTracker = ExportProgressTracker()
         progressTracker.recordProgress(0)
-        let stallDetected = CancellationToken()
 
         let progressMonitor = Task {
             for await state in exportSession.states(updateInterval: 3) {
@@ -229,45 +227,29 @@ enum FFmpegEncoder {
         }
         defer { progressMonitor.cancel() }
 
-        let stallMonitor = Task {
-            while !Task.isCancelled {
-                if cancellationCheck() { exportSession.cancelExport(); return }
-                let elapsed = progressTracker.secondsSinceLastProgress
-                if elapsed >= stallTimeout {
-                    logger.error("Passthrough export stalled (\(Int(elapsed))s), cancelling")
-                    stallDetected.cancel()
-                    exportSession.cancelExport()
-                    return
-                }
-                try? await Task.sleep(nanoseconds: 1_000_000_000)
-            }
+        // Stall + cancellation watchdog (S-4)
+        nonisolated(unsafe) let sessionRef = exportSession
+        let watchdog = ExportWatchdog(label: "passthrough", progress: progressTracker,
+                                      isCancellationRequested: cancellationCheck) { _ in
+            sessionRef.cancelExport()
         }
-        defer { stallMonitor.cancel() }
+        defer { watchdog.invalidate() }
 
+        var exportError: Error?
         do {
-            nonisolated(unsafe) let sessionRef = exportSession
             try await Task.detached(priority: .userInitiated) {
                 try await sessionRef.export(to: outputURL, as: .mov)
             }.value
         } catch {
-            try? FileManager.default.removeItem(at: outputURL)
-            if stallDetected.isCancelled {
-                throw PreviewError.exportStalled(elapsedSeconds: Int(progressTracker.secondsSinceLastProgress))
-            }
-            if cancellationCheck() { throw PreviewError.cancelled }
-            throw PreviewError.encodingFailed("Passthrough export failed", error)
+            exportError = error
         }
+        watchdog.invalidate()
 
-        if stallDetected.isCancelled {
+        if let failure = watchdog.failure(error: exportError, outputURL: outputURL,
+                                          failedMessage: "Passthrough export failed",
+                                          missingOutputMessage: "Passthrough export produced no output file") {
             try? FileManager.default.removeItem(at: outputURL)
-            throw PreviewError.exportStalled(elapsedSeconds: Int(progressTracker.secondsSinceLastProgress))
-        }
-        if cancellationCheck() {
-            try? FileManager.default.removeItem(at: outputURL)
-            throw PreviewError.cancelled
-        }
-        guard FileManager.default.fileExists(atPath: outputURL.path) else {
-            throw PreviewError.encodingFailed("Passthrough export produced no output file", nil)
+            throw failure
         }
         progressHandler(1.0, "Passthrough complete")
         logger.debug("Passthrough export finished: \(outputURL.lastPathComponent)")
