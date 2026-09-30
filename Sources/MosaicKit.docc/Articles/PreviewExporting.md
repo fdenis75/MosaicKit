@@ -55,7 +55,7 @@ macOS aggressively reduces CPU and GPU usage for apps whose windows are hidden, 
 * While MosaicKit automatically requests `.userInitiated` `ProcessInfo` activity tokens, this does **not** override window occlusion suspensions for Core Animation. The export will stall.
 
 ### macOS Background Scheduling
-When macOS runs a process under background scheduling (throttled CPU and I/O; what `taskpolicy -b` applies), `AVAssetExportSession` can stop progressing mid-encode for minutes while still reporting it is exporting. The whole process is throttled, so several concurrent exports freeze together.
+When macOS runs a process under background scheduling (throttled CPU and I/O; what `taskpolicy -b` applies) or caps its quality of service at background (`taskpolicy -c background`), `AVAssetExportSession` can stop progressing mid-encode for minutes while still reporting it is exporting. The whole process is throttled, so several concurrent exports freeze together.
 
 Measured with MosaicKit's opt-in `ExportStressTests` on an Apple silicon Mac:
 
@@ -64,6 +64,7 @@ Measured with MosaicKit's opt-in `ExportStressTests` on an Apple silicon Mac:
 | Normal | 640 (including 4K drone footage, 10 at once) | 0 |
 | Background (`taskpolicy -b`) | 60 | 6 |
 | Background, after the process moved itself back to normal scheduling | 60 | 0 |
+| Background QoS cap (`taskpolicy -c background`) | 60 | 7 |
 
 The `.userInitiated` activity token does not prevent this. The stall detector below catches it; the export succeeds once the process is back at normal priority, so run long exports while your app is active.
 
