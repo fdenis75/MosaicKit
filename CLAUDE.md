@@ -294,6 +294,8 @@ MOSAICKIT_SUITE_MODE=none swift test                    # CI mode: skip extended
   `MOSAICKIT_BENCHMARK=/path/to/videos swift test -c release --filter BenchmarkTests`.
   Optional: `MOSAICKIT_BENCHMARK_RUNS` (default 3), `MOSAICKIT_BENCHMARK_CONCURRENCY`
   (default `1,0`), `MOSAICKIT_BENCHMARK_JSON` (write results as JSON).
+  The baseline and the noise guidance are in the plan's §8.1 (day-to-day variance reaches 14 %,
+  so compare back-to-back runs from one session for hot-path changes).
 
 - **Location:** tests live in `Tests/MosaicKitTests/`. Fixtures in `embeddedAsset/` are loaded
   with `Bundle.module`:

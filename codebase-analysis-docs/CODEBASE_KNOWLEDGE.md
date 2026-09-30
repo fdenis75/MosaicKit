@@ -289,7 +289,7 @@ work as the package stands. The files in `Examples/` are reference snippets only
 │   ├── VideoInputScanner.swift        scanVideos / discoverVideoSources / discoverVideos
 │   └── MosaicKit.docc/                DocC catalog (8 articles)
 ├── SourcesWebP/MosaicKitWebP.swift    → target "MosaicKitWebP" (DefaultMosaicKitWebPEncoder + register())
-├── Tests/MosaicKitTests/              Swift Testing suites (23 files) + embeddedAsset/ (test_video.mp4, rotated_portrait.mp4, pinned config JSON)
+├── Tests/MosaicKitTests/              Swift Testing suites (24 files) + embeddedAsset/ (test_video.mp4, rotated_portrait.mp4, pinned config JSON)
 ├── Examples/                          5 illustrative .swift files (NOT wired as SPM targets)
 ├── Media.xcassets/                    test_video dataset (same fixture, for Xcode)
 ├── .github/workflows/                 swift.yml (macOS + iOS Simulator CI), claude*.yml
@@ -451,7 +451,7 @@ register:
 2. **Mosaic output-dimension limit.** `MetalMosaicGenerator` rejects `config.width > 16_384`
    inside generation (not in `validate()`) and videos shorter than 5 s, both as
    `MosaicError.invalidVideo`.
-   [[F:Sources/Processing/MetalMosaicGenerator.swift#165-170#7e2dd6b8]]
+   [[F:Sources/Processing/MetalMosaicGenerator.swift#320-323#8f2055d8]]
 3. **Preview skip-if-exists never matches in default naming mode.** With `fullPathInName ==
    false` and no `filenameTemplate`, `PreviewConfiguration.generateFilename` embeds a
    run-time timestamp (`yyyy-MM-dd_HH-mm-ss`). As a result, `overwrite == false` never finds an
@@ -626,7 +626,10 @@ Full sequence including the coordinator: `codebase-analysis-docs/assets/mosaic-s
 #### Stage-by-stage table
 
 The stage body is `MetalMosaicGenerator.generate`
-[[F:Sources/Processing/MetalMosaicGenerator.swift#97-358#7e2dd6b8]].
+[[F:Sources/Processing/MetalMosaicGenerator.swift#97-235#8f2055d8]]. Since S-2, stages 2–5 run in
+`planMosaic`, stages 6–12 in `composeMosaic` and stage 14 in `exportAnimation`
+[[F:Sources/Processing/MetalMosaicGenerator.swift#298-441#8f2055d8]]. `generateMosaicImage` calls
+the same `planMosaic` + `composeMosaic`, so both entry points compose the same image.
 
 | # | Stage | Code | Runs on | Key facts |
 |---|---|---|---|---|
@@ -635,7 +638,7 @@ The stage body is `MetalMosaicGenerator.generate`
 | 2 | Duration / AR | inside `generate` | generator actor | Uses `video.duration` if known, else loads it. Rejects `< 5 s`, `width > 16 384`, and non-finite dimensions. Aspect ratio = `video.width / video.height`. `preferredTransform` is **not** applied, so rotated sources use raw dimensions. |
 | 3 | Thumbnail count | `LayoutProcessor.calculateThumbnailCount` [[F:Sources/Processing/LayoutProcessor.swift#577-607#43311084]] | generator actor | `count = clamp((width/200 + 10·ln(duration)) × density.factor, 4, 800)`. `.auto` uses the largest screen instead: `(screenW / (160·scale)) × (screenH / (160·scale / videoAR))`, capped at 800. |
 | 4 | Layout | `LayoutProcessor.calculateLayout` [[F:Sources/Processing/LayoutProcessor.swift#72-134#43311084]] | generator actor (under `NSRecursiveLock`) | Cache key: `aspectRatio-originalAR-count-width-density-layoutType`. `.auto` is never cached. Invalid input returns an **empty** layout, which later throws "Empty mosaic layout". `.iphone` forces width 1200, 1 column, max height 8000. |
-| 5 | Aspect normalization | `mutableConfig.updateAspectRatio(AspectRatio.findNearest(to: layout.mosaicSize))` | generator actor | The config passed down may carry a **different** `layout.aspectRatio` than the caller set. Path/filename generation still uses the caller's original `config`. |
+| 5 | Aspect normalization | `planMosaic`: `adjustedConfig.updateAspectRatio(AspectRatio.findNearest(to: layout.mosaicSize))` | generator actor | The config passed down may carry a **different** `layout.aspectRatio` than the caller set. Path/filename generation still uses the caller's original `config`. |
 | 6 | Header | `ThumbnailProcessor.createMetadataHeader` | generator actor (synchronous CPU) | Only when `includeMetadata`. Height is added on top of the layout height. |
 | 7 | Frame extraction | `ThumbnailProcessor.processedFramesStream` [[F:Sources/Processing/ThumbnailProcessor.swift#138-190#49eec98a]] | producer `Task` on the global executor | One `AVAssetImageGenerator` with the batched `images(for:)` API. `maximumSize` = largest cell × `decodeQualityScale` (1). Tolerance ±1 s, or 0 when `useAccurateTimestamps`. Sampling: first 20 % of frames in the first 33 % of the 5–95 % window, 60 % in the middle, 20 % in the last third [[F:Sources/Processing/ThumbnailProcessor.swift#501-534#49eec98a]]. Any `.failure` throws: mosaics are strict (**no placeholder frames**). |
 | 8 | Labeling + color sampling | same | child tasks, **≤ 8 in flight** | Each frame is labeled (`addTimestampToImage`). If Color DNA is on, `OverlayProcessor.averageColor` goes into `FrameColorCollector`. Results are yielded **out of order**; the index travels with each frame. |
@@ -643,8 +646,8 @@ The stage body is `MetalMosaicGenerator.generate`
 | 10 | Compositing | `generateMosaicStream` [[F:Sources/Processing/MetalImageProcessor.swift#863-997#ead31817]], `processBatch` @L999, `renderFrame` @L1076 | nonisolated async | One setup command buffer (fill + header), awaited. Frames are then rendered in **20-frame command buffers**, committed without waiting. Each frame: `createTexture(from: CGImage)`, `scaleTexture` if the size differs, `compositeTexture`, optional `addBorder`. The shadow path draws a CPU `CGContext` shadow and composites that. Duplicate or out-of-range indices throw. **All** positions must be filled, or it throws "Missing mosaic frames". |
 | 11 | GPU sync + readback | `synchronizeGPU` @L1057, `createCGImage(from:)` | nonisolated | An empty barrier command buffer is committed last and awaited. GPU errors from completion handlers are collected in `CommandBufferErrorState` and rethrown as `MetalProcessorError.commandBufferExecutionFailed`. |
 | 12 | Post overlays | `OverlayProcessor.applyColorDNA`, `applyWatermark` | generator actor (synchronous CPU) | Returns a new `CGImage`. A `nil` result (failure) silently keeps the previous image. |
-| 13 | Encode + commit | `saveMosaic` [[F:Sources/Processing/MetalMosaicGenerator.swift#599-708#7e2dd6b8]] | generator actor (synchronous CPU) | Output path = `generateOutputDirectory` + `generateFilename`. Encodes with `CGImageDestination` (HEIF embeds a thumbnail, `HasAlpha = false`), or the injected WebP encoder, into the staging file. Then `OutputTransaction.commit()`. |
-| 14 | Animation | `extractFramesForGif` + `AnimatedGifGenerator.save` | generator actor → global | This is a **second, full decode pass** with a separate generator: `.large` caps at 1280×720, `.small` at 960×540. Missing frames are skipped and then checked by count, so any missing frame throws. `frameDelay = 1 / gifFps`. |
+| 13 | Encode + commit | `saveMosaic` [[F:Sources/Processing/MetalMosaicGenerator.swift#523-632#8f2055d8]] | generator actor (synchronous CPU) | Output path = `generateOutputDirectory` + `generateFilename`. Encodes with `CGImageDestination` (HEIF embeds a thumbnail, `HasAlpha = false`), or the injected WebP encoder, into the staging file. Then `OutputTransaction.commit()`. |
+| 14 | Animation | `exportAnimation` (`extractFramesForGif` + `AnimatedGifGenerator.save`), shared by the `.gifOnly`, `.withMosaic` and skip-if-exists backfill sites | generator actor → global | This is a **second, full decode pass** with a separate generator: `.large` caps at 1280×720, `.small` at 960×540. Missing frames are skipped and then checked by count, so any missing frame throws. `frameDelay = 1 / gifFps`. |
 
 **Progress reported to handlers** (`MosaicGenerationProgress.progress`):
 
@@ -958,7 +961,7 @@ graph LR
     (`.process("Shaders")`), and `Bundle.module` locates `default.metallib`.
   - The test target embeds `embeddedAsset/test_video.mp4` (87 s, 8-bit H.264 High, 720p, video-only).
 - **Tests:**
-  - Swift Testing, 23 files. `CombinationTests` and `PreviewCombinationTests` are `.serialized`.
+  - Swift Testing, 24 files. `CombinationTests` and `PreviewCombinationTests` are `.serialized`.
   - Suites that need a media folder read `MOSAICKIT_SUITE_MODE` (`single` | `folder` | `none`;
     unrecognized values → `single`, missing → `none`) and skip in `none`.
   - `BenchmarkTests` (plan P-1, #39) is an opt-in throughput benchmark, enabled only by
@@ -1124,6 +1127,8 @@ backbone. Read `LayoutProcessor` algorithms, `ThumbnailProcessor` header/label r
 - **Entry points:**
   - `MetalMosaicGenerator.generate(for:config:forIphone:) → URL`.
   - `generateMosaicImage(…) → CGImage` (in memory; no skip-if-exists, no file, no animation).
+    It shares `planMosaic` + `composeMosaic` with `generate` (S-2); `MosaicCompositionPathTests`
+    checks that both give a mosaic of the same size.
   - `generateallcombinations(for:config:) → [URL]` (21 files: widths {2000, 5000, 10000} × 7
     densities, HEIF q0.4. It **ignores** the caller's config except as a type witness.)
   - `cancel(for:)`, `cancelAll()`, `setProgressHandler(for:handler:)`,
@@ -1834,7 +1839,7 @@ budgets, because throughput depends on the hardware.
 
 | Rule / constant | Value | Location |
 |---|---|---|
-| Minimum video duration for a mosaic | 5 s | `MetalMosaicGenerator.generate` / `performMosaicImageGeneration` |
+| Minimum video duration for a mosaic | 5 s | `MetalMosaicGenerator.planMosaic` (shared by `generate` and `generateMosaicImage`) |
 | Maximum mosaic width / texture side | 16,384 px | generator guard; `validateTextureSize`; `LayoutProcessor` guards |
 | Mosaic frame count | `clamp((w/200 + 10·ln d) × factor, 4, 800)`; 4 if d < 5 s | `LayoutProcessor.calculateThumbnailCount` |
 | Frame sampling window & weights | 5 %–95 % of duration; 20 % / 60 % / 20 % over thirds | `ThumbnailProcessor.calculateExtractionTimes` (+ preview copy) |
@@ -2497,7 +2502,7 @@ P1 = core feature, P2 = supporting, P3 = docs/infra.
 | # | Pri | Path | Type | Lines | Hash8 | Notes |
 |---|---|---|---|---|---|---|
 | 1 | P0 | `Package.swift` | config | 61 | 721e2854 | Products, targets, deps, platforms |
-| 2 | P0 | `Sources/Processing/MetalMosaicGenerator.swift` | code | 721 | 7e2dd6b8 | Mosaic entry actor; pipeline orchestration; `saveMosaic` @L599 |
+| 2 | P0 | `Sources/Processing/MetalMosaicGenerator.swift` | code | 645 | 8f2055d8 | Mosaic entry actor; pipeline orchestration; shared `planMosaic`/`composeMosaic`/`exportAnimation` @L298; `saveMosaic` @L523 |
 | 3 | P0 | `Sources/Processing/MosaicGeneratorProtocol.swift` | code | 55 | 6997a51a | Actor protocol |
 | 4 | P0 | `Sources/Processing/MosaicGeneratorCoordinator.swift` | code | 811 | 29e05ad2 | Batch actor, progress/result/status types, factory funcs @L796/804 |
 | 5 | P0 | `Sources/Processing/Preview/PreviewVideoGenerator.swift` | code | 1609 | 5c3c660f | Preview actor + `PreviewGenerationLogic` (compose @L599, export paths @L1088/1110/1453) |
@@ -2549,6 +2554,7 @@ P1 = core feature, P2 = supporting, P3 = docs/infra.
 | 51 | P2 | `Tests/MosaicKitTests/LegacyConfigurationDecodingTests.swift` | test | 166 | 2806c7d5 | Pinned 1.3.2, 1.7.0 + minimal config payloads (I-24 guard) |
 | 52 | P2 | `Tests/MosaicKitTests/RotatedSourceTests.swift` | test | 57 | ecc0463c | Rotated portrait fixture; I-1 known issue |
 | 53 | P2 | `Tests/MosaicKitTests/PreviewExportSmokeTests.swift` | test | 88 | feebfa3e | Only end-to-end preview export in CI (native) |
+| 54 | P2 | `Tests/MosaicKitTests/MosaicCompositionPathTests.swift` | test | 62 | c8ec289f | `generate` vs `generateMosaicImage` equivalence (S-2) |
 
 Excluded or low value: `Media.xcassets/**` (binary fixture), `Tests/MosaicKitTests/embeddedAsset/test_video.mp4`
 (87 s 8-bit H.264 video-only fixture), `scripts/**` + `Makefile` (xcodebuild agent scaffold for a
@@ -2573,7 +2579,7 @@ RELATED PRs (merged): #32 this doc (+README unreleased note); #33 iOS CI scheme 
              #34 ffmpeg watchdog (I-16); #35 review path filter; #36 fast animated tests;
              #31 closed (duplicate of #33). Open: #37 CLAUDE.md/AGENTS.md rewrite + this refresh
 
-FILE_MAP_SUMMARY: Appendix A (53 files; P0 = 8, P1 = 15)
+FILE_MAP_SUMMARY: Appendix A (54 files; P0 = 8, P1 = 15)
 ISSUE REGISTER:   §4.2 I-1 … I-26   (High: I-1, I-2; Medium: I-3 I-4 I-8 I-12 I-16 I-20 I-22 I-24 I-26)
 ROADMAP:          §6.1 → IMPLEMENTATION_PLAN.md (decisions §6.4)
 OPEN_QUESTIONS:   §6.2 (Q11 Q13 Q14 Q16 Q17)
