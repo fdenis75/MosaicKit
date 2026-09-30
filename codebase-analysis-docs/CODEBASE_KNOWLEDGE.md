@@ -63,8 +63,8 @@ AVAssetExportSession, SJS, or an external ffmpeg for encoding.
 | Medium | **I-16** slow ffmpeg cancellation (fix in #34) |
 | Medium | **I-20** `.nochange` animation holds all frames in memory |
 | Medium | **I-22** 10-bit H.264 is undecodable on iOS (fixture fixed in #33) |
-| Medium | **I-24** strict `MosaicConfiguration` decoding breaks older saved configs |
-| Medium | **I-26** native preview export can stall intermittently (seen once in macOS CI; cause unknown) |
+| Medium | ~~**I-24** strict `MosaicConfiguration` decoding breaks older saved configs~~ (fixed in S-5) |
+| Medium | **I-26** native preview export can stall mid-encode (AVAssetExportSession stops progressing; seen 3 times, cause unknown) |
 
 **Most valuable platform addition:** iOS/macOS 27
 `AVAssetExportSession.configureForResumableExport()`, which lets interrupted preview exports
@@ -289,7 +289,7 @@ work as the package stands. The files in `Examples/` are reference snippets only
 │   ├── VideoInputScanner.swift        scanVideos / discoverVideoSources / discoverVideos
 │   └── MosaicKit.docc/                DocC catalog (8 articles)
 ├── SourcesWebP/MosaicKitWebP.swift    → target "MosaicKitWebP" (DefaultMosaicKitWebPEncoder + register())
-├── Tests/MosaicKitTests/              Swift Testing suites (26 files) + embeddedAsset/ (test_video.mp4, rotated_portrait.mp4, pinned config JSON)
+├── Tests/MosaicKitTests/              Swift Testing suites (27 files) + embeddedAsset/ (test_video.mp4, rotated_portrait.mp4, pinned config JSON)
 ├── Examples/                          5 illustrative .swift files (NOT wired as SPM targets)
 ├── Media.xcassets/                    test_video dataset (same fixture, for Xcode)
 ├── .github/workflows/                 swift.yml (macOS + iOS Simulator CI), claude*.yml
@@ -456,14 +456,16 @@ register:
    false` and no `filenameTemplate`, `PreviewConfiguration.generateFilename` embeds a
    run-time timestamp (`yyyy-MM-dd_HH-mm-ss`). As a result, `overwrite == false` never finds an
    existing file, and each run writes a new preview.
-   [[F:Sources/Models/PreviewConfiguration.swift#517-565#cfcba13c]]
+   [[F:Sources/Models/PreviewConfiguration.swift#503-551#ad2e0ffe]]
 4. **Preview max-resolution default mismatch.** `_exportMaxResolutionRaw` defaults to `"1080p"`
    (the declaration, the decoder fallback, and the `init(…maxResolution:)` fallback all agree).
-   Comments in two initializers say "defaults to 4K", and the README says 4K.
+   Comments in two initializers say "defaults to 4K", and the README says 4K. *(Fixed in S-5:
+   one `defaultExportMaxResolutionRaw` constant, the comment and README corrected, I-13.)*
 5. **`MosaicConfiguration` decoding is strict.** `gifMode`, `gifSize`, `animatedFormat`,
    `gifFps`, `overwrite`, and the other fields use `decode`, not `decodeIfPresent`. Only
    `createOutputSubdirectory` and the two templates are tolerant. Configs persisted before those
-   fields existed will fail to decode.
+   fields existed will fail to decode. *(Fixed in S-5: every key added after 1.0 falls back to
+   a default; pinned 1.0.0 and 1.3.2 payloads decode, I-24.)*
 6. **`generateallcombinations` ignores most of the caller's config.** It builds fresh HEIF
    configs (quality 0.4, default layout, metadata on, accurate timestamps) and does not use
    the caller's `outputdirectory`, overlay, or templates.
@@ -968,7 +970,7 @@ graph LR
     (`.process("Shaders")`), and `Bundle.module` locates `default.metallib`.
   - The test target embeds `embeddedAsset/test_video.mp4` (87 s, 8-bit H.264 High, 720p, video-only).
 - **Tests:**
-  - Swift Testing, 26 files. `CombinationTests` and `PreviewCombinationTests` are `.serialized`.
+  - Swift Testing, 27 files. `CombinationTests` and `PreviewCombinationTests` are `.serialized`.
   - Suites that need a media folder read `MOSAICKIT_SUITE_MODE` (`single` | `folder` | `none`;
     unrecognized values → `single`, missing → `none`) and skip in `none`.
   - `BenchmarkTests` (plan P-1, #39) is an opt-in throughput benchmark, enabled only by
@@ -1768,7 +1770,7 @@ robustness, performance, or cosmetic.
 | I-10 | F5 | **`MetadataField.colorPalette` never renders.** | Confirmed (static) | Low | The generator never passes `swatchColors` to `createMetadataHeader` | Compute swatches from the dominant colors (already computed for the background) and pass them in. This requires generating the header **after** the first frames. |
 | I-11 | F12 | **The `{aspectRatio}` template token inserts `:`** into paths. | Confirmed (static) | Low–Medium | `layout.aspectRatio.rawValue` ("16:9") is used verbatim; `configurationHash` already replaces `:` with `-` | Use the hash-style `16-9` in templates. **Decision D5 → plan F-3.** |
 | I-12 | F8 | **Preview skip-if-exists never matches** with default naming (run timestamp in the filename). | Confirmed (static) | Medium | `PreviewConfiguration.generateFilename` | Drop the run timestamp from the default name (it could be a `{time}` token instead). This is a naming change (rule 4). **Decision D2 → plan F-3.** |
-| I-13 | F8 | Default `exportMaxResolution` is **1080p**; the README (1.6.2) and code comments say 4K. | Confirmed (static) | Low | `_exportMaxResolutionRaw = "1080p"` in three places | Decide the intended default and align code and docs. **Decision D3 (keep 1080p) → plan S-5.** |
+| I-13 | F8 | Default `exportMaxResolution` is **1080p**; the README (1.6.2) and code comments say 4K. | **Fixed (S-5)**: one `defaultExportMaxResolutionRaw` constant (property default, macOS 26 init, decoder); the stale "4K" comment is gone and the README 1.6.2 note carries a correction | Low | `PreviewConfiguration.defaultExportMaxResolutionRaw` | Decision D3 (keep 1080p). **Test:** `ConfigurationInitializerTests` checks the 1080p default. |
 | I-14 | F11 | **A `GenerationJobController` job cancelled before it runs is stuck in `.cancelling`** and cannot be retried. Records never freed; no tests. | Confirmed (static) | Low–Medium | `cancel` sets `.cancelling`; only `value(for:)` moves it to `.cancelled` | In `cancel`, if `task == nil`, go directly to `.cancelled`. Add `remove(_:)`. Add tests. **Decision D1: deprecate `GenerationJobController` (won't fix) → plan S-6.** |
 | I-15 | F10 | **Mosaic coordinator keys state by `video.id`.** Concurrent jobs on the same input clobber each other's cancellation and progress. | **Fixed (S-3)**: tasks, handlers and sources keyed per attempt; `activeTasks` is a read-only view by video ID. **Test:** `BatchRunnerTests` "Cancelling a video cancels every concurrent attempt on it" | Low | `attemptTasks[attemptID]`, `attemptSources`, `progressHandlers[attemptID]` | The generator's own `setProgressHandler(for:)` is still keyed by video; two concurrent attempts on one video can swap per-stage progress handlers there (cancellation is unaffected). |
 | I-16 | F3/F9 | **Slow ffmpeg cancellation under load** (16–20 s instead of ~4 s). This makes `ffmpegCancellationKillsUncooperativeProcess` fail intermittently in CI. | **Fixed (PR #34, merged)** | Medium | CI logs on PR #32/#33; the watchdog is a `Task` that polls every 2 s and escalates with `Task.sleep` | **Fixed in PR #34**: `DispatchSourceTimer` watchdog on a dedicated queue plus termination from `onCancel`. macOS CI is green, including this test. The native/SJS/passthrough watchdogs moved to the same `DispatchSourceTimer` approach in S-4 (`ExportWatchdog`). |
@@ -1779,9 +1781,9 @@ robustness, performance, or cosmetic.
 | I-21 | CI | iOS job used a scheme with no test action; the tests never compiled for iOS. | **Fixed (PR #33, merged)**; #31 closed as duplicate | — | CI logs | Scheme `MosaicKit-Package` + `URL.homeDirectory` in `CombinationTests` + `TEST_RUNNER_` suite-mode forwarding |
 | I-22 | F2/F3/F6/F8 + CI | **10-bit H.264 ("High 10") sources cannot be decoded on iOS.** Mosaic and animation jobs fail entirely because extraction is strict. The embedded test fixture is itself High 10, so the 10 embedded-media tests fail on the iOS Simulator (178 run, 10 fail). | Confirmed (fixture `avcC`: `profile_idc 110`, 10-bit luma/chroma; CI: VideoToolbox `err=-8969` on every frame) | Medium (iOS) | CI run on PR #33 @ 85c6d5e; local `avcC` parse | CI: **fixture re-encoded to 8-bit H.264 High in PR #33 (merged)**. Product (still open): detect unsupported codec/bit depth at inspection (`formatDescriptions`) and fail fast with a clear `VideoError`/`MosaicError`, or fall back to a software path. |
 | I-23 | Deps / logging | `swift-log` is declared in `Package.swift` but never imported. The OSLog subsystem is `com.mosaicKit` in most files but `com.mosaickit` in the preview files, which splits Console filtering. | **Fixed (S-1, #38)**: dependency removed; subsystem unified on `com.mosaicKit`. The stale `swift-log` pin left in `Package.resolved` was dropped in #44 | Low | `grep` finds no `import Logging`; `Logger(subsystem:)` strings | Remove the dependency (or adopt it). Unify the subsystem string. Fix the CLAUDE.md logging guidance. |
-| I-24 | Codable | `MosaicConfiguration.init(from:)` requires most keys (`decode`), so configs persisted by older versions fail to decode when a field is added. | Confirmed (static) | Medium (upgrade risk) | `MosaicConfiguration.swift` decoder | Use `decodeIfPresent ?? default` for every key added after 1.0 (rule 2). Add a decode-old-payload test per new field. **Test:** `LegacyConfigurationDecodingTests` (P-2) decodes pinned 1.7.0 and minimal payloads, plus a 1.3.2 payload (pre-`gifFps`) that fails today and is wrapped in `withKnownIssue` until S-5; never edit those fixtures to make it pass. |
+| I-24 | Codable | `MosaicConfiguration.init(from:)` required most keys (`decode`), so configs persisted by older versions failed to decode when a field was added. | **Fixed (S-5)**: every key added after 1.0 (`overlay`, `gifMode`, `gifSize`, `animatedFormat`, `overwrite`, `gifFps`, `createOutputSubdirectory`) uses `decodeIfPresent ?? MissingKeyDefault`, matching the designated init's defaults | Medium (upgrade risk) | `MosaicConfiguration.swift` decoder | Add new keys to `MissingKeyDefault`, never as a required `decode`. **Test:** `LegacyConfigurationDecodingTests` decodes pinned 1.0.0, 1.3.2 and 1.7.0 payloads plus the minimal one; never edit those fixtures to make it pass. |
 | I-25 | Hygiene | Dead or misleading code: `generateallcombinations` ignores the caller's config; unused private helpers in `MetalMosaicGenerator` (`extractFramesWithVideoToolbox`, `calculateExtractionTimes`, `calculateAspectRatio`); unused `MosaicFrameSource`/`makeFrameSource`, `prioritizeVideos`, `VideoError`, `LibraryError`; never-emitted statuses. | **Partly fixed (S-1, #38)**: the unused private helpers and `MosaicFrameSource` are removed. Remaining (public API) → deprecate in S-6 (D1). | Low | §2.12, §5.4 | Remove, or document as intentionally unused (`MosaicFrameSource` has history, §2.6). |
-| I-26 | F8/F9 | **Native preview export can stall with no progress on the macOS CI runner.** `PreviewExportSmokeTests` stalled once in 4 macOS runs of identical code (run 36323934052 on #40: `exportStalled(elapsedSeconds: 120)`; the other runs finished the export in about 20 s). The export never reported progress and never returned, so the 120 s watchdog fired. | **Open (cause unknown)**: diagnostics added in P-2 (the test reports its timestamped progress trail on failure). Seen once more on 2026-09-30 on the maintainer's Mac, in the first local test run after a fresh build (S-4 code, 162 s); the trail was not captured, and 3 cold and 21 warm reruns (15 preview-only, 6 full suite) passed. S-4 moved the watchdog off the cooperative pool and logs the progress value at which an export stalls | Medium (CI reliability; possibly a real hang for users) | CI log of run 36323934052; `exportWithNativeSession` in `PreviewVideoGenerator.swift` | Read the progress trail of the next failure (stuck in `.pending`/`.waiting`, or flat at some percentage). Suspects: `allowsParallelizedExport = true` (macOS only) on a 3-vCPU VM, and encoder contention with the tests running in parallel. S-4 reworks this watchdog and must address it. |
+| I-26 | F8/F9 | **Native preview export can stall with no progress on the macOS CI runner.** `PreviewExportSmokeTests` stalled once in 4 macOS runs of identical code (run 36323934052 on #40: `exportStalled(elapsedSeconds: 120)`; the other runs finished the export in about 20 s). The export never reported progress and never returned, so the 120 s watchdog fired. | **Open (cause unknown)**: diagnostics added in P-2 (the test reports its timestamped progress trail on failure). Seen once more on 2026-09-30 on the maintainer's Mac, in the first local test run after a fresh build (S-4 code, 162 s); the trail was not captured, and 3 cold and 21 warm reruns (15 preview-only, 6 full suite) passed. S-4 moved the watchdog off the cooperative pool and logs the progress value at which an export stalls. **First captured trail** (CI run 36732100248 on #45, macOS): composition 0.4 s; encoding 0→60 % in 31 s; then `.exporting` state updates kept arriving every ~5 s, all at exactly 60 %, until the watchdog stopped it at 120 s. So `AVAssetExportSession` itself stopped progressing mid-encode; the progress monitor was not starved and the watchdog was right. The other macOS run on the same commit passed | Medium (CI reliability; possibly a real hang for users) | CI log of run 36323934052; `exportWithNativeSession` in `PreviewVideoGenerator.swift` | Read the progress trail of the next failure (stuck in `.pending`/`.waiting`, or flat at some percentage). Remaining suspects: `allowsParallelizedExport = true` (macOS only), and encoder contention with the parallel mosaic/HEIC/WebP tests on the paravirtualized runner. Next experiment: run the smoke test with `allowsParallelizedExport = false`, or serialized against the encoding suites. In apps, `PreviewGeneratorCoordinator` retries stalled exports (≤ 3 attempts); the smoke test disables retry on purpose. S-4 reworks this watchdog and must address it. |
 
 ### 4.3 Performance: hotspots & budgets
 
@@ -2143,7 +2145,7 @@ Other initializers and their deviations from the main init:
 | `exportMode` | `PreviewExportMode` | `.native` | `useNativeExport` is a deprecated alias |
 | `exportPresetName` | `nativeExportPreset?` | **`.AVAssetExportPresetHEVC1920x1080`** (decoded configs without the key: `nil`) | |
 | `sJSExportPresetName` | `SjSExportPreset?` | `.hevc` (also on decode) | |
-| `exportMaxResolution` | `ExportMaxResolution?` (stored as a raw string) | `"1080p"` | README says 4K (I-13) |
+| `exportMaxResolution` | `ExportMaxResolution?` (stored as a raw string) | `"1080p"` (`defaultExportMaxResolutionRaw`) | Decision D3; README corrected in S-5 (I-13) |
 | `ffmpegBinaryPath` / `ffmpegTempFolder` / `ffmpegEncodingOptions` | `String?` / `URL?` / `FFmpegEncodingOptions?` | `nil` | |
 | `overwrite` | `Bool` | `false` | |
 | `enableAppLifecycleMonitor` / `enableExportRetry` | `Bool` | `true` / `true` | set both `false` for daemons / CLIs |
@@ -2430,6 +2432,7 @@ let out = try await jobs.value(for: id)                    // starts the work
   when a caller sets `nil` explicitly. Severities were downgraded, and §2.12, F9, and §4 were
   corrected.
 - `PreviewConfiguration` decoding is tolerant, while `MosaicConfiguration` decoding is strict.
+  *(Corrected in S-5: `MosaicConfiguration` decoding is now tolerant for every post-1.0 key.)*
   Synthesized decoders bypass init clamps. Unknown enum raw values throw.
 - **Unused status cases:** preview `.extracting` and `.saving`, and mosaic `.extractingThumbnails`.
 - The examples in `Examples/` match the current API.
@@ -2463,7 +2466,7 @@ with the code.
 | 7 | Fail fast on undecodable sources (10-bit H.264 on iOS, …) at inspection time | I-22 | A clear error instead of "Frame extraction failed" | S |
 | 8 | Stream animated-export frames into the encoder instead of `[CGImage]` | I-20 | Memory safety for `.nochange` / long videos | M |
 | 9 | Fix or deprecate `.dynamic`; fix `.auto` units | I-8, I-9 | Broken layout options that are advertised in the README | M |
-| 10 | Housekeeping: `decodeIfPresent` for new keys, ~~remove dead code and swift-log, unify the log subsystem~~ (done in S-1, #38), render or remove `.colorPalette`, and resolve I-13 (4K vs 1080p docs) | I-10, I-13, I-23, I-24, I-25 | Lower maintenance cost and fewer surprises | S each |
+| 10 | Housekeeping: ~~`decodeIfPresent` for new keys~~ (done in S-5), ~~remove dead code and swift-log, unify the log subsystem~~ (done in S-1, #38), render or remove `.colorPalette`, and ~~resolve I-13 (4K vs 1080p docs)~~ (done in S-5) | I-10, I-13, I-23, I-24, I-25 | Lower maintenance cost and fewer surprises | S each |
 | 11 | Performance exploration (always benchmark against the batched path): CVPixelBuffer → Metal zero-copy path, GPU-side frame treatment, moving encoding off the generator actor, the VideoToolbox constant-quality factor for SJS | §4.3, §4.9 | Throughput is a hard requirement | L |
 | 12 | Root-cause the intermittent native export stall on macOS CI (progress trail from the smoke test), S-4 moved the watchdog off the cooperative pool and logs the progress value at the stall; the root cause is still open | I-26 | A stalled export fails users silently after 120 s and makes CI unreliable | S–M |
 
@@ -2519,8 +2522,8 @@ P1 = core feature, P2 = supporting, P3 = docs/infra.
 | 4 | P0 | `Sources/Processing/MosaicGeneratorCoordinator.swift` | code | 730 | 62277ee6 | Batch actor (per-attempt tracking, `runBatch`), progress/result/status types, factory funcs at the end |
 | 5 | P0 | `Sources/Processing/Preview/PreviewVideoGenerator.swift` | code | 1546 | f459c3b8 | Preview actor + `PreviewGenerationLogic` (compose @L604, export paths @L1093/1115/1425) |
 | 6 | P0 | `Sources/Processing/Preview/PreviewGeneratorCoordinator.swift` | code | 490 | f77a7373 | Preview batch (`runBatch`), concurrency cap 2 @L400, retry @L423 |
-| 7 | P0 | `Sources/Models/MosaicConfiguration.swift` | model | 689 | 82390038 | Config + path templating + format enums |
-| 8 | P0 | `Sources/Models/PreviewConfiguration.swift` | model | 819 | cfcba13c | Config + extract math + path templating |
+| 7 | P0 | `Sources/Models/MosaicConfiguration.swift` | model | 672 | 89ddf030 | Config + path templating + format enums |
+| 8 | P0 | `Sources/Models/PreviewConfiguration.swift` | model | 805 | ad2e0ffe | Config + extract math + path templating |
 | 9 | P1 | `Sources/Processing/ThumbnailProcessor.swift` | code | 1576 | 49eec98a | Frame stream @L138, GIF frames @L75, header @L594/857 |
 | 10 | P1 | `Sources/Processing/MetalImageProcessor.swift` | code | 1335 | ead31817 | Metal pipeline, `generateMosaicStream` @L863, DominantColors @L601 |
 | 11 | P1 | `Sources/Processing/LayoutProcessor.swift` | code | 677 | 43311084 | Layout algorithms, cache @L21/92/131 |
@@ -2563,13 +2566,14 @@ P1 = core feature, P2 = supporting, P3 = docs/infra.
 | 48 | P3 | `CLAUDE.md` | doc | 397 | 46c1bd5d | Agent guide (rewritten 2026-09-26; points to this doc; keep mirrored) |
 | 49 | P3 | `AGENTS.md` | doc | 397 | 477b4c7b | Agent guide (rewritten 2026-09-26; points to this doc; keep mirrored) |
 | 50 | P2 | `Tests/MosaicKitTests/BenchmarkTests.swift` | test | 231 | 3ac1e33b | Opt-in throughput benchmark (`MOSAICKIT_BENCHMARK`); gate for ⚡ plan steps |
-| 51 | P2 | `Tests/MosaicKitTests/LegacyConfigurationDecodingTests.swift` | test | 166 | 2806c7d5 | Pinned 1.3.2, 1.7.0 + minimal config payloads (I-24 guard) |
+| 51 | P2 | `Tests/MosaicKitTests/LegacyConfigurationDecodingTests.swift` | test | 199 | fc113746 | Pinned 1.0.0, 1.3.2, 1.7.0 + minimal config payloads (I-24 guard) |
 | 52 | P2 | `Tests/MosaicKitTests/RotatedSourceTests.swift` | test | 57 | ecc0463c | Rotated portrait fixture; I-1 known issue |
 | 53 | P2 | `Tests/MosaicKitTests/PreviewExportSmokeTests.swift` | test | 88 | feebfa3e | Only end-to-end preview export in CI (native) |
 | 54 | P2 | `Tests/MosaicKitTests/MosaicCompositionPathTests.swift` | test | 62 | c8ec289f | `generate` vs `generateMosaicImage` equivalence (S-2) |
 | 55 | P2 | `Tests/MosaicKitTests/BatchRunnerTests.swift` | test | 189 | a9e1715d | Batch runners (fake mosaic generator) + I-15 + preview composition batch (S-3) |
 | 56 | P1 | `Sources/Processing/Preview/ExportWatchdog.swift` | code | 139 | bbdf71b8 | Shared stall/cancel watchdog + outcome mapper for native, SJS and passthrough exports (S-4) |
 | 57 | P2 | `Tests/MosaicKitTests/ExportWatchdogTests.swift` | test | 164 | 1ddbd7ee | Watchdog stall/cancel/invalidate + outcome mapping order (S-4) |
+| 58 | P2 | `Tests/MosaicKitTests/ConfigurationInitializerTests.swift` | test | 90 | 2b40144c | Secondary/deprecated config initializers keep their values; 1080p default (S-5) |
 
 Excluded or low value: `Media.xcassets/**` (binary fixture), `Tests/MosaicKitTests/embeddedAsset/test_video.mp4`
 (87 s 8-bit H.264 video-only fixture), `scripts/**` + `Makefile` (xcodebuild agent scaffold for a
@@ -2594,8 +2598,8 @@ RELATED PRs (merged): #32 this doc (+README unreleased note); #33 iOS CI scheme 
              #34 ffmpeg watchdog (I-16); #35 review path filter; #36 fast animated tests;
              #31 closed (duplicate of #33). Open: #37 CLAUDE.md/AGENTS.md rewrite + this refresh
 
-FILE_MAP_SUMMARY: Appendix A (57 files; P0 = 8, P1 = 15)
-ISSUE REGISTER:   §4.2 I-1 … I-26   (High: I-1, I-2; Medium: I-3 I-4 I-8 I-12 I-16 I-20 I-22 I-24 I-26)
+FILE_MAP_SUMMARY: Appendix A (58 files; P0 = 8, P1 = 15)
+ISSUE REGISTER:   §4.2 I-1 … I-26   (High: I-1, I-2; Medium: I-3 I-4 I-8 I-12 I-16 I-20 I-22 I-24 I-26; fixed: I-15 I-16 I-23 I-24)
 ROADMAP:          §6.1 → IMPLEMENTATION_PLAN.md (decisions §6.4)
 OPEN_QUESTIONS:   §6.2 (Q11 Q13 Q14 Q16 Q17)
 GLOSSARY:         §5.1

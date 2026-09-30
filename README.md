@@ -22,6 +22,7 @@ A high-performance Swift package for generating video mosaics with Metal-acceler
 ## Unreleased (since 1.7.0)
 
 - **Mosaic frame extraction reverted to the batched pipeline** — the pull-based, bounded frame source introduced in 1.7.0 made mosaic generation 30–45 % slower, so extraction is back to batched `AVAssetImageGenerator` requests feeding pipelined 20-frame Metal command buffers (#28, #29). The 1.7.0 "pull-based bounded stream" bullet below no longer describes the current implementation.
+- **Older saved configurations decode again** — `MosaicConfiguration` now decodes JSON saved by every release since 1.0.0. Keys added later (`overlay`, the animation keys, `overwrite`, `gifFps`) fall back to the initializer defaults instead of failing the decode.
 - **Logging** — the unused `swift-log` dependency is removed, and every component now logs under the OSLog subsystem `com.mosaicKit`. Console filters on `com.mosaickit` (lowercase, previously used by the preview components) no longer match.
 
 ## New in 1.7.0
@@ -52,7 +53,7 @@ A high-performance Swift package for generating video mosaics with Metal-acceler
 
 ## New in 1.6.2
 
-- **Fixed max export resolution** — `PreviewConfiguration`'s default `ExportMaxResolution` is now `4K` (was `1080p`), and `nativeExportPreset` gained an `availableResolutions` accessor describing which `ExportMaxResolution` values are valid for each native export preset.
+- **Fixed max export resolution** — `PreviewConfiguration`'s default `ExportMaxResolution` is now `4K` (was `1080p`) *(correction: the shipped default is still `1080p`, which is the intended value)*, and `nativeExportPreset` gained an `availableResolutions` accessor describing which `ExportMaxResolution` values are valid for each native export preset.
 
 ## New in 1.6.1
 

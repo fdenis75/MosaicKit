@@ -131,6 +131,21 @@ public struct MosaicConfiguration: Codable, Sendable {
 
     // MARK: - Codable
 
+    /// Values for keys that configurations saved by older versions don't have (I-24). They
+    /// match the designated initializer's defaults. Every key added after 1.0 falls back to
+    /// one of these: `overlay` (1.1.0); `gifMode`, `gifSize`, `animatedFormat` (1.1.11);
+    /// `overwrite` (1.1.16); `gifFps` (1.4.0); `createOutputSubdirectory` (1.6.0).
+    /// Add new keys here, never as a required `decode`.
+    private enum MissingKeyDefault {
+        static let overlay = OverlayConfiguration.default
+        static let gifMode = GifCreationMode.disabled
+        static let gifSize = GifSize.nochange
+        static let animatedFormat = AnimatedFormat.webp
+        static let gifFps: Double = 10
+        static let overwrite = false
+        static let createOutputSubdirectory = true
+    }
+
     private enum CodingKeys: String, CodingKey {
         case width, density, format, layout, includeMetadata, useAccurateTimestamps,
              compressionQuality, outputdirectory, fullPathInName, useMovieColorsForBg,
@@ -151,16 +166,16 @@ public struct MosaicConfiguration: Codable, Sendable {
         fullPathInName = try container.decode(Bool.self, forKey: .fullPathInName)
         useMovieColorsForBg = try container.decode(Bool.self, forKey: .useMovieColorsForBg)
         backgroundColor = try container.decode(MosaicColor.self, forKey: .backgroundColor)
-        overlay = try container.decode(OverlayConfiguration.self, forKey: .overlay)
-        gifMode = try container.decode(GifCreationMode.self, forKey: .gifMode)
-        gifSize = try container.decode(GifSize.self, forKey: .gifSize)
-        animatedFormat = try container.decode(AnimatedFormat.self, forKey: .animatedFormat)
-        gifFps = try container.decode(Double.self, forKey: .gifFps)
-        overwrite = try container.decode(Bool.self, forKey: .overwrite)
-        // Added after configurations were already being persisted; missing key
-        // (older saved config) resolves to `true`, preserving the previous,
-        // unconditional subdirectory-creation behavior.
-        createOutputSubdirectory = try container.decodeIfPresent(Bool.self, forKey: .createOutputSubdirectory) ?? true
+        // Keys added after 1.0: absent from older saved configurations (I-24).
+        overlay = try container.decodeIfPresent(OverlayConfiguration.self, forKey: .overlay) ?? MissingKeyDefault.overlay
+        gifMode = try container.decodeIfPresent(GifCreationMode.self, forKey: .gifMode) ?? MissingKeyDefault.gifMode
+        gifSize = try container.decodeIfPresent(GifSize.self, forKey: .gifSize) ?? MissingKeyDefault.gifSize
+        animatedFormat = try container.decodeIfPresent(AnimatedFormat.self, forKey: .animatedFormat) ?? MissingKeyDefault.animatedFormat
+        gifFps = try container.decodeIfPresent(Double.self, forKey: .gifFps) ?? MissingKeyDefault.gifFps
+        overwrite = try container.decodeIfPresent(Bool.self, forKey: .overwrite) ?? MissingKeyDefault.overwrite
+        // A missing key keeps the previous, unconditional subdirectory creation.
+        createOutputSubdirectory = try container.decodeIfPresent(Bool.self, forKey: .createOutputSubdirectory)
+            ?? MissingKeyDefault.createOutputSubdirectory
         outputDirectoryTemplate = try container.decodeIfPresent(String.self, forKey: .outputDirectoryTemplate)
         filenameTemplate = try container.decodeIfPresent(String.self, forKey: .filenameTemplate)
     }
@@ -237,22 +252,11 @@ public struct MosaicConfiguration: Codable, Sendable {
         animatedFormat: AnimatedFormat = .webp,
         gifFps: Double = 10
     ) {
-        self.width = 2500
-        self.density = density
-        self.format = .heif
-        self.layout = .default
-        self.includeMetadata = true
-        self.useAccurateTimestamps = false
-        self.compressionQuality = 0.3
-        self.outputdirectory = outputdirectory
-        self.fullPathInName = fullPathInName
-        self.useMovieColorsForBg = false
-        self.backgroundColor = .defaultGray
-        self.overlay = .default
-        self.gifMode = gifMode
-        self.gifSize = gifSize
-        self.animatedFormat = animatedFormat
-        self.gifFps = gifFps
+        self.init(width: 2500, density: density, format: .heif, layout: .default,
+                  includeMetadata: true, useAccurateTimestamps: false, compressionQuality: 0.3,
+                  outputdirectory: outputdirectory, fullPathInName: fullPathInName,
+                  useMovieColorsForBg: false, backgroundColor: .defaultGray, overlay: .default,
+                  gifMode: gifMode, gifSize: gifSize, animatedFormat: animatedFormat, gifFps: gifFps)
     }
 
     public init(
@@ -270,22 +274,12 @@ public struct MosaicConfiguration: Codable, Sendable {
         overlay: OverlayConfiguration = .default,
         gifFps: Double = 10
     ) {
-        self.width = width
-        self.density = density
-        self.format = format
-        self.layout = layout
-        self.includeMetadata = includeMetadata
-        self.useAccurateTimestamps = useAccurateTimestamps
-        self.compressionQuality = compressionQuality
-        self.outputdirectory = outputdirectory
-        self.fullPathInName = fullPathInName
-        self.useMovieColorsForBg = useMovieColorsForBg
-        self.backgroundColor = backgroundColor
-        self.overlay = overlay
-        self.gifMode = .disabled
-        self.gifSize = .small
-        self.animatedFormat = .webp
-        self.gifFps = gifFps
+        self.init(width: width, density: density, format: format, layout: layout,
+                  includeMetadata: includeMetadata, useAccurateTimestamps: useAccurateTimestamps,
+                  compressionQuality: compressionQuality, outputdirectory: outputdirectory,
+                  fullPathInName: fullPathInName, useMovieColorsForBg: useMovieColorsForBg,
+                  backgroundColor: backgroundColor, overlay: overlay,
+                  gifMode: .disabled, gifSize: .small, animatedFormat: .webp, gifFps: gifFps)
     }
     
     /// Creates a MosaicConfiguration instance.
@@ -303,25 +297,14 @@ public struct MosaicConfiguration: Codable, Sendable {
         outputdirectory: URL? = nil,
         fullPathInName: Bool = false,
         forIphone: Bool
-
     ) {
-        self.width = width
-        self.density = density
-        self.format = format
-        self.layout = layout
-        self.includeMetadata = includeMetadata
-        self.useAccurateTimestamps = useAccurateTimestamps
-        self.compressionQuality = compressionQuality
-        self.outputdirectory = outputdirectory
-        self.fullPathInName = fullPathInName
         // forIphone == true previously meant solid gray; map that to the new params
-        self.useMovieColorsForBg = !forIphone
-        self.backgroundColor = .defaultGray
-        self.overlay = .default
-        self.gifMode = .disabled
-        self.gifSize = .nochange
-        self.animatedFormat = .gif
-        self.gifFps = 10
+        self.init(width: width, density: density, format: format, layout: layout,
+                  includeMetadata: includeMetadata, useAccurateTimestamps: useAccurateTimestamps,
+                  compressionQuality: compressionQuality, outputdirectory: outputdirectory,
+                  fullPathInName: fullPathInName, useMovieColorsForBg: !forIphone,
+                  backgroundColor: .defaultGray, overlay: .default,
+                  gifMode: .disabled, gifSize: .nochange, animatedFormat: .gif, gifFps: 10)
     }
 
     /// Default configuration for mosaic generation

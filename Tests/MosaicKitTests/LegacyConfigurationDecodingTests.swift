@@ -10,13 +10,14 @@ import Testing
 ///
 /// - `*-1.7.0.json`: payloads in the shape 1.7.0 encodes (the config models are unchanged
 ///   from 1.7.0 through 1.7.4), with non-default values so every field is exercised.
-/// - `*-legacy-minimal.json`: only the keys each decoder requires today. `MosaicConfiguration`
-///   decodes most keys strictly (I-24), so adding a required key makes this test fail; add
-///   new keys with `decodeIfPresent` plus a default instead (rules card #2).
+/// - `*-legacy-minimal.json`: the keys `MosaicConfiguration` required before S-5, so a newly
+///   required key makes this test fail; add new keys with `decodeIfPresent` plus a default
+///   instead (rules card #2).
 /// - `mosaic-config-1.3.2.json`: the shape 1.3.2 encoded, the last release before `gifFps`
-///   (added in 1.4.0) and `createOutputSubdirectory`. It does not decode today because
-///   `gifFps` is still required (I-24); plan step S-5 fixes that and must remove the
-///   `withKnownIssue` wrapper (Swift Testing fails the test once the issue stops reproducing).
+///   (added in 1.4.0) and `createOutputSubdirectory`.
+/// - `mosaic-config-1.0.0.json`: the shape 1.0.0 encoded, before every later key (`overlay`,
+///   the animation keys, `overwrite`, `gifFps`, `createOutputSubdirectory`, the templates).
+///   Both decoded only after S-5 made every post-1.0 key optional (I-24).
 ///
 /// Never edit these fixtures to make a test pass: that would hide exactly the breakage
 /// they exist to catch.
@@ -85,24 +86,56 @@ struct LegacyConfigurationDecodingTests {
     func mosaicConfiguration132Decodes() throws {
         let data = try fixture("mosaic-config-1.3.2")
 
-        withKnownIssue("I-24: gifFps is decoded strictly, so pre-1.4.0 configs fail (fixed by plan step S-5)") {
-            let config = try JSONDecoder().decode(MosaicConfiguration.self, from: data)
-            #expect(config.width == 4000)
-            #expect(config.density == .s) // resolved from `factor` alone, as 1.3.2 wrote it
-            #expect(config.format == .png)
-            #expect(config.layout.aspectRatio == .standard)
-            #expect(config.layout.layoutType == .classic)
-            #expect(config.layout.visual.borderColor == .gray)
-            #expect(config.outputdirectory?.absoluteString == "file:///tmp/MosaicKit132/")
-            #expect(config.overlay.header.fields == [.title, .codec])
-            #expect(config.overlay.colorDNA.position == .top)
-            #expect(config.gifMode == .gifOnly)
-            #expect(config.animatedFormat == .heic)
-            #expect(config.overwrite)
-            #expect(config.filenameTemplate == "{name}.{ext}")
-            #expect(config.gifFps == 10) // keys added after 1.3.2 take their defaults
-            #expect(config.createOutputSubdirectory)
-        }
+        let config = try JSONDecoder().decode(MosaicConfiguration.self, from: data)
+        #expect(config.width == 4000)
+        #expect(config.density == .s) // resolved from `factor` alone, as 1.3.2 wrote it
+        #expect(config.format == .png)
+        #expect(config.layout.aspectRatio == .standard)
+        #expect(config.layout.layoutType == .classic)
+        #expect(config.layout.visual.borderColor == .gray)
+        #expect(config.outputdirectory?.absoluteString == "file:///tmp/MosaicKit132/")
+        #expect(config.overlay.header.fields == [.title, .codec])
+        #expect(config.overlay.colorDNA.position == .top)
+        #expect(config.gifMode == .gifOnly)
+        #expect(config.animatedFormat == .heic)
+        #expect(config.overwrite)
+        #expect(config.filenameTemplate == "{name}.{ext}")
+        #expect(config.gifFps == 10) // keys added after 1.3.2 take their defaults
+        #expect(config.createOutputSubdirectory)
+    }
+
+    @Test("A MosaicConfiguration saved by 1.0.0 decodes, with every later key at its default (I-24)")
+    func mosaicConfiguration100Decodes() throws {
+        let config = try JSONDecoder().decode(MosaicConfiguration.self, from: try fixture("mosaic-config-1.0.0"))
+
+        #expect(config.width == 3000)
+        #expect(config.density == .xl) // resolved from `factor` alone
+        #expect(config.format == .jpeg)
+        #expect(config.layout.aspectRatio == .square)
+        #expect(config.layout.layoutType == .classic)
+        #expect(config.layout.spacing == 3)
+        #expect(config.layout.visual.borderColor == .black)
+        #expect(!config.includeMetadata)
+        #expect(config.useAccurateTimestamps)
+        #expect(config.compressionQuality == 0.55)
+        #expect(config.outputdirectory?.absoluteString == "file:///tmp/MosaicKit100/")
+        #expect(config.fullPathInName)
+        #expect(!config.useMovieColorsForBg)
+        #expect(config.backgroundColor == MosaicColor(red: 0.15, green: 0.2, blue: 0.25))
+
+        // Keys added after 1.0 take the designated initializer's defaults.
+        let defaults = MosaicConfiguration(width: 5120, gifMode: .disabled)
+        #expect(config.overlay.header.fields == defaults.overlay.header.fields)
+        #expect(config.overlay.watermark == nil)
+        #expect(config.overlay.colorDNA.show == defaults.overlay.colorDNA.show)
+        #expect(config.gifMode == defaults.gifMode)
+        #expect(config.gifSize == defaults.gifSize)
+        #expect(config.animatedFormat == defaults.animatedFormat)
+        #expect(config.gifFps == defaults.gifFps)
+        #expect(config.overwrite == defaults.overwrite)
+        #expect(config.createOutputSubdirectory == defaults.createOutputSubdirectory)
+        #expect(config.outputDirectoryTemplate == nil)
+        #expect(config.filenameTemplate == nil)
     }
 
     @Test("A decoded 1.7.0 MosaicConfiguration round-trips through the current encoder")
