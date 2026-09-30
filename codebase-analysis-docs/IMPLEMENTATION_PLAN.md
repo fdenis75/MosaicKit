@@ -136,7 +136,7 @@ Every PR updates its row here (status) and the matching §4.2 / §6.1 entries in
 | S-6 | done | #48 |
 | S-7 | optional | |
 | F-1 | planned | |
-| F-2 | done (I-2, I-3; Q13 answered; found and fixed I-27) | |
+| F-2 | done (I-2, I-3; Q13 answered; found and fixed I-27) | #49 |
 | F-3 | planned | |
 | F-4 | planned | |
 | F-5 | planned | |
