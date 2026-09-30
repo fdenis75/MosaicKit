@@ -133,7 +133,7 @@ Every PR updates its row here (status) and the matching §4.2 / §6.1 entries in
 | S-3 | done; A/B/A benchmark gate passed (§8.1) | #42 |
 | S-4 | done; I-26 still open (see A-26) | #43 |
 | S-5 | done | #45 |
-| S-6 | done | PR_S6 |
+| S-6 | done | #48 |
 | S-7 | optional | |
 | F-1 | planned | |
 | F-2 | planned | |
