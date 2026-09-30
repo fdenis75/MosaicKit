@@ -156,8 +156,12 @@ public struct PreviewConfiguration: Codable, Sendable, Hashable {
     ///
     /// Stored as a raw `String?` so `PreviewConfiguration` remains fully `Codable`
     /// on macOS 15+ even though `ExportMaxResolution` itself requires macOS 26+.
-    /// Defaults to `"1080p"` (mirrors `ExportMaxResolution._1080p`).
-    private var _exportMaxResolutionRaw: String? = "1080p"
+    /// Defaults to `"1080p"` (mirrors `ExportMaxResolution._1080p`; decision D3, I-13).
+    private var _exportMaxResolutionRaw: String? = Self.defaultExportMaxResolutionRaw
+
+    /// The default maximum export resolution, as `ExportMaxResolution._1080p.rawValue`. Used by
+    /// the property default, the macOS 26 initializer and the decoder.
+    private static let defaultExportMaxResolutionRaw = "1080p"
 
     /// Internal accessor for the raw resolution value, used by the video-generation
     /// pipeline to pass the preference through without requiring an `#available` context.
@@ -243,7 +247,7 @@ public struct PreviewConfiguration: Codable, Sendable, Hashable {
         self.ffmpegEncodingOptions = ffmpegEncodingOptions
         self.enableAppLifecycleMonitor = enableAppLifecycleMonitor
         self.enableExportRetry = enableExportRetry
-        // _exportMaxResolutionRaw defaults to "4K" via the property declaration
+        // _exportMaxResolutionRaw keeps its property default, 1080p.
     }
 
     /// Deprecated. Use ``init(exportMode:)`` instead.
@@ -262,23 +266,14 @@ public struct PreviewConfiguration: Codable, Sendable, Hashable {
         exportPresetName: nativeExportPreset? = .AVAssetExportPresetHEVC1920x1080,
         sjSExportPresetName: SjSExportPreset? = .hevc
     ) {
-        self.targetDuration = targetDuration
-        self.minimumExtractDuration = minimumExtractDuration
-        self.maximumPlaybackSpeed = maximumPlaybackSpeed
-        self.density = density
-        self.format = format
-        self.includeAudio = includeAudio
-        self.outputDirectory = outputDirectory
-        self.fullPathInName = fullPathInName
-        self.compressionQuality = min(max(compressionQuality, 0.0), 1.0)
-        self.exportMode = useNativeExport ? .native : .sjs
-        self.exportPresetName = exportPresetName
-        self.sJSExportPresetName = sjSExportPresetName ?? .hevc
-        self.ffmpegBinaryPath = nil
-        self.ffmpegTempFolder = nil
-        self.ffmpegEncodingOptions = nil
-        self.enableAppLifecycleMonitor = true
-        self.enableExportRetry = true
+        self.init(targetDuration: targetDuration, minimumExtractDuration: minimumExtractDuration,
+                  maximumPlaybackSpeed: maximumPlaybackSpeed, density: density, format: format,
+                  includeAudio: includeAudio, outputDirectory: outputDirectory,
+                  fullPathInName: fullPathInName, compressionQuality: compressionQuality,
+                  exportMode: useNativeExport ? .native : .sjs, exportPresetName: exportPresetName,
+                  sjSExportPresetName: sjSExportPresetName, ffmpegBinaryPath: nil,
+                  ffmpegTempFolder: nil, ffmpegEncodingOptions: nil,
+                  enableAppLifecycleMonitor: true, enableExportRetry: true)
     }
 
     /// Creates a `PreviewConfiguration` with an explicit maximum export resolution.
@@ -306,24 +301,15 @@ public struct PreviewConfiguration: Codable, Sendable, Hashable {
         enableAppLifecycleMonitor: Bool = true,
         enableExportRetry: Bool = true
     ) {
-        self.targetDuration = targetDuration
-        self.minimumExtractDuration = minimumExtractDuration
-        self.maximumPlaybackSpeed = maximumPlaybackSpeed
-        self.density = density
-        self.format = format
-        self.includeAudio = includeAudio
-        self.outputDirectory = outputDirectory
-        self.fullPathInName = fullPathInName
-        self.compressionQuality = min(max(compressionQuality, 0.0), 1.0)
-        self.exportMode = exportMode
-        self.exportPresetName = exportPresetName
-        self.sJSExportPresetName = sjSExportPresetName ?? .hevc
-        self._exportMaxResolutionRaw = (maxResolution ?? ._1080p).rawValue
-        self.ffmpegBinaryPath = ffmpegBinaryPath
-        self.ffmpegTempFolder = ffmpegTempFolder
-        self.ffmpegEncodingOptions = ffmpegEncodingOptions
-        self.enableAppLifecycleMonitor = enableAppLifecycleMonitor
-        self.enableExportRetry = enableExportRetry
+        self.init(targetDuration: targetDuration, minimumExtractDuration: minimumExtractDuration,
+                  maximumPlaybackSpeed: maximumPlaybackSpeed, density: density, format: format,
+                  includeAudio: includeAudio, outputDirectory: outputDirectory,
+                  fullPathInName: fullPathInName, compressionQuality: compressionQuality,
+                  exportMode: exportMode, exportPresetName: exportPresetName,
+                  sjSExportPresetName: sjSExportPresetName, ffmpegBinaryPath: ffmpegBinaryPath,
+                  ffmpegTempFolder: ffmpegTempFolder, ffmpegEncodingOptions: ffmpegEncodingOptions,
+                  enableAppLifecycleMonitor: enableAppLifecycleMonitor, enableExportRetry: enableExportRetry)
+        self._exportMaxResolutionRaw = maxResolution?.rawValue ?? Self.defaultExportMaxResolutionRaw
     }
 
     
@@ -371,7 +357,7 @@ public struct PreviewConfiguration: Codable, Sendable, Hashable {
         // Decoded as String? so this round-trips correctly on all OS versions.
         // ExportMaxResolution itself requires macOS 26+; storing as a raw value keeps
         // PreviewConfiguration Codable on macOS 15+.
-        _exportMaxResolutionRaw = try container.decodeIfPresent(String.self, forKey: .exportMaxResolution) ?? "1080p"
+        _exportMaxResolutionRaw = try container.decodeIfPresent(String.self, forKey: .exportMaxResolution) ?? Self.defaultExportMaxResolutionRaw
         overwrite = try container.decodeIfPresent(Bool.self, forKey: .overwrite) ?? false
         outputDirectoryTemplate = try container.decodeIfPresent(String.self, forKey: .outputDirectoryTemplate)
         filenameTemplate = try container.decodeIfPresent(String.self, forKey: .filenameTemplate)

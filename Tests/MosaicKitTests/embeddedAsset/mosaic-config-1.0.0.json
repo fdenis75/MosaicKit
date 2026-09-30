@@ -1,0 +1,18 @@
+{
+  "backgroundColor" : { "alpha" : 1, "blue" : 0.25, "green" : 0.2, "red" : 0.15 },
+  "compressionQuality" : 0.55,
+  "density" : { "factor" : 0.5 },
+  "format" : "jpeg",
+  "fullPathInName" : true,
+  "includeMetadata" : false,
+  "layout" : {
+    "aspectRatio" : "1:1",
+    "layoutType" : "classic",
+    "spacing" : 3,
+    "visual" : { "addBorder" : true, "addShadow" : false, "borderColor" : "black", "borderWidth" : 2 }
+  },
+  "outputdirectory" : "file:///tmp/MosaicKit100/",
+  "useAccurateTimestamps" : true,
+  "useMovieColorsForBg" : false,
+  "width" : 3000
+}

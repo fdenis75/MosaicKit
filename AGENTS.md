@@ -167,8 +167,9 @@ knowledge base §5.2–§5.3.
   - `dynamic`: center-emphasized; geometrically broken, see I-8.
   - `iphone`: mobile-optimized.
 - **`AspectRatio`:** `16:9`, `4:3`, `1:1`, `21:9`, `9:16`.
-- **Codable rule:** add new keys with `decodeIfPresent` plus a default. `MosaicConfiguration`'s
-  decoder is strict, so a required new key breaks configs saved by older versions (I-24).
+- **Codable rule:** add new keys with `decodeIfPresent` plus a default (in `MosaicConfiguration`,
+  a `MissingKeyDefault` constant). A required new key breaks configs saved by older versions;
+  the pinned payloads back to 1.0.0 catch that in CI (I-24, fixed in S-5).
 - **Persisted values:** never rename raw values that are persisted. They also appear in output
   paths through `configurationHash` (rules card #3–#4).
 
