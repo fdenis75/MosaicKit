@@ -221,7 +221,7 @@ Happy mosaic generating! 🎬
 
 ### Lifecycle control
 
-`GenerationJobController` demonstrates explicit job identity and cancellation/pause/retry for app-managed work. Use the coordinator APIs for progress-aware mosaic or preview batches.
+`GenerationJobController` demonstrates explicit job identity and cancellation/pause/retry for app-managed work. It is deprecated and will be removed in MosaicKit 2.0; prefer the coordinator APIs, which also report progress, for mosaic or preview batches.
 
 ```swift
 let controller = GenerationJobController()

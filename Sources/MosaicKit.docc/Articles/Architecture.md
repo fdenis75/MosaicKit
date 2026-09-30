@@ -54,10 +54,12 @@ public actor MetalMosaicGenerator: MosaicGeneratorProtocol {
                          forIphone: Bool = false) async throws -> URL
     public func generateMosaicImage(for video: VideoInput, config: MosaicConfiguration,
                                     forIphone: Bool) async throws -> CGImage
-    public func generateallcombinations(for video: VideoInput,
-                                        config: MosaicConfiguration) async throws -> [URL]
 }
 ```
+
+`generateallcombinations(for:config:)` is deprecated and will be removed in MosaicKit 2.0: it
+ignores most of the configuration it is given. Call `generate(for:config:forIphone:)` once per
+configuration instead.
 
 For batches, wrap it in ``MosaicGeneratorCoordinator`` (or use the `createDefaultMosaicCoordinator`/
 `createMosaicCoordinatorWithMetal` convenience functions), which adds CPU/memory-aware
@@ -75,8 +77,6 @@ public protocol MosaicGeneratorProtocol: Actor {
                  forIphone: Bool) async throws -> URL
     func generateMosaicImage(for video: VideoInput, config: MosaicConfiguration,
                              forIphone: Bool) async throws -> CGImage
-    func generateallcombinations(for video: VideoInput,
-                                config: MosaicConfiguration) async throws -> [URL]
     func cancel(for video: VideoInput)
     func cancelAll()
     func setProgressHandler(for video: VideoInput,
@@ -132,20 +132,14 @@ See <doc:LayoutAlgorithms> for detailed algorithm descriptions.
 
 #### ThumbnailProcessor
 
-Extracts frames from video using `AVAssetImageGenerator`, hardware-accelerated via VideoToolbox:
+Extracts frames from video using `AVAssetImageGenerator`, hardware-accelerated via VideoToolbox.
+The generator uses its internal `processedFramesStream`, which requests frames in batches and
+yields each labeled frame with its layout index as soon as it is decoded, so frames never pile up
+in an array.
 
-```swift
-public final class ThumbnailProcessor: Sendable {
-    public func extractThumbnails(
-        from file: URL,
-        layout: MosaicLayout,
-        asset: AVAsset,
-        preview: Bool = false,
-        accurate: Bool = false,
-        progressHandler: ((Double) -> Void)? = nil
-    ) async throws -> [(image: CGImage, timestamp: String)]
-}
-```
+The array-based helpers (`extractThumbnails`, `extractFramesStream`, `extractThumbnailsUI`), the
+CoreGraphics `generateMosaic(from:…)` and the legacy `createMetadataHeader(metadata:…)` are
+deprecated and will be removed in MosaicKit 2.0.
 
 **Frame Distribution Strategy:**
 - First third: 20% of frames
@@ -159,8 +153,8 @@ GPU-accelerated image composition using Metal shaders:
 
 ```swift
 public final class MetalImageProcessor: @unchecked Sendable {
-    public func generateMosaic(
-        from frames: [(image: CGImage, timestamp: String)],
+    public func generateMosaicStream(
+        stream: AsyncThrowingStream<(Int, CGImage), Error>,
         layout: MosaicLayout,
         metadata: VideoMetadata,
         config: MosaicConfiguration,
@@ -170,6 +164,10 @@ public final class MetalImageProcessor: @unchecked Sendable {
     ) async throws -> CGImage
 }
 ```
+
+It encodes frames into 20-frame command buffers as they arrive from the stream and commits each
+buffer without waiting; one barrier buffer at the end synchronizes the GPU before readback. The array-based `generateMosaic(from:…)` is deprecated and will be
+removed in MosaicKit 2.0.
 
 ## Data Flow
 
@@ -187,7 +185,7 @@ public final class MetalImageProcessor: @unchecked Sendable {
 
 3. **Frame Extraction**
    ```
-   ThumbnailProcessor + VideoToolbox → [(image: CGImage, timestamp: String)]
+   ThumbnailProcessor + VideoToolbox → AsyncThrowingStream<(index, CGImage)>
    ```
 
 4. **Image Composition**

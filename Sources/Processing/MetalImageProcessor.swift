@@ -732,6 +732,7 @@ public final class MetalImageProcessor: @unchecked Sendable {
     ///   - metadataHeader: Optional pre-generated metadata header image
     ///   - progressHandler: Optional progress handler to update progress
     /// - Returns: Generated mosaic image
+    @available(*, deprecated, message: "Array-based path, unused by MosaicKit. Removed in MosaicKit 2.0. Use generateMosaicStream(stream:...) or MetalMosaicGenerator.generateMosaicImage(for:config:forIphone:).")
     public func generateMosaic(
         from frames: [(image: CGImage, timestamp: String)],
         layout: MosaicLayout,

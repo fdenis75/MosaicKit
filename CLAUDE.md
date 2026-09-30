@@ -111,7 +111,7 @@ MosaicKit/
   `.native` (AVAssetExportSession), `.sjs` (SJSAssetExportSession) or `.ffmpeg`.
 - **Batches:** `MosaicGeneratorCoordinator` and `PreviewGeneratorCoordinator` (concurrency
   limits, `batchEpoch` cancellation). `GenerationJobController` provides an explicit job
-  lifecycle.
+  lifecycle; it is deprecated (S-6) and removed in 2.0.
 
 ### Key types
 
@@ -120,7 +120,7 @@ MosaicKit/
 | `MetalMosaicGenerator` | `Processing/MetalMosaicGenerator.swift` | Mosaic engine (actor) |
 | `MosaicGeneratorProtocol` | `Processing/MosaicGeneratorProtocol.swift` | Shared interface |
 | `MosaicGeneratorCoordinator` | `Processing/MosaicGeneratorCoordinator.swift` | Concurrent mosaic batches |
-| `GenerationJobController` | `Processing/GenerationJobs.swift` | Explicit job lifecycle |
+| `GenerationJobController` | `Processing/GenerationJobs.swift` | Explicit job lifecycle (deprecated in S-6; removed in 2.0) |
 | `LayoutProcessor` | `Processing/LayoutProcessor.swift` | Layout calculation + caching |
 | `ThumbnailProcessor` | `Processing/ThumbnailProcessor.swift` | Frame extraction |
 | `MetalImageProcessor` | `Processing/MetalImageProcessor.swift` | Metal shader dispatch |
@@ -358,7 +358,7 @@ Follow `CONTRIBUTING.md`.
 - **DocC** (`Sources/MosaicKit.docc/`):
   - `GettingStarted`, `QuickStart`: onboarding.
   - `LayoutAlgorithms`: layout types.
-  - `Architecture`: accurate, but shows the array-based path.
+  - `Architecture`: accurate; shows the streaming path (since S-6).
   - `PerformanceGuide`: benchmarks unverified.
   - `PreviewExporting`: preview export modes.
   - `BackgroundProcessing`: iOS background execution.

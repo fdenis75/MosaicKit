@@ -127,6 +127,7 @@ extension MosaicLayout {
     /// individual sizes in the thumbnailSizes array.
     ///
     /// - Returns: A string containing the ASCII art representation of the mosaic layout.
+    @available(*, deprecated, message: "Debugging aid, unused by MosaicKit. Removed in MosaicKit 2.0. Use description().")
     public func drawMosaicASCIIArt() -> String {
         var ascii = ""
         var grid = Array(repeating: Array(repeating: " ", count: cols), count: rows)

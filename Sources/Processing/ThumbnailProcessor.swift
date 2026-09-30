@@ -38,6 +38,7 @@ public final class ThumbnailProcessor: Sendable {
     ///   - preview: Whether generating preview thumbnails
     ///   - accurate: Whether to use accurate timestamp extraction
     /// - Returns: Array of tuples containing thumbnail images and their timestamps
+    @available(*, deprecated, message: "Unused by MosaicKit. Removed in MosaicKit 2.0. Use MetalMosaicGenerator.generateMosaicImage(for:config:forIphone:) for a mosaic, or AVAssetImageGenerator for raw frames.")
     public func extractThumbnails(
         from file: URL,
         layout: MosaicLayout,
@@ -123,6 +124,7 @@ public final class ThumbnailProcessor: Sendable {
     ///   - asset: Video asset to extract thumbnails from
     ///   - accurate: Whether to use accurate timestamp extraction
     /// - Returns: Async stream of tuples containing index, thumbnail image and timestamp
+    @available(*, deprecated, message: "Unused by MosaicKit. Removed in MosaicKit 2.0. Use MetalMosaicGenerator.generateMosaicImage(for:config:forIphone:) for a mosaic, or AVAssetImageGenerator for raw frames.")
     public func extractFramesStream(
         from file: URL,
         layout: MosaicLayout,
@@ -238,6 +240,7 @@ public final class ThumbnailProcessor: Sendable {
     ///   - asset: Video asset to extract thumbnails from
     ///   - accurate: Whether to use accurate timestamp extraction
     /// - Returns: Array of tuples containing thumbnail images and their timestamps
+    @available(*, deprecated, message: "Unused by MosaicKit. Removed in MosaicKit 2.0. Use AVAssetImageGenerator for raw frames.")
     public func extractThumbnailsUI(
         from file: URL,
         count: Int,
@@ -290,6 +293,7 @@ public final class ThumbnailProcessor: Sendable {
     ///   - metadata: Video metadata
     ///   - config: Mosaic configuration
     /// - Returns: Generated mosaic image
+    @available(*, deprecated, message: "CoreGraphics fallback, unused since the Metal engine runs on every platform. Removed in MosaicKit 2.0. Use MetalMosaicGenerator.generateMosaicImage(for:config:forIphone:).")
     public func generateMosaic(
         from frames: [(image: CGImage, timestamp: String)],
         layout: MosaicLayout,
@@ -854,6 +858,7 @@ public final class ThumbnailProcessor: Sendable {
     ///   - height: The height of the metadata header (matching first row of thumbnails)
     ///   - backgroundColor: Optional background color (if nil, platform-specific default will be used)
     /// - Returns: A CGImage containing the metadata header
+    @available(*, deprecated, message: "Legacy header, unused by MosaicKit. Removed in MosaicKit 2.0. Use createMetadataHeader(for:width:height:thumbnailHeight:backgroundColor:forIphone:headerConfig:swatchColors:).")
     public func createMetadataHeader(
         metadata: VideoMetadata,
         width: Int,

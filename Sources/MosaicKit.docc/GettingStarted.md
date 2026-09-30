@@ -142,8 +142,12 @@ AVFoundation work.
 
 ### Cancellation, pause, and retry
 
-Coordinator methods support cancelling one video or an entire batch. For queue-level controls,
-submit an operation to ``GenerationJobController`` and retain its ``GenerationJobID``:
+Coordinator methods support cancelling one video (`cancelGeneration(for:)`) or an entire batch
+(`cancelAllGenerations()`). Retry by calling the generation method again; a failed or
+cancelled attempt leaves no partial output behind.
+
+> Deprecated: ``GenerationJobController`` will be removed in MosaicKit 2.0. A job cancelled before
+> it runs stays in `.cancelling` and cannot be retried. Existing code keeps working:
 
 ```swift
 let controller = GenerationJobController()
