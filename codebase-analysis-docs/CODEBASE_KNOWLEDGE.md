@@ -2560,7 +2560,7 @@ P1 = core feature, P2 = supporting, P3 = docs/infra.
 | 52 | P2 | `Tests/MosaicKitTests/RotatedSourceTests.swift` | test | 57 | ecc0463c | Rotated portrait fixture; I-1 known issue |
 | 53 | P2 | `Tests/MosaicKitTests/PreviewExportSmokeTests.swift` | test | 88 | feebfa3e | Only end-to-end preview export in CI (native) |
 | 54 | P2 | `Tests/MosaicKitTests/MosaicCompositionPathTests.swift` | test | 62 | c8ec289f | `generate` vs `generateMosaicImage` equivalence (S-2) |
-| 55 | P2 | `Tests/MosaicKitTests/BatchRunnerTests.swift` | test | 189 | 6c51d24d | Batch runners (fake mosaic generator) + I-15 + preview composition batch (S-3) |
+| 55 | P2 | `Tests/MosaicKitTests/BatchRunnerTests.swift` | test | 189 | a9e1715d | Batch runners (fake mosaic generator) + I-15 + preview composition batch (S-3) |
 
 Excluded or low value: `Media.xcassets/**` (binary fixture), `Tests/MosaicKitTests/embeddedAsset/test_video.mp4`
 (87 s 8-bit H.264 video-only fixture), `scripts/**` + `Makefile` (xcodebuild agent scaffold for a

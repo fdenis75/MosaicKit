@@ -21,7 +21,7 @@ struct MosaicBatchRunnerTests {
         let results = try await coordinator.generateMosaicsforbatch(videos: videos, config: .default) { events.record($0) }
 
         #expect(results.count == videos.count)
-        #expect(results.allSatisfy(\.isSuccess))
+        #expect(results.allSatisfy { $0.isSuccess })
         #expect(Set(results.map(\.video.id)) == Set(videos.map(\.id)))
         #expect(await generator.started == videos.count)
         #expect(await generator.maxRunning == 2, "At most 2 jobs may run at once, and 6 videos should fill both slots")
@@ -40,7 +40,7 @@ struct MosaicBatchRunnerTests {
         let results = try await coordinator.generateMosaicsForFiles(urls, config: .default) { _ in }
 
         #expect(results.count == urls.count)
-        #expect(results.allSatisfy(\.isSuccess))
+        #expect(results.allSatisfy { $0.isSuccess })
         #expect(Set(results.map(\.video.url)) == Set(urls))
         #expect(await generator.maxRunning <= 2)
     }
@@ -118,7 +118,7 @@ struct PreviewBatchRunnerTests {
         }
 
         #expect(results.count == videos.count)
-        #expect(results.allSatisfy(\.isSuccess), "Failures: \(results.compactMap { $0.error?.localizedDescription })")
+        #expect(results.allSatisfy { $0.isSuccess }, "Failures: \(results.compactMap { $0.error?.localizedDescription })")
         #expect(queued.ids == Set(videos.map(\.id)))
     }
 }
@@ -171,9 +171,9 @@ private final class ProgressEvents: Sendable {
 
 /// Thread-safe set of video IDs reported `.queued`.
 private final class QueuedIDs: Sendable {
-    private let set = Mutex<Set<UUID>>([])
-    func insert(_ id: UUID) { set.withLock { _ = $0.insert(id) } }
-    var ids: Set<UUID> { set.withLock { $0 } }
+    private let storage = Mutex<Set<UUID>>([])
+    func insert(_ id: UUID) { storage.withLock { _ = $0.insert(id) } }
+    var ids: Set<UUID> { storage.withLock { $0 } }
 }
 
 /// Polls `condition` every 10 ms for up to 10 s.
