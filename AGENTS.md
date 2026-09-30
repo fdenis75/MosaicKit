@@ -297,6 +297,10 @@ MOSAICKIT_SUITE_MODE=none swift test                    # CI mode: skip extended
   (default `1,0`), `MOSAICKIT_BENCHMARK_JSON` (write results as JSON).
   The baseline and the noise guidance are in the plan's §8.1 (day-to-day variance reaches 14 %,
   so compare back-to-back runs from one session for hot-path changes).
+- **Export stress test (I-26):** `ExportStressTests` runs only when `MOSAICKIT_STRESS=<rounds>`
+  is set. Preview exports stall under macOS background scheduling, so compare a plain run with
+  one under `taskpolicy -b`. Tests that export video call `ProcessScheduling.leaveBackground()`
+  first, as `PreviewExportSmokeTests` does.
 
 - **Location:** tests live in `Tests/MosaicKitTests/`. Fixtures in `embeddedAsset/` are loaded
   with `Bundle.module`:

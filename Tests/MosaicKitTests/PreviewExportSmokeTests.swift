@@ -16,11 +16,18 @@ import Testing
 /// available on the iOS Simulator; HEVC export there is slow software encoding.
 ///
 /// On failure the test reports the full progress trail (status, progress and exporter message,
-/// timestamped), so an export that stalls (I-26) shows which state it was stuck in.
+/// timestamped), so an export that stalls shows which state it was stuck in.
+///
+/// I-26: under macOS background scheduling (`PRIO_DARWIN_BG`) the export stalls mid-encode for
+/// minutes, which made this test fail intermittently on CI. The test therefore leaves background
+/// scheduling first and logs whether the process was in it. The library itself never changes
+/// its host's scheduling; apps handle this as described in the `PreviewExporting` article.
 struct PreviewExportSmokeTests {
 
     @Test("Native preview export produces a playable movie from the embedded video")
     func nativePreviewExportProducesMovie() async throws {
+        let wasBackground = ProcessScheduling.leaveBackground()
+        print("PreviewExportSmokeTests: process was \(wasBackground ? "" : "not ")under background scheduling")
         let videoURL = try #require(Bundle.module.url(forResource: "test_video", withExtension: "mp4"),
                                     "Missing test fixture test_video.mp4")
         let video = try await VideoInput(from: videoURL)
@@ -51,7 +58,7 @@ struct PreviewExportSmokeTests {
         do {
             outputURL = try await generator.generate(for: video, config: config)
         } catch {
-            Issue.record("Preview export failed: \(error)\nProgress trail:\n\(trail.formatted)")
+            Issue.record("Preview export failed: \(error)\nBackground scheduling at start: \(wasBackground), now: \(ProcessScheduling.isBackground)\nProgress trail:\n\(trail.formatted)")
             return
         }
 
