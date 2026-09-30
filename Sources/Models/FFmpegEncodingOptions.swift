@@ -279,11 +279,15 @@ public struct FFmpegEncodingOptions: Codable, Sendable, Hashable {
             args += ["-preset", speedPreset.rawValue]
         }
         args += ["-movflags", "+faststart"]
-        if videoCodec == .hevcVideoToolbox || videoCodec == .hevc {
-            args += ["-pix_fmt", "p010le"]
-            args += ["-tag:v", "hvc1"]
-            args += ["-r", "30"]
-            
+        // HEVC is encoded as 10-bit; libx265 takes a planar format, VideoToolbox a
+        // semi-planar one. The source frame rate is kept (no `-r`, I-3).
+        switch videoCodec {
+        case .hevc:
+            args += ["-pix_fmt", "yuv420p10le", "-tag:v", "hvc1"]
+        case .hevcVideoToolbox:
+            args += ["-pix_fmt", "p010le", "-tag:v", "hvc1"]
+        case .h264, .h264VideoToolbox, .copy:
+            break
         }
         // Resolution filter — applied for all codecs except copy.
         // VideoToolbox needs this too: passthrough mode skips the AVVideoComposition,

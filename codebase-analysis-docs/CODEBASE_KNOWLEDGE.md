@@ -55,8 +55,8 @@ AVAssetExportSession, SJS, or an external ffmpeg for encoding.
 | Priority | Issue |
 |---|---|
 | High | **I-1** rotated/portrait sources are stretched |
-| High | **I-2** the ffmpeg scale filter distorts non-16:9 and portrait video |
-| Medium | **I-3** ffmpeg HEVC forced to 30 fps |
+| High | ~~**I-2** the ffmpeg scale filter distorts non-16:9 and portrait video~~ (fixed in F-2) |
+| Medium | ~~**I-3** ffmpeg HEVC forced to 30 fps~~ (fixed in F-2) |
 | Medium | **I-4** no-overwrite placeholder race |
 | Medium | **I-8** `.dynamic` layout overlaps and clips cells |
 | Medium | **I-12** preview skip-if-exists never matches |
@@ -801,8 +801,8 @@ change code:
 | `MetalImageProcessor.generateMosaicStream` | global (nonisolated async); GPU completion handlers on Metal threads |
 | `PreviewGenerationLogic.generate`, compose, SJS export | global (nonisolated static async) |
 | native export, ffmpeg orchestration, `generateComposition` | **main actor** (the heavy parts are detached `.userInitiated`) |
-| `runFFmpeg` wait | a `DispatchQueue.global(qos: .utility)` thread blocked in `waitUntilExit` |
-| ffmpeg stderr parsing | Foundation's `readabilityHandler` queue; state behind a `Mutex` |
+| `runFFmpeg` wait | no thread: a continuation resumed by `Process.terminationHandler` (installed before `run()`; `waitUntilExit` could hang, I-27) |
+| ffmpeg stderr parsing | Foundation's `readabilityHandler` queue; state behind a `Mutex`; the handler detaches itself at EOF |
 | `AppLifecycleMonitor` notifications | `NotificationCenter` → `Task` → actor |
 
 **Thread-safety of non-actor shared objects:**
@@ -1003,7 +1003,7 @@ graph LR
    (maintainer). It is now dead code. The README's 1.7.0 note describes the reverted design.
 4. Mosaic frame extraction is strict (any failed frame fails the job). There is no best-effort
    mode, despite `spec.md` asking for an explicit policy.
-5. `VideoFormat.exportPreset(quality:)` [[F:Sources/Models/VideoFormat.swift#397-416#26c5e961]]
+5. `VideoFormat.exportPreset(quality:)` [[F:Sources/Models/VideoFormat.swift#404-423#32b26bf5]]
    uses **exact floating-point equality**:
    - quality values other than {1.0, 0.9, 0.8, 0.7, 0.5, 0.4} fall through to
      **Passthrough**, so 0.6 or 0.75 silently produce a passthrough export;
@@ -1380,20 +1380,25 @@ backbone. Read `LayoutProcessor` algorithms, `ThumbnailProcessor` header/label r
     [VideoToolbox: -b:v <br> | -q:v <40…90 from preset>]
     [software:    -crf N | -b:v <br>] -preset <preset>
     -movflags +faststart
-    [hevc/hevc_vt: -pix_fmt p010le -tag:v hvc1 -r 30]
-    [-vf "scale='min(W,iw)':'min(ih,H)'"]
+    [hevc:    -pix_fmt yuv420p10le -tag:v hvc1]
+    [hevc_vt: -pix_fmt p010le -tag:v hvc1]
+    [-vf "scale=w='if(gt(ih,iw),min(H,iw),min(W,iw))':h='if(gt(ih,iw),min(W,ih),min(H,ih))'
+          :force_original_aspect_ratio=decrease:force_divisible_by=2"]
     [-c:a <codec> -b:a <br> | -an] <extraArgs…> <staging output>
   ```
 
 - **Edge cases / likely bugs:**
-  - ⚠ **The ffmpeg scale filter does not preserve aspect ratio.**
+  - ~~⚠ **The ffmpeg scale filter does not preserve aspect ratio.**~~ *Fixed in F-2 (I-2); the
+    template above shows the current filter. Original finding:*
     `scale='min(1920,iw)':'min(ih,1080)'` clamps width and height independently:
     - a 3840×1600 source becomes 1920×1080 (**stretched**);
     - a portrait 1080×1920 source becomes 1080×1080 (**squashed**).
     A correct form is
     `scale='min(W,iw)':'min(H,ih)':force_original_aspect_ratio=decrease:force_divisible_by=2`
     (with portrait-aware W/H).
-  - ⚠ The HEVC paths force **`-r 30`**, discarding the source frame rate (24/25/50/60 fps).
+  - ~~⚠~~ *Fixed in F-2 (I-3): no `-r`, and libx265 gets `yuv420p10le`. Q13 answered: ffmpeg 9
+    warns "Incompatible pixel format 'p010le' for codec 'libx265'" and auto-selects
+    `yuv420p10le`, so the old `pix_fmt` was cosmetic. Original finding:* The HEVC paths force **`-r 30`**, discarding the source frame rate (24/25/50/60 fps).
     This contradicts the "fractional frame rates preserved" note, which only covers the
     composition's `frameDuration`. They also force `-pix_fmt p010le` (10-bit), a VideoToolbox
     pixel format. libx265 normally expects `yuv420p10le`, so ffmpeg will auto-convert or warn.
@@ -1767,8 +1772,8 @@ robustness, performance, or cosmetic.
 | ID | Area | Issue | Status | Severity | Evidence | Fix sketch |
 |---|---|---|---|---|---|---|
 | I-1 | F2/F3 | **Rotated (portrait phone) videos get landscape layout cells.** Frames arrive rotated and are then **stretched**. | Confirmed (API + static) | **High** | `AVAssetTrack.naturalSize` is untransformed; `VideoMetadataExtractor` stores it as width/height; `AVAssetImageGenerator.appliesPreferredTrackTransform = true` rotates frames; `renderFrame` scales each frame to the exact cell size (`scaleTexture` ignores aspect). The decoder's `maximumSize` also fits the rotated frame inside the landscape box, so it is downscaled **and** blurred. | Apply `preferredTransform` to `naturalSize` in the extractor (use abs of the transformed size), as `buildVideoComposition` already does. Note that `VideoInput.width/height` semantics change, which affects the header "Resolution" field. **Test:** `RotatedSourceTests` (P-2) documents it with `withKnownIssue`; F-1 must remove the wrapper. |
-| I-2 | F9 | **ffmpeg scale filter distorts** non-16:9 and portrait sources. | Confirmed (static) | **High** (ffmpeg users) | `ExportMaxResolution.scaleFilter` = `scale='min(W,iw)':'min(ih,H)'` clamps each axis independently. 3840×1600 → 1920×1080; 1080×1920 → 1080×1080. | `scale=w='min(W,iw)':h='min(H,ih)':force_original_aspect_ratio=decrease:force_divisible_by=2`, with W/H swapped for portrait (as `buildVideoComposition` does). |
-| I-3 | F9 | **ffmpeg HEVC forces `-r 30`** (and `-pix_fmt p010le`). | Confirmed (static); pix_fmt effect suspected | Medium | `buildArguments` adds `-r 30` for `.hevc` / `.hevcVideoToolbox`. | Drop `-r` (keep the source rate), or derive it from the composition's frame duration. Use `yuv420p10le` for libx265 and keep `p010le` only for VideoToolbox. |
+| I-2 | F9 | **ffmpeg scale filter distorts** non-16:9 and portrait sources. | **Fixed (F-2)**: `scaleFilter` now bounds the box with `min()` per axis (W/H swapped when `ih > iw`), then `force_original_aspect_ratio=decrease:force_divisible_by=2`. Checked with ffmpeg 9: 3840×1600 → 1920×800, 2160×3840 → 1080×1920, 1280×720 unchanged. **Test:** `FFmpegArgumentsTests` (argument arrays; real encodes of 16:9, 21:9 and the rotated fixture when ffmpeg is installed) | **High** (ffmpeg users) | `ExportMaxResolution.scaleFilter` = `scale='min(W,iw)':'min(ih,H)'` clamps each axis independently. 3840×1600 → 1920×1080; 1080×1920 → 1080×1080. | `scale=w='min(W,iw)':h='min(H,ih)':force_original_aspect_ratio=decrease:force_divisible_by=2`, with W/H swapped for portrait (as `buildVideoComposition` does). |
+| I-3 | F9 | **ffmpeg HEVC forces `-r 30`** (and `-pix_fmt p010le`). | **Fixed (F-2)**: no `-r` (source rate kept); `-pix_fmt yuv420p10le` for libx265, `p010le` only for VideoToolbox. Q13: ffmpeg 9 warned and auto-converted `p010le` for libx265, so only `-r 30` changed the output. **Test:** `FFmpegArgumentsTests` | Medium | `buildArguments` adds `-r 30` for `.hevc` / `.hevcVideoToolbox`. | Drop `-r` (keep the source rate), or derive it from the composition's frame duration. Use `yuv420p10le` for libx265 and keep `p010le` only for VideoToolbox. |
 | I-4 | F12 | **No-overwrite publication is not atomic.** Zero-byte placeholder race; placeholder leaked if `rename` fails. | Confirmed (static) | Medium | `OutputTransaction.commit()`, §F12 | See the §F12 design note (strategy per destination). Minimum: delete the placeholder on rename failure, and treat zero-byte files as "not done" in skip-if-exists. **Decision D6 → plan F-4.** |
 | I-5 | F9 | **Native `exportPreset(quality:)` matches exact floats.** Unmatched values → **Passthrough**; 0.7 → H.264 1080p (the comment says HEVC); the MediumQuality branch is unreachable (duplicate `0.7`). Reached only when `exportPresetName == nil`: **configs decoded without that key** (the decoder uses `decodeIfPresent` with no default) or explicit `nil`. The `init` default is HEVC 1920×1080. | Confirmed (static) | Low–Medium | `VideoFormat.swift` @L397–416 | Use ranges (`>= 0.95`, …). Decide what the 0.7 mapping should be. Reject Passthrough when a composition or audio mix is required (overlays, resize, speed ≠ 1). |
 | I-6 | F9 | **SJS with `sJSExportPresetName` explicitly `nil`** produces H.264 Baseline at 0.8 (exact matching), while `PreviewExportDescription.sjs` reports **HEVC**. *(Corrected: `init` and decoding both default to `.hevc`, so the default config is fine.)* | Confirmed (static) | Low | `videoSettings(for:…)` matches only 1.0/0.75/0.5/0.25; `PreviewExportDescription.sjs` defaults to `.hevc` when no preset is set | Use range mapping and make the description call the same resolver as the exporter (one source of truth). |
@@ -1792,6 +1797,7 @@ robustness, performance, or cosmetic.
 | I-24 | Codable | `MosaicConfiguration.init(from:)` required most keys (`decode`), so configs persisted by older versions failed to decode when a field was added. | **Fixed (S-5)**: every key added after 1.0 (`overlay`, `gifMode`, `gifSize`, `animatedFormat`, `overwrite`, `gifFps`, `createOutputSubdirectory`) uses `decodeIfPresent ?? MissingKeyDefault`, matching the designated init's defaults | Medium (upgrade risk) | `MosaicConfiguration.swift` decoder | Add new keys to `MissingKeyDefault`, never as a required `decode`. **Test:** `LegacyConfigurationDecodingTests` decodes pinned 1.0.0, 1.3.2 and 1.7.0 payloads plus the minimal one; never edit those fixtures to make it pass. |
 | I-25 | Hygiene | Dead or misleading code: `generateallcombinations` ignores the caller's config; unused private helpers in `MetalMosaicGenerator` (`extractFramesWithVideoToolbox`, `calculateExtractionTimes`, `calculateAspectRatio`); unused `MosaicFrameSource`/`makeFrameSource`, `prioritizeVideos`, `VideoError`, `LibraryError`; never-emitted statuses. | **Mostly fixed.** S-1 (#38) removed the unused private helpers and `MosaicFrameSource`. S-6 deprecated the unused public API (`generateallcombinations`, the array-based `ThumbnailProcessor`/`MetalImageProcessor` paths, the job controller, `drawMosaicASCIIArt`, `FFmpegEncodingOptions.forPreview`, two preview-coordinator getters) for removal in 2.0. Still open: `LibraryError` and the never-emitted statuses; `VideoError` stays because F-6 will throw it. | Low | §2.12, §5.4 | Remove, or document as intentionally unused (`MosaicFrameSource` has history, §2.6). |
 | I-26 | F8/F9 | **Native preview export stalls mid-encode.** `AVAssetExportSession` stops progressing while state updates keep arriving at a frozen percentage. Reproduced under macOS background scheduling (`PRIO_DARWIN_BG`, `taskpolicy -b`) and under a background QoS clamp (`taskpolicy -c background`). Also seen intermittently in `PreviewExportSmokeTests` on CI (runs 36323934052 on #40; 36732100248 on #45 and 36742667122 on #46, both frozen at exactly 60 % encoding for 120 s) and once locally. | **Mechanism reproduced; CI attributed to the virtual machine (known issue there)**. `ExportStressTests` on the maintainer's M-series Mac: normal priority 0 stalls in 640 exports (fixture and 4K/1080p drone footage, 10 at once plus HEIC/mosaic load); `taskpolicy -b` 6 of 60 (7 of 60 with `allowsParallelizedExport` off, so that flag is not a factor), 0 of 60 after `leaveBackground()`; `taskpolicy -c background` 7 of 60 even after `leaveBackground()` (a process cannot lift a QoS clamp). In one throttled round all 6 exports froze together for 194 s. The `.userInitiated` activity does not prevent it; the maintainer saw the same with backgrounded apps. **CI:** the GitHub macOS runner is a virtual machine and starts tests at utility QoS (logged: `mainThreadQoS=0x11 virtualMachine=true darwinBackground=false`). A utility QoS cap alone does not reproduce the stall on real hardware (0 of 60), and CI stalls always freeze at exactly 60 %, unlike the scattered local positions, so the VM (no real media hardware) is the remaining cause. It cannot be reproduced without a VM. Since #47 the smoke test records `exportStalled` as a known intermittent issue **only when `kern.hv_vmm_present` reports a VM**; on real Macs, and for any other error, it fails | Medium (apps exporting in the background; CI reliability) | `ExportStressTests`, CI logs above | Product (roadmap #12): the library never changes its host's scheduling; apps should export while active, and the macOS stall retry in `PreviewGeneratorCoordinator` could wait until the app is active again, as iOS waits for foreground. |
+| I-27 | F9 | **`runFFmpeg` can hang forever after ffmpeg exits.** Found by F-2's real-encode test: a 0.07 s ffmpeg run left `waitUntilExit()` blocked on a dispatch thread with no ffmpeg process left, while the stderr `readabilityHandler` spun on empty EOF reads (~75 % CPU). | **Fixed (F-2)**: the exit status comes from `terminationHandler`, installed before `run()`, through a `Mutex`-guarded continuation (no blocked thread); the stderr handler detaches at EOF. A standalone repro hung within 300 fast runs with `waitUntilExit` (with or without the EOF fix) and completed 300/300 with `terminationHandler`. **Test:** `FFmpegArgumentsTests` real-encode test (15 consecutive passes); `PreviewReliabilityRegressionTests` ffmpeg cancellation still passes | Medium (ffmpeg users; short clips) | `FFmpegEncoder.runFFmpeg` waited with `DispatchQueue.global().async { waitUntilExit() }`. | Done. |
 
 ### 4.3 Performance: hotspots & budgets
 
@@ -2467,7 +2473,7 @@ with the code.
 |---|---|---|---|---|
 | 1 | ~~Merge **#33** (iOS CI) and **#34** (ffmpeg watchdog)~~ **Done**: #32–#36 merged; CI green on both platforms | I-16, I-21, I-22 (CI) | Restores a green, meaningful CI on both platforms | done |
 | 2 | Apply `preferredTransform` to the dimensions in `VideoMetadataExtractor`; add a rotated-video fixture test | I-1 | Portrait phone videos are the most common source on iOS | S |
-| 3 | Fix the ffmpeg scale filter (aspect-preserving, even dimensions) and drop the forced `-r 30` / wrong `pix_fmt` for libx265 | I-2, I-3 | Wrong output for common sources in the ffmpeg mode | S |
+| 3 | ~~Fix the ffmpeg scale filter (aspect-preserving, even dimensions) and drop the forced `-r 30` / wrong `pix_fmt` for libx265~~ **Done** (F-2, which also fixed the `runFFmpeg` exit hang it uncovered) | I-2, I-3, I-27 | Wrong output for common sources in the ffmpeg mode | done |
 | 4 | Make preview default filenames deterministic (drop the run timestamp or make it a token) | I-12 | Enables incremental preview runs (skip-if-exists) | S (naming change: note in the release) |
 | 5 | Destination-aware output publication: local `renamex_np(RENAME_EXCL)`, remote staging, iCloud coordination; ignore zero-byte outputs in skip-if-exists | I-4 | Correctness on NAS and iCloud; maintainer-planned (§F12) | M |
 | 6 | Opt-in **resumable preview export** (iOS/macOS 27) with a stable per-job temp directory | §4.9 | Big win for long exports interrupted in the background | M |
@@ -2483,7 +2489,7 @@ with the code.
 | ID | Question | How to answer |
 |---|---|---|
 | Q11 | How much does actor serialization of encode and overlays limit batch throughput? | Instruments (`OSSignposter` intervals already exist) with 1/2/4 concurrent jobs |
-| Q13 | Does `-pix_fmt p010le` with libx265 warn, convert, or fail? | Run the ffmpeg export on a 10-bit-capable build and inspect the output |
+| Q13 | ~~Does `-pix_fmt p010le` with libx265 warn, convert, or fail?~~ **Answered (F-2)**: ffmpeg 9 warns and auto-selects `yuv420p10le`; F-2 now passes `yuv420p10le` explicitly | ~~Run the ffmpeg export on a 10-bit-capable build and inspect the output~~ |
 | Q14 | How does iCloud Drive treat hidden staging files and the placeholder? | Generate into an iCloud Drive folder with `overwrite == false`; watch `brctl log` / conflicts |
 | Q16 | Which configurations does `configureForResumableExport()` accept? | Probe with the native presets ± video composition, animation tool, and audio mix on OS 27 |
 | Q17 | Is AVIF (still/sequence) writable on iOS 27? | `CGImageDestinationCopyTypeIdentifiers()` on device |
@@ -2609,9 +2615,9 @@ RELATED PRs (merged): #32 this doc (+README unreleased note); #33 iOS CI scheme 
              #31 closed (duplicate of #33). Open: #37 CLAUDE.md/AGENTS.md rewrite + this refresh
 
 FILE_MAP_SUMMARY: Appendix A (60 files; P0 = 8, P1 = 15)
-ISSUE REGISTER:   §4.2 I-1 … I-26   (High: I-1, I-2; Medium: I-3 I-4 I-8 I-12 I-16 I-20 I-22 I-24 I-26; fixed: I-15 I-16 I-23 I-24)
+ISSUE REGISTER:   §4.2 I-1 … I-27   (High: I-1, I-2; Medium: I-3 I-4 I-8 I-12 I-16 I-20 I-22 I-24 I-26 I-27; fixed: I-2 I-3 I-15 I-16 I-23 I-24 I-27)
 ROADMAP:          §6.1 → IMPLEMENTATION_PLAN.md (decisions §6.4)
-OPEN_QUESTIONS:   §6.2 (Q11 Q13 Q14 Q16 Q17)
+OPEN_QUESTIONS:   §6.2 (Q11 Q14 Q16 Q17; Q13 answered in F-2)
 GLOSSARY:         §5.1
 MAINTENANCE:      §6.3 + codebase-analysis-docs/assets/doc_check.py
 ```

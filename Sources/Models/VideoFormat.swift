@@ -320,8 +320,15 @@ public enum ExportMaxResolution: String, Codable, Sendable, CaseIterable, Identi
     /// preserving aspect ratio. Never upscales; has no effect when the source is already smaller.
     /// Suitable for direct use as the value of the ffmpeg `-vf` option (no shell quoting needed
     /// since arguments are passed as an array, not via a shell).
+    ///
+    /// The bound is in landscape coordinates and is swapped for portrait sources (height >
+    /// width), as the native export path does. ffmpeg autorotates the input, so `iw`/`ih` are
+    /// the displayed dimensions. The output is rounded down to even dimensions (I-2).
     public var scaleFilter: String {
-        "scale='min(\(maxWidth),iw)':'min(ih,\(maxHeight))'"
+        "scale="
+            + "w='if(gt(ih,iw),min(\(maxHeight),iw),min(\(maxWidth),iw))'"
+            + ":h='if(gt(ih,iw),min(\(maxWidth),ih),min(\(maxHeight),ih))'"
+            + ":force_original_aspect_ratio=decrease:force_divisible_by=2"
     }
 
     /// Alias for ``SD``, matching the lowercase case name previously used by

@@ -296,8 +296,13 @@ enum FFmpegEncoder {
         // readabilityHandler fires on Foundation's internal serial queue whenever
         // new data arrives from the ffmpeg process's stderr.
         pipeRef.fileHandleForReading.readabilityHandler = { handle in
-            guard let chunk = String(data: handle.availableData, encoding: .utf8),
-                  !chunk.isEmpty else { return }
+            let data = handle.availableData
+            // At EOF the handler keeps firing with empty data; detach it to stop the spin.
+            guard !data.isEmpty else {
+                handle.readabilityHandler = nil
+                return
+            }
+            guard let chunk = String(data: data, encoding: .utf8) else { return }
             let snapshot = stderrState.withLock { buffer in
                 buffer = String((buffer + chunk).suffix(8192))
                 return buffer
@@ -324,6 +329,21 @@ enum FFmpegEncoder {
                 progressHandler(fraction, "FFmpeg: \(Int(fraction * 100))%")
             }
 
+        }
+
+        // Exit status, delivered by `terminationHandler`. `waitUntilExit()` on a dispatch
+        // thread can miss the exit of a short-lived process and block forever (I-27), so the
+        // handler is installed before `run()` and resumes whoever is waiting.
+        let exitState = Mutex<(status: Int32?, waiter: CheckedContinuation<Int32, Never>?)>((nil, nil))
+        processRef.terminationHandler = { finished in
+            let status = finished.terminationStatus
+            processFinished.cancel()
+            let waiter = exitState.withLock { state in
+                state.status = status
+                defer { state.waiter = nil }
+                return state.waiter
+            }
+            waiter?.resume(returning: status)
         }
 
         try Task.checkCancellation()
@@ -377,15 +397,15 @@ enum FFmpegEncoder {
             pipeRef.fileHandleForReading.readabilityHandler = nil
         }
 
-        // Wait for process exit on a DispatchQueue thread to avoid blocking the Swift
-        // concurrency pool (waitUntilExit() is a blocking call).
+        // Suspend (without blocking a thread) until `terminationHandler` reports the exit.
         let exitCode = await withTaskCancellationHandler {
             await withCheckedContinuation { (continuation: CheckedContinuation<Int32, Never>) in
-                DispatchQueue.global(qos: .userInitiated).async {
-                    processRef.waitUntilExit()
-                    processFinished.cancel()
-                    continuation.resume(returning: processRef.terminationStatus)
+                let status = exitState.withLock { state -> Int32? in
+                    if let status = state.status { return status }
+                    state.waiter = continuation
+                    return nil
                 }
+                if let status { continuation.resume(returning: status) }
             }
         } onCancel: {
             callerCancelled.cancel()
