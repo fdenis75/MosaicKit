@@ -137,7 +137,7 @@ Every PR updates its row here (status) and the matching §4.2 / §6.1 entries in
 | S-7 | optional | |
 | F-1 | done; A/B/A benchmark gate passed (§8.1) | #50 |
 | F-2 | done (I-2, I-3; Q13 answered; found and fixed I-27) | #49 |
-| F-3 | planned | |
+| F-3 | done (I-11, I-12) | #54 |
 | F-4 | planned | |
 | F-5 | planned | |
 | F-6 | planned | |

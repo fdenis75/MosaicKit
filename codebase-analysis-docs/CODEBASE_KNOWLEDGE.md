@@ -59,7 +59,7 @@ AVAssetExportSession, SJS, or an external ffmpeg for encoding.
 | Medium | ~~**I-3** ffmpeg HEVC forced to 30 fps~~ (fixed in F-2) |
 | Medium | **I-4** no-overwrite placeholder race |
 | Medium | **I-8** `.dynamic` layout overlaps and clips cells |
-| Medium | **I-12** preview skip-if-exists never matches |
+| Medium | ~~**I-12** preview skip-if-exists never matches~~ (fixed in F-3) |
 | Medium | **I-16** slow ffmpeg cancellation (fix in #34) |
 | Medium | **I-20** `.nochange` animation holds all frames in memory |
 | Medium | **I-22** 10-bit H.264 is undecodable on iOS (fixture fixed in #33) |
@@ -455,8 +455,9 @@ register:
 3. **Preview skip-if-exists never matches in default naming mode.** With `fullPathInName ==
    false` and no `filenameTemplate`, `PreviewConfiguration.generateFilename` embeds a
    run-time timestamp (`yyyy-MM-dd_HH-mm-ss`). As a result, `overwrite == false` never finds an
-   existing file, and each run writes a new preview.
-   [[F:Sources/Models/PreviewConfiguration.swift#503-551#ad2e0ffe]]
+   existing file, and each run writes a new preview. *(Fixed in F-3, I-12: the default name no
+   longer has the timestamp; it is an opt-in `{time}` token.)*
+   [[F:Sources/Models/PreviewConfiguration.swift#510-554#ee2900f9]]
 4. **Preview max-resolution default mismatch.** `_exportMaxResolutionRaw` defaults to `"1080p"`
    (the declaration, the decoder fallback, and the `init(…maxResolution:)` fallback all agree).
    Comments in two initializers say "defaults to 4K", and the README says 4K. *(Fixed in S-5:
@@ -1343,8 +1344,11 @@ backbone. Read `LayoutProcessor` algorithms, `ThumbnailProcessor` header/label r
     They are **file export only**: they are not applied in compositions, and `.ffmpeg` rejects
     them at validation. (The deprecated wording "burned in via Core Animation" applies to
     native/SJS.)
-  - Default filename includes the run timestamp (§1.10 item 3), so skip-if-exists only works
-    with `fullPathInName` or a `filenameTemplate`.
+  - Since F-3 (I-12) the default filename is deterministic: it has no run timestamp, so
+    skip-if-exists matches a previous run. A timestamp is available only through the opt-in
+    `{time}` token (`HH-mm-ss`) of `filenameTemplate`; `generateFilename(for:referenceDate:)`
+    takes the date used by `{date}`/`{time}`. A template with `{time}` never matches an
+    earlier run, so don't combine it with `overwrite == false` if you want skipping.
 - **Tests:**
   - `PreviewConfigurationTests`: clip math, Codable, filenames, export description.
   - `PreviewReliabilityRegressionTests`: late progress delivery, frame duration, ffmpeg
@@ -1518,7 +1522,8 @@ backbone. Read `LayoutProcessor` algorithms, `ThumbnailProcessor` header/label r
   - Directory = `outputDirectory` ?? the video's folder (optionally templated with `{root}`
     `{duration}` `{density}` `{format}` `{exportMode}` `{date}`).
   - Default filename: `_preview_<name>_<dur>_<density>_<fmt>_<audio|noaudio>_<exportLabel>_<res>[_<timing>]_<yyyy-MM-dd_HH-mm-ss>_.<ext>`.
-    With `fullPathInName` there is no run timestamp.
+    With `fullPathInName` there is no run timestamp. Since F-3 (I-11) the `{aspectRatio}` token
+    renders with a dash (`16-9`), like `configurationHash`.
   - Sanitizing replaces *every* non-alphanumeric character with `_`.
 - **Skip-if-exists** (`overwrite == false`, the default for both):
   - It is a `FileManager.fileExists` check on the resolved final path, done **before** any
@@ -1672,7 +1677,7 @@ none.
 10. **`LayoutConfiguration.spacing` is not a layout input.** It only insets cells (F4).
 11. **`discoverVideos` fails the whole scan on one undecodable file**, and the extension list
     includes formats AVFoundation usually can't read (F1).
-12. **The `{aspectRatio}` template token inserts a colon** (e.g. `16:9`) into directory and
+12. **Fixed in F-3 (I-11): the `{aspectRatio}` template token inserted a colon** (e.g. `16:9`) into directory and
     file names. On macOS, a colon is shown as `/` in Finder and is invalid on SMB and exFAT
     (F12).
 13. **`GenerationJobController`:** untested, never frees records, and a job cancelled before it
@@ -1782,8 +1787,8 @@ robustness, performance, or cosmetic.
 | I-8 | F4 | **`.dynamic` layout is geometrically broken.** Rows overlap, wide rows are clipped, and the width ignores `config.width`. | Confirmed (simulated) | Medium | Simulation (5120 px, 16:9): n=107 → canvas width 4737 but widest row 6257 (**clipped**); 40/107 cells taller than their row (**overlap**). n=30 → width 6897 > 5120. n=800 → 15 rows with negative scale, cells as narrow as 5 px. | Normalize each row to `mosaicWidth`, use a single height per row, clamp the scale at ≥ 0, and compute the canvas from the max row width. Or deprecate `.dynamic`. **Decision D4 (deprecate) → plan F-7.** |
 | I-9 | F4 | **`.auto` fails on iPhone.** It mixes points and pixels; the count is 0, the layout is empty, and it throws "Empty mosaic layout". | Confirmed (static) | Low–Medium | `calculateMaxThumbnails`: 390 pt / (160·3) → 0 columns | Use pixels consistently (points × scale), or points consistently. Floor the count at 4. |
 | I-10 | F5 | **`MetadataField.colorPalette` never renders.** | Confirmed (static) | Low | The generator never passes `swatchColors` to `createMetadataHeader` | Compute swatches from the dominant colors (already computed for the background) and pass them in. This requires generating the header **after** the first frames. |
-| I-11 | F12 | **The `{aspectRatio}` template token inserts `:`** into paths. | Confirmed (static) | Low–Medium | `layout.aspectRatio.rawValue` ("16:9") is used verbatim; `configurationHash` already replaces `:` with `-` | Use the hash-style `16-9` in templates. **Decision D5 → plan F-3.** |
-| I-12 | F8 | **Preview skip-if-exists never matches** with default naming (run timestamp in the filename). | Confirmed (static) | Medium | `PreviewConfiguration.generateFilename` | Drop the run timestamp from the default name (it could be a `{time}` token instead). This is a naming change (rule 4). **Decision D2 → plan F-3.** |
+| I-11 | F12 | **The `{aspectRatio}` template token inserts `:`** into paths. | **Fixed (F-3)**: both token maps (`generateOutputDirectory`/`animatedOutputURL` and the filename template) render `16-9`. **Test:** `MosaicConfigurationTests` "{aspectRatio} renders with a dash…", and the pinned `3840_S_9-16_classic` path | Low–Medium | `layout.aspectRatio.rawValue` ("16:9") was used verbatim; `configurationHash` already replaced `:` with `-` | Used the hash-style `16-9` in templates (D5). This moves outputs for users of the token and the animation names derived from the mosaic name. |
+| I-12 | F8 | **Preview skip-if-exists never matches** with default naming (run timestamp in the filename). | **Fixed (F-3)**: the default name no longer has the run timestamp; `{time}` is an opt-in `filenameTemplate` token. **Tests:** `PreviewConfigurationTests` (deterministic name, `{time}` token) and `PreviewSkipExistingTests` (existing file returned, nothing exported) | Medium | `PreviewConfiguration.generateFilename` | Dropped the run timestamp from the default name (D2). This is a naming change (rule 4): existing default-named previews are regenerated once. |
 | I-13 | F8 | Default `exportMaxResolution` is **1080p**; the README (1.6.2) and code comments say 4K. | **Fixed (S-5)**: one `defaultExportMaxResolutionRaw` constant (property default, macOS 26 init, decoder); the stale "4K" comment is gone and the README 1.6.2 note carries a correction | Low | `PreviewConfiguration.defaultExportMaxResolutionRaw` | Decision D3 (keep 1080p). **Test:** `ConfigurationInitializerTests` checks the 1080p default. |
 | I-14 | F11 | **A `GenerationJobController` job cancelled before it runs is stuck in `.cancelling`** and cannot be retried. Records never freed; no tests. | Confirmed (static) | Low–Medium | `cancel` sets `.cancelling`; only `value(for:)` moves it to `.cancelled` | In `cancel`, if `task == nil`, go directly to `.cancelled`. Add `remove(_:)`. Add tests. **Decision D1: deprecate `GenerationJobController` (won't fix) → plan S-6.** **Won't fix: deprecated in S-6** with the other job types; removed in 2.0. |
 | I-15 | F10 | **Mosaic coordinator keys state by `video.id`.** Concurrent jobs on the same input clobber each other's cancellation and progress. | **Fixed (S-3)**: tasks, handlers and sources keyed per attempt; `activeTasks` is a read-only view by video ID. **Test:** `BatchRunnerTests` "Cancelling a video cancels every concurrent attempt on it" | Low | `attemptTasks[attemptID]`, `attemptSources`, `progressHandlers[attemptID]` | The generator's own `setProgressHandler(for:)` is still keyed by video; two concurrent attempts on one video can swap per-stage progress handlers there (cancellation is unaffected). |
@@ -2420,8 +2425,8 @@ let out = try await jobs.value(for: id)                    // starts the work
 | Mosaic | `<outputdirectory or video folder>/<configurationHash>/<[postID_]name>_<configurationHash>.<ext>` | `…/5120_M_16-9_custom/holiday_5120_M_16-9_custom.heic` |
 | Mosaic (`createOutputSubdirectory = false`) | `<root>/<name>_<hash>.<ext>` | `…/holiday_5120_M_16-9_custom.heic` |
 | Animation | same directory: `"<gifSize> -<mosaic base name>.<gif|heics|webp>"` | `…/small -holiday_5120_M_16-9_custom.webp` |
-| Preview | `<outputDirectory or video folder>/_preview_<name>_<dur>_<density>_<fmt>_<audio>_<export>_<res>[_<timing>]_<yyyy-MM-dd_HH-mm-ss>_.<ext>` | `…/_preview_holiday_1m_M_mp4_audio_HEVC_High_nat_1080p_2026-09-25_20-15-00_.mp4` |
-| Preview (`fullPathInName`) | `<dir>/<sanitized path>_<name>_preview_<config>.<ext>` (no run timestamp, so skip-if-exists works) | |
+| Preview | `<outputDirectory or video folder>/_preview_<name>_<dur>_<density>_<fmt>_<audio>_<export>_<res>[_<timing>].<ext>` (no run timestamp since F-3; `{time}` is an opt-in template token) | `…/_preview_holiday_1m_M_mp4_audio_HEVC_High_nat_1080p.mp4` |
+| Preview (`fullPathInName`) | `<dir>/<sanitized path>_<name>_preview_<config>.<ext>` (no run timestamp, so skip-if-exists works; the default name is deterministic too since F-3) | |
 | Staging (transient) | `<final dir>/.mosaickit-<UUID>.<ext>` | |
 | ffmpeg intermediate (transient) | `<ffmpegTempFolder or $TMPDIR/MosaicKitFFmpeg/<UUID>>/<UUID>_passthrough.mov` | |
 
@@ -2475,7 +2480,7 @@ with the code.
 | 1 | ~~Merge **#33** (iOS CI) and **#34** (ffmpeg watchdog)~~ **Done**: #32–#36 merged; CI green on both platforms | I-16, I-21, I-22 (CI) | Restores a green, meaningful CI on both platforms | done |
 | 2 | ~~Apply `preferredTransform` to the dimensions in `VideoMetadataExtractor`; add a rotated-video fixture test~~ **Done** (F-1) | I-1 | Portrait phone videos are the most common source on iOS | done |
 | 3 | ~~Fix the ffmpeg scale filter (aspect-preserving, even dimensions) and drop the forced `-r 30` / wrong `pix_fmt` for libx265~~ **Done** (F-2, which also fixed the `runFFmpeg` exit hang it uncovered) | I-2, I-3, I-27 | Wrong output for common sources in the ffmpeg mode | done |
-| 4 | Make preview default filenames deterministic (drop the run timestamp or make it a token) | I-12 | Enables incremental preview runs (skip-if-exists) | S (naming change: note in the release) |
+| 4 | ~~Make preview default filenames deterministic (drop the run timestamp or make it a token)~~ **Done** (F-3, with I-11) | I-12, I-11 | Enables incremental preview runs (skip-if-exists) | done |
 | 5 | Destination-aware output publication: local `renamex_np(RENAME_EXCL)`, remote staging, iCloud coordination; ignore zero-byte outputs in skip-if-exists | I-4 | Correctness on NAS and iCloud; maintainer-planned (§F12) | M |
 | 6 | Opt-in **resumable preview export** (iOS/macOS 27) with a stable per-job temp directory | §4.9 | Big win for long exports interrupted in the background | M |
 | 7 | Fail fast on undecodable sources (10-bit H.264 on iOS, …) at inspection time | I-22 | A clear error instead of "Frame extraction failed" | S |
@@ -2537,8 +2542,8 @@ P1 = core feature, P2 = supporting, P3 = docs/infra.
 | 4 | P0 | `Sources/Processing/MosaicGeneratorCoordinator.swift` | code | 730 | 62277ee6 | Batch actor (per-attempt tracking, `runBatch`), progress/result/status types, factory funcs at the end |
 | 5 | P0 | `Sources/Processing/Preview/PreviewVideoGenerator.swift` | code | 1546 | f459c3b8 | Preview actor + `PreviewGenerationLogic` (compose @L604, export paths @L1093/1115/1425) |
 | 6 | P0 | `Sources/Processing/Preview/PreviewGeneratorCoordinator.swift` | code | 492 | 092dc7ff | Preview batch (`runBatch`), concurrency cap 2 @L402, retry @L425 |
-| 7 | P0 | `Sources/Models/MosaicConfiguration.swift` | model | 672 | 89ddf030 | Config + path templating + format enums |
-| 8 | P0 | `Sources/Models/PreviewConfiguration.swift` | model | 805 | ad2e0ffe | Config + extract math + path templating |
+| 7 | P0 | `Sources/Models/MosaicConfiguration.swift` | model | 672 | 478f6c33 | Config + path templating + format enums |
+| 8 | P0 | `Sources/Models/PreviewConfiguration.swift` | model | 817 | ee2900f9 | Config + extract math + path templating |
 | 9 | P1 | `Sources/Processing/ThumbnailProcessor.swift` | code | 1581 | 844677b3 | Frame stream @L140, GIF frames @L76, header @L598/862 |
 | 10 | P1 | `Sources/Processing/MetalImageProcessor.swift` | code | 1336 | 04cfcb88 | Metal pipeline, `generateMosaicStream` @L864, DominantColors @L601 |
 | 11 | P1 | `Sources/Processing/LayoutProcessor.swift` | code | 677 | 43311084 | Layout algorithms, cache @L21/92/131 |
@@ -2616,7 +2621,7 @@ RELATED PRs (merged): #32 this doc (+README unreleased note); #33 iOS CI scheme 
              #31 closed (duplicate of #33). Open: #37 CLAUDE.md/AGENTS.md rewrite + this refresh
 
 FILE_MAP_SUMMARY: Appendix A (60 files; P0 = 8, P1 = 15)
-ISSUE REGISTER:   §4.2 I-1 … I-27   (High: I-1, I-2; Medium: I-3 I-4 I-8 I-12 I-16 I-20 I-22 I-24 I-26 I-27; fixed: I-1 I-2 I-3 I-15 I-16 I-23 I-24 I-27)
+ISSUE REGISTER:   §4.2 I-1 … I-27   (High: I-1, I-2; Medium: I-3 I-4 I-8 I-12 I-16 I-20 I-22 I-24 I-26 I-27; fixed: I-1 I-2 I-3 I-11 I-12 I-15 I-16 I-23 I-24 I-27)
 ROADMAP:          §6.1 → IMPLEMENTATION_PLAN.md (decisions §6.4)
 OPEN_QUESTIONS:   §6.2 (Q11 Q14 Q16 Q17; Q13 answered in F-2)
 GLOSSARY:         §5.1
