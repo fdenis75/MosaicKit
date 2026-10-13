@@ -21,6 +21,7 @@ A high-performance Swift package for generating video mosaics with Metal-acceler
 
 ## Unreleased (since 1.7.0)
 
+- **Rotated (portrait phone) sources keep their aspect ratio** — inspection now reports display dimensions (`naturalSize` with `preferredTransform` applied), so mosaic cells are portrait for portrait clips instead of stretching rotated frames into landscape cells (I-1). Behavior change: `VideoInput.width` / `height` and the header "Resolution" field now show the displayed size (for example 1080×1920 instead of 1920×1080) for rotated sources.
 - **Mosaic frame extraction reverted to the batched pipeline** — the pull-based, bounded frame source introduced in 1.7.0 made mosaic generation 30–45 % slower, so extraction is back to batched `AVAssetImageGenerator` requests feeding pipelined 20-frame Metal command buffers (#28, #29). The 1.7.0 "pull-based bounded stream" bullet below no longer describes the current implementation.
 - **Older saved configurations decode again** — `MosaicConfiguration` now decodes JSON saved by every release since 1.0.0. Keys added later (`overlay`, the animation keys, `overwrite`, `gifFps`) fall back to the initializer defaults instead of failing the decode.
 - **Logging** — the unused `swift-log` dependency is removed, and every component now logs under the OSLog subsystem `com.mosaicKit`. Console filters on `com.mosaickit` (lowercase, previously used by the preview components) no longer match.

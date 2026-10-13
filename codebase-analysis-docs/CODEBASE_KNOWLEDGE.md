@@ -54,7 +54,7 @@ AVAssetExportSession, SJS, or an external ffmpeg for encoding.
 
 | Priority | Issue |
 |---|---|
-| High | **I-1** rotated/portrait sources are stretched |
+| High | ~~**I-1** rotated/portrait sources are stretched~~ (fixed in F-1) |
 | High | ~~**I-2** the ffmpeg scale filter distorts non-16:9 and portrait video~~ (fixed in F-2) |
 | Medium | ~~**I-3** ffmpeg HEVC forced to 30 fps~~ (fixed in F-2) |
 | Medium | **I-4** no-overwrite placeholder race |
@@ -637,7 +637,7 @@ the same `planMosaic` + `composeMosaic`, so both entry points compose the same i
 |---|---|---|---|---|
 | 0 | Validate | `MosaicConfiguration.validate()` [[F:Sources/Models/ConfigurationValidation.swift#15-66#83f12470]] | caller → actor | Checks geometry, quality, fps, colors, and whether WebP is registered. |
 | 1 | Skip-if-exists | inside `generate` | generator actor | Uses one `referenceDate` for both the check and the save, so `{time}` resolves identically. With `.withMosaic`, a missing animation is backfilled. |
-| 2 | Duration / AR | inside `generate` | generator actor | Uses `video.duration` if known, else loads it. Rejects `< 5 s`, `width > 16 384`, and non-finite dimensions. Aspect ratio = `video.width / video.height`. `preferredTransform` is **not** applied, so rotated sources use raw dimensions. |
+| 2 | Duration / AR | inside `generate` | generator actor | Uses `video.duration` if known, else loads it. Rejects `< 5 s`, `width > 16 384`, and non-finite dimensions. Aspect ratio = `video.width / video.height`, which are display dimensions since F-1 (`preferredTransform` is applied in the extractor). |
 | 3 | Thumbnail count | `LayoutProcessor.calculateThumbnailCount` [[F:Sources/Processing/LayoutProcessor.swift#577-607#43311084]] | generator actor | `count = clamp((width/200 + 10·ln(duration)) × density.factor, 4, 800)`. `.auto` uses the largest screen instead: `(screenW / (160·scale)) × (screenH / (160·scale / videoAR))`, capped at 800. |
 | 4 | Layout | `LayoutProcessor.calculateLayout` [[F:Sources/Processing/LayoutProcessor.swift#72-134#43311084]] | generator actor (under `NSRecursiveLock`) | Cache key: `aspectRatio-originalAR-count-width-density-layoutType`. `.auto` is never cached. Invalid input returns an **empty** layout, which later throws "Empty mosaic layout". `.iphone` forces width 1200, 1 column, max height 8000. |
 | 5 | Aspect normalization | `planMosaic`: `adjustedConfig.updateAspectRatio(AspectRatio.findNearest(to: layout.mosaicSize))` | generator actor | The config passed down may carry a **different** `layout.aspectRatio` than the caller set. Path/filename generation still uses the caller's original `config`. |
@@ -1121,8 +1121,9 @@ backbone. Read `LayoutProcessor` algorithms, `ThumbnailProcessor` header/label r
   - `metadata.custom` is carried through, but no built-in feature renders it. Only
     `.custom(label:value:)` header fields render custom text, and those take literal values.
 - **Edge cases & hidden dependencies:**
-  - **`naturalSize` is not transformed by `preferredTransform`** (§2.12 item 10). Portrait phone
-    videos report landscape width and height.
+  - Since F-1 (I-1), `width`/`height` are **display dimensions**: `naturalSize` with
+    `preferredTransform` applied (absolute values), so a portrait phone video reports portrait
+    width and height. Before F-1 it reported the stored, landscape size (§2.12 item 10).
   - `frameRate` is `nil` when nominal fps is 0 (VFR or odd streams).
   - `resolution`, `audioCodec`, `hasAudio`, and `fileCreationDate` are computed but **dropped**:
     `VideoInput` has no fields for them.
@@ -1771,7 +1772,7 @@ robustness, performance, or cosmetic.
 
 | ID | Area | Issue | Status | Severity | Evidence | Fix sketch |
 |---|---|---|---|---|---|---|
-| I-1 | F2/F3 | **Rotated (portrait phone) videos get landscape layout cells.** Frames arrive rotated and are then **stretched**. | Confirmed (API + static) | **High** | `AVAssetTrack.naturalSize` is untransformed; `VideoMetadataExtractor` stores it as width/height; `AVAssetImageGenerator.appliesPreferredTrackTransform = true` rotates frames; `renderFrame` scales each frame to the exact cell size (`scaleTexture` ignores aspect). The decoder's `maximumSize` also fits the rotated frame inside the landscape box, so it is downscaled **and** blurred. | Apply `preferredTransform` to `naturalSize` in the extractor (use abs of the transformed size), as `buildVideoComposition` already does. Note that `VideoInput.width/height` semantics change, which affects the header "Resolution" field. **Test:** `RotatedSourceTests` (P-2) documents it with `withKnownIssue`; F-1 must remove the wrapper. |
+| I-1 | F2/F3 | **Rotated (portrait phone) videos get landscape layout cells.** Frames arrive rotated and are then **stretched**. | **Fixed (F-1)**: `VideoMetadataExtractor` loads `preferredTransform` with `naturalSize` and stores the absolute transformed size, so `VideoInput.width/height` and the header "Resolution" are display dimensions. **Test:** `RotatedSourceTests` (the `withKnownIssue` wrapper is removed). | **High** | `AVAssetTrack.naturalSize` is untransformed; `VideoMetadataExtractor` stores it as width/height; `AVAssetImageGenerator.appliesPreferredTrackTransform = true` rotates frames; `renderFrame` scales each frame to the exact cell size (`scaleTexture` ignores aspect). The decoder's `maximumSize` also fits the rotated frame inside the landscape box, so it is downscaled **and** blurred. | Applied `preferredTransform` to `naturalSize` in the extractor (abs of the transformed size), as `buildVideoComposition` does. |
 | I-2 | F9 | **ffmpeg scale filter distorts** non-16:9 and portrait sources. | **Fixed (F-2)**: `scaleFilter` now bounds the box with `min()` per axis (W/H swapped when `ih > iw`), then `force_original_aspect_ratio=decrease:force_divisible_by=2`. Checked with ffmpeg 9: 3840×1600 → 1920×800, 2160×3840 → 1080×1920, 1280×720 unchanged. **Test:** `FFmpegArgumentsTests` (argument arrays; real encodes of 16:9, 21:9 and the rotated fixture when ffmpeg is installed) | **High** (ffmpeg users) | `ExportMaxResolution.scaleFilter` = `scale='min(W,iw)':'min(ih,H)'` clamps each axis independently. 3840×1600 → 1920×1080; 1080×1920 → 1080×1080. | `scale=w='min(W,iw)':h='min(H,ih)':force_original_aspect_ratio=decrease:force_divisible_by=2`, with W/H swapped for portrait (as `buildVideoComposition` does). |
 | I-3 | F9 | **ffmpeg HEVC forces `-r 30`** (and `-pix_fmt p010le`). | **Fixed (F-2)**: no `-r` (source rate kept); `-pix_fmt yuv420p10le` for libx265, `p010le` only for VideoToolbox. Q13: ffmpeg 9 warned and auto-converted `p010le` for libx265, so only `-r 30` changed the output. **Test:** `FFmpegArgumentsTests` | Medium | `buildArguments` adds `-r 30` for `.hevc` / `.hevcVideoToolbox`. | Drop `-r` (keep the source rate), or derive it from the composition's frame duration. Use `yuv420p10le` for libx265 and keep `p010le` only for VideoToolbox. |
 | I-4 | F12 | **No-overwrite publication is not atomic.** Zero-byte placeholder race; placeholder leaked if `rename` fails. | Confirmed (static) | Medium | `OutputTransaction.commit()`, §F12 | See the §F12 design note (strategy per destination). Minimum: delete the placeholder on rename failure, and treat zero-byte files as "not done" in skip-if-exists. **Decision D6 → plan F-4.** |
@@ -2472,7 +2473,7 @@ with the code.
 | # | Work item | Issues | Why now | Effort |
 |---|---|---|---|---|
 | 1 | ~~Merge **#33** (iOS CI) and **#34** (ffmpeg watchdog)~~ **Done**: #32–#36 merged; CI green on both platforms | I-16, I-21, I-22 (CI) | Restores a green, meaningful CI on both platforms | done |
-| 2 | Apply `preferredTransform` to the dimensions in `VideoMetadataExtractor`; add a rotated-video fixture test | I-1 | Portrait phone videos are the most common source on iOS | S |
+| 2 | ~~Apply `preferredTransform` to the dimensions in `VideoMetadataExtractor`; add a rotated-video fixture test~~ **Done** (F-1) | I-1 | Portrait phone videos are the most common source on iOS | done |
 | 3 | ~~Fix the ffmpeg scale filter (aspect-preserving, even dimensions) and drop the forced `-r 30` / wrong `pix_fmt` for libx265~~ **Done** (F-2, which also fixed the `runFFmpeg` exit hang it uncovered) | I-2, I-3, I-27 | Wrong output for common sources in the ffmpeg mode | done |
 | 4 | Make preview default filenames deterministic (drop the run timestamp or make it a token) | I-12 | Enables incremental preview runs (skip-if-exists) | S (naming change: note in the release) |
 | 5 | Destination-aware output publication: local `renamex_np(RENAME_EXCL)`, remote staging, iCloud coordination; ignore zero-byte outputs in skip-if-exists | I-4 | Correctness on NAS and iCloud; maintainer-planned (§F12) | M |
@@ -2581,7 +2582,7 @@ P1 = core feature, P2 = supporting, P3 = docs/infra.
 | 49 | P3 | `AGENTS.md` | doc | 397 | 477b4c7b | Agent guide (rewritten 2026-09-26; points to this doc; keep mirrored) |
 | 50 | P2 | `Tests/MosaicKitTests/BenchmarkTests.swift` | test | 231 | 3ac1e33b | Opt-in throughput benchmark (`MOSAICKIT_BENCHMARK`); gate for ⚡ plan steps |
 | 51 | P2 | `Tests/MosaicKitTests/LegacyConfigurationDecodingTests.swift` | test | 199 | fc113746 | Pinned 1.0.0, 1.3.2, 1.7.0 + minimal config payloads (I-24 guard) |
-| 52 | P2 | `Tests/MosaicKitTests/RotatedSourceTests.swift` | test | 57 | ecc0463c | Rotated portrait fixture; I-1 known issue |
+| 52 | P2 | `Tests/MosaicKitTests/RotatedSourceTests.swift` | test | 57 | ecc0463c | Rotated portrait fixture; I-1 regression test |
 | 53 | P2 | `Tests/MosaicKitTests/PreviewExportSmokeTests.swift` | test | 109 | 8b5a4333 | Only end-to-end preview export in CI (native) |
 | 54 | P2 | `Tests/MosaicKitTests/MosaicCompositionPathTests.swift` | test | 62 | c8ec289f | `generate` vs `generateMosaicImage` equivalence (S-2) |
 | 55 | P2 | `Tests/MosaicKitTests/BatchRunnerTests.swift` | test | 189 | a9e1715d | Batch runners (fake mosaic generator) + I-15 + preview composition batch (S-3) |
@@ -2615,7 +2616,7 @@ RELATED PRs (merged): #32 this doc (+README unreleased note); #33 iOS CI scheme 
              #31 closed (duplicate of #33). Open: #37 CLAUDE.md/AGENTS.md rewrite + this refresh
 
 FILE_MAP_SUMMARY: Appendix A (60 files; P0 = 8, P1 = 15)
-ISSUE REGISTER:   §4.2 I-1 … I-27   (High: I-1, I-2; Medium: I-3 I-4 I-8 I-12 I-16 I-20 I-22 I-24 I-26 I-27; fixed: I-2 I-3 I-15 I-16 I-23 I-24 I-27)
+ISSUE REGISTER:   §4.2 I-1 … I-27   (High: I-1, I-2; Medium: I-3 I-4 I-8 I-12 I-16 I-20 I-22 I-24 I-26 I-27; fixed: I-1 I-2 I-3 I-15 I-16 I-23 I-24 I-27)
 ROADMAP:          §6.1 → IMPLEMENTATION_PLAN.md (decisions §6.4)
 OPEN_QUESTIONS:   §6.2 (Q11 Q14 Q16 Q17; Q13 answered in F-2)
 GLOSSARY:         §5.1

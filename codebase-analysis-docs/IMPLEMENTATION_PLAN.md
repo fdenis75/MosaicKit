@@ -135,7 +135,7 @@ Every PR updates its row here (status) and the matching §4.2 / §6.1 entries in
 | S-5 | done | #45 |
 | S-6 | done | #48 |
 | S-7 | optional | |
-| F-1 | planned | |
+| F-1 | done; A/B/A benchmark gate passed (§8.1) | #50 |
 | F-2 | done (I-2, I-3; Q13 answered; found and fixed I-27) | #49 |
 | F-3 | planned | |
 | F-4 | planned | |
@@ -205,6 +205,25 @@ A). Peak RSS: B was higher in both `auto` mosaic rows (+16–23 %) in its single
 not change how many jobs run at once or what they hold, and identical code has moved about
 20 % in these rows before, so this is recorded to recheck on the next ⚡ run rather than
 treated as a regression.
+
+**F-1 A/B/A run** (2026-10-13, same machine, one session; 4 files / 735 MB in
+`/Users/francois/Dev/testvids`, two DJI clips each present twice, none rotated; A = `main@cd1cf36`,
+B = `claude/f1-rotated-sources-i1`). This is a different, smaller set than the baseline above, so
+compare only within this table. Medians in seconds; peak RSS in MB.
+
+| Scenario | Concurrency | A1 | B | A2 | B vs mean(A) | Peak RSS A1 / B / A2 |
+|---|---|---|---|---|---|---|
+| mosaic-5120-M | 1 | 3.23 | 3.17 | 3.26 | −2.3 % | 589 / 588 / 588 |
+| mosaic-5120-M | auto | 1.38 | 1.40 | 1.39 | +1.1 % | 1298 / 1297 / 1291 |
+| mosaic-10000-XS | 1 | 8.80 | 8.78 | 8.94 | −1.0 % | 2358 / 2366 / 2400 |
+| mosaic-10000-XS | auto | 6.44 | 5.73 | 5.74 | −5.9 % | 3382 / 3541 / 3282 |
+| anim-gif-small | 1 | 4.81 | 4.90 | 4.60 | +4.1 % | 3382 / 3541 / 3282 |
+| anim-gif-small | auto | 3.06 | 3.01 | 2.97 | −0.2 % | 3382 / 3541 / 3282 |
+| anim-webp-small | 1 | 11.07 | 11.23 | 10.99 | +1.8 % | 3382 / 3541 / 3282 |
+| anim-webp-small | auto | 9.38 | 9.61 | 9.38 | +2.5 % | 3382 / 3541 / 3282 |
+
+No row regresses beyond noise (A1 and A2 differ by up to 4.5 % on the same code). The fix only
+adds one `load(.preferredTransform)` per inspection, and none of these clips is rotated.
 
 ## 9. Decision log (autonomous work)
 
