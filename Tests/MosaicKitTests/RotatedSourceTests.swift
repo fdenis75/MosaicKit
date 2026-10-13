@@ -9,11 +9,9 @@ import Testing
 /// `embeddedAsset/rotated_portrait.mp4` is an 8-second, 8-bit H.264 clip whose samples are
 /// 640×360 with a 90° track transform, so it displays as 360×640 like a portrait phone video.
 ///
-/// Today frame extraction honours the rotation (portrait frames), but inspection stores the
-/// untransformed `naturalSize` (landscape), so the layout gets landscape cells and every frame
-/// is stretched. The known-issue test below documents that; plan step F-1 fixes I-1 and must
-/// remove the `withKnownIssue` wrapper (Swift Testing fails the test once the issue stops
-/// reproducing, so the fix cannot land silently).
+/// Frame extraction honours the rotation (portrait frames), and since F-1 (I-1) inspection
+/// reports the display size (`naturalSize` with `preferredTransform` applied), so the layout
+/// gets portrait cells and frames are not stretched.
 struct RotatedSourceTests {
 
     private var fixtureURL: URL {
@@ -48,10 +46,8 @@ struct RotatedSourceTests {
             layoutType: .classic
         )
 
-        withKnownIssue("I-1: inspection stores the untransformed naturalSize (fixed by plan step F-1)") {
-            #expect(height > width, "Inspected size is \(width)×\(height); the clip displays as 360×640")
-            #expect(layout.thumbnailSize.height > layout.thumbnailSize.width,
-                    "Classic layout cells are \(layout.thumbnailSize); portrait frames would be stretched into them")
-        }
+        #expect(width == 360 && height == 640, "Inspected size is \(width)×\(height); the clip displays as 360×640")
+        #expect(layout.thumbnailSize.height > layout.thumbnailSize.width,
+                "Classic layout cells are \(layout.thumbnailSize); portrait frames would be stretched into them")
     }
 }
