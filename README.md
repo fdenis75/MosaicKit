@@ -37,7 +37,7 @@ A high-performance Swift package for generating video mosaics with Metal-acceler
 ### Fixes
 
 - **ffmpeg export could hang after ffmpeg exited** (I-27, #49) — a very short ffmpeg run could leave `waitUntilExit()` blocked forever while the stderr handler spun at about 75 % CPU. The exit status now comes from `terminationHandler`, installed before `run()`, and the stderr handler detaches at EOF.
-- **Concurrent jobs on the same input no longer clobber each other** (I-15, #42) — cancellation state, progress handlers and task tracking in `MosaicGeneratorCoordinator` are keyed per attempt instead of per video ID. Cancelling a video cancels every concurrent attempt on it.
+- **Concurrent jobs on the same input no longer clobber each other** (I-15, #42) — cancellation state and task tracking in `MosaicGeneratorCoordinator` are keyed per attempt instead of per video ID, and the coordinator's progress handlers are per attempt too. Cancelling a video cancels every concurrent attempt on it. Known limit: `MetalMosaicGenerator.setProgressHandler(for:)` is still keyed by video, so two concurrent attempts on one video can swap per-stage progress callbacks there.
 - **Older saved configurations decode again** (I-24, #45) — `MosaicConfiguration` decodes JSON saved by every release since 1.0.0. Keys added later (`overlay`, `gifMode`, `gifSize`, `animatedFormat`, `overwrite`, `gifFps`, `createOutputSubdirectory`) fall back to the initializer defaults instead of failing the decode.
 - **Cancelled ffmpeg exports stop promptly under load** (#34) — the ffmpeg cancellation and kill watchdog no longer depends on the Swift cooperative thread pool. Killing an ffmpeg that ignored SIGTERM could take 16 to 20 s when the pool was saturated.
 - **A missing SJS export output reports `.failed` progress** (#43).
@@ -57,7 +57,7 @@ Public API that MosaicKit itself no longer uses now carries `@available(*, depre
 
 ### Internal
 
-- One mosaic composition path (S-2, #41), one batch runner per coordinator (S-3, #42) and one export watchdog shared by the native, SJS and passthrough exports (S-4, #43). Each passed its throughput benchmark gate; no row regressed beyond noise.
+- One mosaic composition path (S-2, #41), one batch runner per coordinator (S-3, #42) and one export watchdog shared by the native, SJS and passthrough exports (S-4, #43). S-2 and S-3 each passed their throughput benchmark gate with no row regressed beyond noise; S-4 was gated by CI and the preview export smoke test.
 - CI no longer runs the 108-run animated matrix (#36); an opt-in throughput benchmark (`MOSAICKIT_BENCHMARK`, #39) and export stress test were added.
 
 ### Known issue
