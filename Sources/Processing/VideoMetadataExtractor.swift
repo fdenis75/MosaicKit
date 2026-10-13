@@ -53,7 +53,13 @@ actor VideoMetadataExtractor {
         // Find video track and load properties
         if let videoTrack = tracks.first(where: { $0.mediaType == .video }) {
             // Load multiple track properties at once for better performance
-            let (size, fps, formats) = try await videoTrack.load(.naturalSize, .nominalFrameRate, .formatDescriptions)
+            let (naturalSize, transform, fps, formats) = try await videoTrack.load(
+                .naturalSize, .preferredTransform, .nominalFrameRate, .formatDescriptions
+            )
+            // naturalSize is the stored (unrotated) size; report display dimensions, as
+            // frame extraction (appliesPreferredTrackTransform) and the preview composition do.
+            let transformed = naturalSize.applying(transform)
+            let size = CGSize(width: abs(transformed.width), height: abs(transformed.height))
 
             try Task.checkCancellation()
             guard size.width.isFinite, size.height.isFinite,
