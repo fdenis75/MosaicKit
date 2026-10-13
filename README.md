@@ -19,13 +19,55 @@ A high-performance Swift package for generating video mosaics with Metal-acceler
 - 🧭 **Explicit job lifecycle control** - Track work with stable job and attempt IDs, and cancel, pause, or retry individual operations
 - 🛡️ **Reliable outputs and validation** - Inputs/configurations are validated early and generated files are committed atomically
 
-## Unreleased (since 1.7.0)
+## Unreleased
 
-- **Rotated (portrait phone) sources keep their aspect ratio** — inspection now reports display dimensions (`naturalSize` with `preferredTransform` applied), so mosaic cells are portrait for portrait clips instead of stretching rotated frames into landscape cells (I-1). Behavior change: `VideoInput.width` / `height` and the header "Resolution" field now show the displayed size (for example 1080×1920 instead of 1920×1080) for rotated sources.
-- **Mosaic frame extraction reverted to the batched pipeline** — the pull-based, bounded frame source introduced in 1.7.0 made mosaic generation 30–45 % slower, so extraction is back to batched `AVAssetImageGenerator` requests feeding pipelined 20-frame Metal command buffers (#28, #29). The 1.7.0 "pull-based bounded stream" bullet below no longer describes the current implementation.
-- **Older saved configurations decode again** — `MosaicConfiguration` now decodes JSON saved by every release since 1.0.0. Keys added later (`overlay`, the animation keys, `overwrite`, `gifFps`) fall back to the initializer defaults instead of failing the decode.
-- **Logging** — the unused `swift-log` dependency is removed, and every component now logs under the OSLog subsystem `com.mosaicKit`. Console filters on `com.mosaickit` (lowercase, previously used by the preview components) no longer match.
-- **Deprecations (removed in 2.0)** — public API that MosaicKit itself no longer uses now carries `@available(*, deprecated)` with a replacement in its message: `GenerationJobController` and its job types (`GenerationJobID`, `GenerationAttemptID`, `GenerationJobState`, `GenerationJobSnapshot`), whose cancel and retry are incomplete; `generateallcombinations(for:config:)` (on `MetalMosaicGenerator` and `MosaicGeneratorProtocol`), which ignores most of its configuration; the array-based `ThumbnailProcessor` helpers (`extractThumbnails`, `extractFramesStream`, `extractThumbnailsUI`, `generateMosaic`, the legacy `createMetadataHeader(metadata:…)`); `MetalImageProcessor.generateMosaic(from:…)`; `MosaicLayout.drawMosaicASCIIArt()`; `FFmpegEncodingOptions.forPreview(quality:)`; and `PreviewGeneratorCoordinator.getConcurrencyLimit()` / `getActiveGenerationCount()`. They still work unchanged.
+- Nothing yet. Add a line here for every change; output-naming and location changes (📁) also get a **Behavior changes** note.
+
+## New in 1.8.0
+
+### Behavior changes
+
+- **Rotated (portrait phone) sources report display dimensions** — inspection now applies `preferredTransform` to `naturalSize` (I-1, #50). `VideoInput.width` / `height` and the header "Resolution" field used to show the stored size (1920×1080 for a phone clip) and now show the displayed size (1080×1920). Mosaic cells for portrait clips are portrait instead of stretching rotated frames into landscape cells. Code that assumed `width > height` for phone footage needs a look.
+- **ffmpeg preview export keeps the source frame rate** — HEVC export (`.hevc`, `.hevcVideoToolbox`) no longer forces `-r 30` (I-3, #49), so 24, 25, 50 and 60 fps clips stay as they are.
+- **ffmpeg preview export preserves aspect ratio** — `ExportMaxResolution.scaleFilter` now bounds each axis (W/H swapped for portrait sources) and adds `force_original_aspect_ratio=decrease:force_divisible_by=2` (I-2, #49). A 3840×1600 source capped at 1080p now comes out 1920×800 instead of a stretched 1920×1080. The filter string changed, so anything that pins it must be updated.
+- **ffmpeg HEVC pixel format** — libx265 now gets `-pix_fmt yuv420p10le`; `p010le` stays for `hevc_videotoolbox` (I-3, #49). Output is unchanged apart from ffmpeg no longer warning about a conversion.
+- **Logging** — the unused `swift-log` dependency is removed, and every component logs under the OSLog subsystem `com.mosaicKit` (#38, #44). Console filters on `com.mosaickit` (lowercase, previously used by the preview components) no longer match.
+- **`MosaicGeneratorCoordinator.activeTasks` is read-only** — it was a `public var` and is now a computed view keyed by video ID (S-3, #42). Code that assigned to it no longer compiles. This is a small source-level break.
+
+### Fixes
+
+- **ffmpeg export could hang after ffmpeg exited** (I-27, #49) — a very short ffmpeg run could leave `waitUntilExit()` blocked forever while the stderr handler spun at about 75 % CPU. The exit status now comes from `terminationHandler`, installed before `run()`, and the stderr handler detaches at EOF.
+- **Concurrent jobs on the same input no longer clobber each other** (I-15, #42) — cancellation state, progress handlers and task tracking in `MosaicGeneratorCoordinator` are keyed per attempt instead of per video ID. Cancelling a video cancels every concurrent attempt on it.
+- **Older saved configurations decode again** (I-24, #45) — `MosaicConfiguration` decodes JSON saved by every release since 1.0.0. Keys added later (`overlay`, `gifMode`, `gifSize`, `animatedFormat`, `overwrite`, `gifFps`, `createOutputSubdirectory`) fall back to the initializer defaults instead of failing the decode.
+- **Cancelled ffmpeg exports stop promptly under load** (#34) — the ffmpeg cancellation and kill watchdog no longer depends on the Swift cooperative thread pool. Killing an ffmpeg that ignored SIGTERM could take 16 to 20 s when the pool was saturated.
+- **A missing SJS export output reports `.failed` progress** (#43).
+- **Export default documented correctly** (I-13, #45) — the default `exportMaxResolution` is `1080p`, as before; the 1.6.2 note that claimed 4K now carries a correction. No behavior change.
+
+### Deprecations (removed in 2.0)
+
+Public API that MosaicKit itself no longer uses now carries `@available(*, deprecated)` with a replacement in its message (S-6, #48). All of it still works unchanged:
+
+- `GenerationJobController` and its job types (`GenerationJobID`, `GenerationAttemptID`, `GenerationJobState`, `GenerationJobSnapshot`), whose cancel and retry are incomplete (I-14) — use `MosaicGeneratorCoordinator` or `PreviewGeneratorCoordinator`.
+- `generateallcombinations(for:config:)` (on `MetalMosaicGenerator` and `MosaicGeneratorProtocol`), which ignores most of its configuration — call `generate(for:config:forIphone:)` once per configuration.
+- The array-based `ThumbnailProcessor` helpers (`extractThumbnails`, `extractFramesStream`, `extractThumbnailsUI`, `generateMosaic`) and `MetalImageProcessor.generateMosaic(from:…)` — use `MetalMosaicGenerator.generateMosaicImage(for:config:forIphone:)`, or `AVAssetImageGenerator` for raw frames.
+- The legacy `ThumbnailProcessor.createMetadataHeader(metadata:…)` — use `createMetadataHeader(for:width:height:thumbnailHeight:backgroundColor:forIphone:headerConfig:swatchColors:)`.
+- `MosaicLayout.drawMosaicASCIIArt()` — use `description()`.
+- `FFmpegEncodingOptions.forPreview(quality:)` — use `from(quality:format:)`.
+- `PreviewGeneratorCoordinator.getConcurrencyLimit()` / `getActiveGenerationCount()` — keep the value you passed to `init(concurrencyLimit:)` or `setConcurrencyLimit(_:)`, and count in-flight work from your progress handlers.
+
+### Internal
+
+- One mosaic composition path (S-2, #41), one batch runner per coordinator (S-3, #42) and one export watchdog shared by the native, SJS and passthrough exports (S-4, #43). Each passed its throughput benchmark gate; no row regressed beyond noise.
+- CI no longer runs the 108-run animated matrix (#36); an opt-in throughput benchmark (`MOSAICKIT_BENCHMARK`, #39) and export stress test were added.
+
+### Known issue
+
+- **Native preview export can stall under macOS background scheduling** (I-26, #46, #47). The cause is understood but not fixed: apps and command-line tools should leave background scheduling before exporting (see `ProcessScheduling.leaveBackground()` in the tests).
+
+## New in 1.7.1 – 1.7.4
+
+- **Mosaic frame extraction reverted to the batched pipeline** (1.7.1–1.7.3, #27, #28, #29) — the pull-based, bounded frame source introduced in 1.7.0 made mosaic generation 30–45 % slower, so extraction is back to batched `AVAssetImageGenerator` requests feeding pipelined 20-frame Metal command buffers. The 1.7.0 "pull-based bounded stream" bullet below no longer describes the current implementation.
+- **Non-overwrite output publish works on SMB shares** (1.7.4, #30).
 
 ## New in 1.7.0
 
@@ -34,7 +76,7 @@ A high-performance Swift package for generating video mosaics with Metal-acceler
 - **Reliable cancellation and retries** — mosaic, preview, animated-image, and FFmpeg pipelines now
   observe cancellation at extraction, GPU, encoding, and cleanup boundaries; failed attempts cannot
   be reported with partial output files.
-- **Bounded and faster mosaic processing** — frame extraction uses a pull-based bounded stream,
+- **Bounded and faster mosaic processing** — frame extraction uses a pull-based bounded stream *(reverted in 1.7.1–1.7.3, see above)*,
   layout caching includes all relevant inputs, and GPU failures are propagated with diagnostics.
 - **Safer preview exports** — staged output commits, ordered batch progress, bounded FFmpeg
   termination diagnostics, audio-mix forwarding, fractional frame rates, and correct portrait
@@ -134,7 +176,7 @@ Add MosaicKit to your `Package.swift`:
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/fdenis75/MosaicKit.git", from: "1.2.0")
+    .package(url: "https://github.com/fdenis75/MosaicKit.git", from: "1.8.0")
 ]
 ```
 
