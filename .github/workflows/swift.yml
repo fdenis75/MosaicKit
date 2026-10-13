@@ -10,11 +10,23 @@
 
 name: Swift
 
+# Docs-only changes don't build or test anything, so they skip the (slow) jobs below.
+# Anything outside these paths, including Package.swift, workflows and sources, still runs.
 on:
   push:
     branches: ["main", "claude/**"]
+    paths-ignore:
+      - "**/*.md"
+      - "codebase-analysis-docs/**"
+      - "tasks/**"
+      - "LICENSE"
   pull_request:
     branches: ["main"]
+    paths-ignore:
+      - "**/*.md"
+      - "codebase-analysis-docs/**"
+      - "tasks/**"
+      - "LICENSE"
 
 concurrency:
   group: swift-${{ github.ref }}
