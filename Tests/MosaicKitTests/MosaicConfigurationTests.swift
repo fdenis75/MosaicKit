@@ -185,7 +185,23 @@ struct MosaicConfigurationTests {
         #expect(components.count == 3)
         #expect(components[0].wholeMatch(of: /\d{4}-\d{2}-\d{2}/) != nil, "Missing date component")
         #expect(components[1].wholeMatch(of: /\d{2}-\d{2}-\d{2}/) != nil, "Missing time component")
-        #expect(components[2] == "3840_S_9:16_classic")
+        #expect(components[2] == "3840_S_9-16_classic")
+    }
+
+    @Test("{aspectRatio} renders with a dash in directory and filename templates (I-11)")
+    func aspectRatioTokenHasNoColon() async {
+        let video = await makeVideoInput(filePath: "/Volumes/volname/test/test.mp4")
+        var config = MosaicConfiguration(width: 3840, density: .s)
+        config.layout.aspectRatio = .vertical
+        config.outputDirectoryTemplate = "{root}/{aspectRatio}"
+        config.filenameTemplate = "{name}_{aspectRatio}"
+        let root = URL.homeDirectory.appendingPathComponent("mosaic-tests")
+
+        let directory = config.generateOutputDirectory(rootDirectory: root, videoInput: video)
+        #expect(directory.lastPathComponent == "9-16")
+        let filename = config.generateFilename(originalFilename: "test", videoInput: video)
+        #expect(!filename.contains(":"))
+        #expect(filename.contains("9-16"))
     }
 
     @Test("createOutputSubdirectory round-trips through Codable")

@@ -419,7 +419,7 @@ public struct MosaicConfiguration: Codable, Sendable {
             "hash": configurationHash,
             "width": String(width),
             "density": density.name,
-            "aspectRatio": layout.aspectRatio.rawValue,
+            "aspectRatio": layout.aspectRatio.rawValue.replacingOccurrences(of: ":", with: "-"),
             "layout": layout.layoutType.rawValue,
             "date": today,
             "time": now
@@ -532,7 +532,7 @@ public struct MosaicConfiguration: Codable, Sendable {
             "ext": format.fileExtension,
             "width": String(width),
             "density": density.name,
-            "aspectRatio": layout.aspectRatio.rawValue,
+            "aspectRatio": layout.aspectRatio.rawValue.replacingOccurrences(of: ":", with: "-"),
             "layout": layout.layoutType.rawValue,
             "hash": configurationHash,
             "postID": videoInput.postID.map { Self.sanitizeForFilePath($0) },
