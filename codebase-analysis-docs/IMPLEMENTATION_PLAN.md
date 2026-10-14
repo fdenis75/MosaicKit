@@ -115,8 +115,7 @@ flowchart LR
 **Releases:**
 
 - **1.8.0** after waves 1–3: deprecations; F-1 and F-2 fixes. **Released 2026-10-13.** One small source-level break shipped and is documented as a behavior change: `MosaicGeneratorCoordinator.activeTasks` became read-only in S-3 (accepted by the maintainer).
-- **1.9.0** after wave 4: includes the 📁 naming and publication changes, called out in the
-  changelog.
+- **1.9.0**: planned for after wave 4 with the 📁 naming and publication changes. It **ships early (2026-10-14) with F-3, F-6 and F-7 only** (F-3 is the 📁 naming change, called out in the changelog); F-4 (publication), F-5 and F-8 move to a later release.
 - **2.0.0** removes everything deprecated in S-6.
 
 ## 8. Tracking
@@ -140,7 +139,7 @@ Every PR updates its row here (status) and the matching §4.2 / §6.1 entries in
 | F-3 | done (I-11, I-12) | #54 |
 | F-4 | planned | |
 | F-5 | planned | |
-| F-6 | planned | |
+| F-6 | done (I-22) | #56 |
 | F-7 | done (I-8, I-9) | #55 |
 | F-8 | planned | |
 

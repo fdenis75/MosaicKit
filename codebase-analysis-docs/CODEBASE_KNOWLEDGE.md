@@ -423,6 +423,7 @@ Default values worth knowing:
 | Source code | **Authoritative** | Always verify against it. |
 | `README.md` | High, with exceptions | Current through 1.7.0, but the 1.7.0 "bounded pull-based stream" note describes a design that was later **reverted** for performance (§2.6). Other exception: "New in 1.6.2" says the default `ExportMaxResolution` is **4K**, but the code defaults to **"1080p"** (§1.10 item 4). The installation snippet still says `from: "1.2.0"`. |
 | `MIGRATING-TO-1.8.md` | High | Upgrade guide from 1.7.x to 1.8.0 (breaking and behavior changes, deprecations). Verified against tags `1.7.4` and `1.8.0` (public API diff). |
+| `MIGRATING-TO-1.9.md` | High | Upgrade guide from 1.8.x to 1.9.0 (source breaks, naming and layout behavior changes). Verified against tags `1.8.0` and `1.9.0` (public API diff). |
 | `CLAUDE.md` / `AGENTS.md` | High (rewritten 2026-09-26) | Both files are identical except for the title and first paragraph, and point agents to this document first. Earlier errors (swift-log, "no Makefile", `swift run` examples, nonexistent workflows, `Models/AspectRatio.swift`, Core Graphics/vImage, `VideoFormat` as the mosaic format) are corrected. Keep the two files in sync. |
 | `MosaicKit-DeepDive.md` | **Stale — do not trust architecture sections** | Describes the removed dual engine (`CoreGraphicsMosaicGenerator`, `MosaicGeneratorFactory`, vImage buffer pool) and a `.gif` still format. The coordinator concurrency formula it gives is for previews only, and the cap of 8 it quotes is really 2. |
 | `spec.md` | **Design intent, only partly implemented** | Describes a `GenerationRequest/Plan`, `JobHandle/BatchHandle`, checkpoint ledger, and a single processing-service actor. None of these exist. What does exist: `VideoSource`, `OutputTransaction`, validation, `GenerationJobController` (the spec's `MosaicFrameSource` shipped in 1.7.0, was reverted, and was removed in S-1, #38). |
@@ -2633,7 +2634,7 @@ RELATED PRs (merged): #32 this doc (+README unreleased note); #33 iOS CI scheme 
              #31 closed (duplicate of #33). Open: #37 CLAUDE.md/AGENTS.md rewrite + this refresh
 
 FILE_MAP_SUMMARY: Appendix A (60 files; P0 = 8, P1 = 15)
-ISSUE REGISTER:   §4.2 I-1 … I-27   (High: I-1, I-2; Medium: I-3 I-4 I-8 I-12 I-16 I-20 I-22 I-24 I-26 I-27; fixed: I-1 I-2 I-3 I-9 I-11 I-12 I-15 I-16 I-23 I-24 I-27)
+ISSUE REGISTER:   §4.2 I-1 … I-27   (High: I-1, I-2; Medium: I-3 I-4 I-8 I-12 I-16 I-20 I-22 I-24 I-26 I-27; fixed: I-1 I-2 I-3 I-9 I-11 I-12 I-15 I-22 I-16 I-23 I-24 I-27)
 ROADMAP:          §6.1 → IMPLEMENTATION_PLAN.md (decisions §6.4)
 OPEN_QUESTIONS:   §6.2 (Q11 Q14 Q16 Q17; Q13 answered in F-2)
 GLOSSARY:         §5.1

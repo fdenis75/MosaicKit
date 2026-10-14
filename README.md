@@ -21,12 +21,28 @@ A high-performance Swift package for generating video mosaics with Metal-acceler
 
 ## Unreleased
 
+- Nothing yet. Add a line here for every change; output-naming and location changes (📁) also get a **Behavior changes** note.
+
+## New in 1.9.0
+
+Upgrading from 1.8.x? [MIGRATING-TO-1.9.md](MIGRATING-TO-1.9.md) lists every change that can break an app, who is affected, and how to adapt.
+
 ### Behavior changes
 
-- **`LayoutType.dynamic` is deprecated and laid out as `.custom`** (I-8) — the old algorithm produced overlapping rows and clipped cells. Configurations that store `"dynamic"` still decode; a one-time warning is logged, and `LayoutType.allCases` no longer lists it. Output for `.dynamic` users changes to the `.custom` layout. Removed in 2.0.
-- **`.auto` layout works on small screens** (I-9) — it now measures the screen in pixels throughout (the minimum cell is 160 points), so an iPhone no longer ends with 0 columns and an empty layout; the automatic frame count is at least 4.
-- **Preview default file names are deterministic** (I-12) — the default name no longer contains the run timestamp (`_preview_<name>_<config>.<ext>` instead of `…_<yyyy-MM-dd_HH-mm-ss>_.<ext>`), so `overwrite == false` now skips a preview that already exists. Previews saved under the old names are not recognized and are regenerated once. The timestamp is available as the opt-in `{time}` token (`HH-mm-ss`) of `PreviewConfiguration.filenameTemplate`; a template with `{time}` never matches an earlier run.
-- **`{aspectRatio}` renders as `16-9`** (I-11) — in `MosaicConfiguration` directory and filename templates the token no longer inserts a colon (`16:9`), which Finder shows as `/` and SMB or exFAT reject. Outputs of users of the token move, and so do animation names derived from the mosaic name.
+- **Preview default file names are deterministic** (I-12, #54) — the default name no longer contains the run timestamp (`_preview_<name>_<config>.<ext>` instead of `…_<yyyy-MM-dd_HH-mm-ss>_.<ext>`), so `overwrite == false` now skips a preview that already exists. Previews saved under the old names are not recognized and are regenerated once. The timestamp is available as the opt-in `{time}` token (`HH-mm-ss`) of `PreviewConfiguration.filenameTemplate`; a template with `{time}` never matches an earlier run.
+- **`{aspectRatio}` renders as `16-9`** (I-11, #54) — in `MosaicConfiguration` directory and filename templates the token no longer inserts a colon (`16:9`), which Finder shows as `/` and SMB or exFAT reject. Outputs of users of the token move, and so do animation names derived from the mosaic name.
+- **`LayoutType.dynamic` is deprecated and laid out as `.custom`** (I-8, #55) — the old algorithm produced overlapping rows and clipped cells. Configurations that store `"dynamic"` still decode; a one-time warning is logged, and `LayoutType.allCases` no longer lists it. Output for `.dynamic` users changes to the `.custom` layout. Removed in 2.0.
+- **`.auto` layout works on small screens** (I-9, #55) — it now measures the screen in pixels throughout (the minimum cell is 160 points), so an iPhone no longer ends with 0 columns and an empty layout; the automatic frame count is at least 4. On a desktop the canvas is now the screen's pixel size (for example 3024 px wide on a 2x display, where it used to be 1512).
+- **iOS fails fast on undecodable H.264** (I-22, #56) — inspecting a video whose H.264 profile iOS cannot decode (High 10, High 4:2:2, High 4:4:4) now throws the new `VideoError.unsupportedCodec(URL, String)`, which names the codec and suggests re-encoding, instead of every frame extraction failing later. Every sample description of the track is checked. macOS and Mac Catalyst are unaffected. Code that switches exhaustively over `VideoError` needs a new case.
+
+### Internal
+
+- The Swift workflow is skipped for docs-only changes (#52).
+- The 1.8.0 migration guide, [MIGRATING-TO-1.8.md](MIGRATING-TO-1.8.md), was added (#57).
+
+### Known issue
+
+- **Native preview export can stall under macOS background scheduling** (I-26), unchanged from 1.8.0. See the `PreviewExporting` article.
 
 ## New in 1.8.0
 
@@ -184,7 +200,7 @@ Add MosaicKit to your `Package.swift`:
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/fdenis75/MosaicKit.git", from: "1.8.0")
+    .package(url: "https://github.com/fdenis75/MosaicKit.git", from: "1.9.0")
 ]
 ```
 
