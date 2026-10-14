@@ -28,12 +28,15 @@ A high-performance Swift package for generating video mosaics with Metal-acceler
 
 ## New in 1.8.0
 
+Upgrading from 1.7.x? [MIGRATING-TO-1.8.md](MIGRATING-TO-1.8.md) lists every change that can break an app, who is affected, and how to adapt.
+
 ### Behavior changes
 
 - **Rotated (portrait phone) sources report display dimensions** — inspection now applies `preferredTransform` to `naturalSize` (I-1, #50). `VideoInput.width` / `height` and the header "Resolution" field used to show the stored size (1920×1080 for a phone clip) and now show the displayed size (1080×1920). Mosaic cells for portrait clips are portrait instead of stretching rotated frames into landscape cells. Code that assumed `width > height` for phone footage needs a look.
 - **ffmpeg preview export keeps the source frame rate** — HEVC export (`.hevc`, `.hevcVideoToolbox`) no longer forces `-r 30` (I-3, #49), so 24, 25, 50 and 60 fps clips stay as they are.
 - **ffmpeg preview export preserves aspect ratio** — `ExportMaxResolution.scaleFilter` now bounds each axis (W/H swapped for portrait sources) and adds `force_original_aspect_ratio=decrease:force_divisible_by=2` (I-2, #49). A 3840×1600 source capped at 1080p now comes out 1920×800 instead of a stretched 1920×1080. The filter string changed, so anything that pins it must be updated.
 - **ffmpeg HEVC pixel format** — libx265 now gets `-pix_fmt yuv420p10le`; `p010le` stays for `hevc_videotoolbox` (I-3, #49). Output is unchanged apart from ffmpeg no longer warning about a conversion.
+- **A cancelled native or passthrough preview export reports `PreviewError.cancelled`** (S-4, #43) — a `CancellationError` from `AVAssetExportSession` used to surface as `PreviewError.encodingFailed`; it now matches the SJS path. Error handling that treats `.encodingFailed` as a failure and `.cancelled` as a user cancel now sees the cancel correctly.
 - **Logging** — the unused `swift-log` dependency is removed, and every component logs under the OSLog subsystem `com.mosaicKit` (#38, #44). Console filters on `com.mosaickit` (lowercase, previously used by the preview components) no longer match.
 - **`MosaicGeneratorCoordinator.activeTasks` is read-only** — it was a `public var` and is now a computed view keyed by video ID (S-3, #42). Code that assigned to it no longer compiles. This is a small source-level break.
 
