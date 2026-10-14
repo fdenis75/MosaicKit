@@ -998,7 +998,7 @@ graph LR
     `schedule` (03:17 UTC) and `workflow_dispatch` triggers of the same workflow leave it empty, so
     they run every night on `main` and on demand (`gh workflow run Swift --ref <branch>`). The
     macOS job still runs them (seconds). The HEIC integration test now uses density `.xxl`.
-    The two diagnostic steps (simulator list, `xcodebuild -list`) were removed.
+    The two diagnostic steps (simulator list, `xcodebuild -list`) were removed. The nightly and manual runs use their own concurrency group (`swift-<ref>-extended`), so a push to `main` can't cancel them.
   - Plus `claude-code-review.yml` (PR review bot; since PR #35 it runs only when code paths
     change) and `claude.yml` (@claude mentions).
 
@@ -2603,7 +2603,7 @@ P1 = core feature, P2 = supporting, P3 = docs/infra.
 | 41 | P2 | `Tests/MosaicKitTests/PreviewCancellationTests.swift` | test | 371 | a144428d | Skipped when `MOSAICKIT_SUITE_MODE=none` |
 | 42 | P2 | `Tests/MosaicKitTests/InputValidationRegressionTests.swift` | test | 129 | 1f41f0d4 | Validation regressions |
 | 43 | P2 | `Tests/MosaicKitTests/OutputTransactionTests.swift` | test | 43 | cd1a7e9a | Atomic commit |
-| 44 | P3 | `.github/workflows/swift.yml` | ci | 148 | cb5b4d47 | macOS `swift test` + iOS Sim `xcodebuild`; skipped for docs-only changes; animated tests nightly only |
+| 44 | P3 | `.github/workflows/swift.yml` | ci | 151 | 58dee9db | macOS `swift test` + iOS Sim `xcodebuild`; skipped for docs-only changes; animated tests nightly only |
 | 45 | P3 | `README.md` | doc | 998 | 149953d1 | Changelog + usage |
 | 46 | P3 | `spec.md` | doc | 78 | 4508df31 | Reliability spec (partially implemented) |
 | 47 | P3 | `MosaicKit-DeepDive.md` | doc | 199 | 1e67bef6 | Stale architecture |

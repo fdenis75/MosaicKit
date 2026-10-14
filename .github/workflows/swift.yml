@@ -33,8 +33,11 @@ on:
     - cron: "17 3 * * *"
   workflow_dispatch:
 
+# Scheduled and manual runs get their own group: on `main` they share the ref with pushes, and a
+# push must not cancel the nightly run (the only one that runs the animated-export tests), nor
+# the nightly run cancel a normal check.
 concurrency:
-  group: swift-${{ github.ref }}
+  group: swift-${{ github.ref }}-${{ (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && 'extended' || 'ci' }}
   cancel-in-progress: true
 
 permissions:
