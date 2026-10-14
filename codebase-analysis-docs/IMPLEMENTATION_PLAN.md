@@ -140,7 +140,7 @@ Every PR updates its row here (status) and the matching §4.2 / §6.1 entries in
 | F-3 | done (I-11, I-12) | #54 |
 | F-4 | planned | |
 | F-5 | planned | |
-| F-6 | planned | |
+| F-6 | done (I-22) | #56 |
 | F-7 | planned | |
 | F-8 | planned | |
 

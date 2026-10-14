@@ -62,7 +62,7 @@ AVAssetExportSession, SJS, or an external ffmpeg for encoding.
 | Medium | ~~**I-12** preview skip-if-exists never matches~~ (fixed in F-3) |
 | Medium | **I-16** slow ffmpeg cancellation (fix in #34) |
 | Medium | **I-20** `.nochange` animation holds all frames in memory |
-| Medium | **I-22** 10-bit H.264 is undecodable on iOS (fixture fixed in #33) |
+| Medium | ~~**I-22** 10-bit H.264 is undecodable on iOS (fixture fixed in #33)~~ (fails fast since F-6) |
 | Medium | ~~**I-24** strict `MosaicConfiguration` decoding breaks older saved configs~~ (fixed in S-5) |
 | Medium | **I-26** native preview export stalls mid-encode under macOS background scheduling or a background QoS cap (reproduced), and on the CI virtual machine (known issue in the smoke test) |
 
@@ -289,7 +289,7 @@ work as the package stands. The files in `Examples/` are reference snippets only
 │   ├── VideoInputScanner.swift        scanVideos / discoverVideoSources / discoverVideos
 │   └── MosaicKit.docc/                DocC catalog (8 articles)
 ├── SourcesWebP/MosaicKitWebP.swift    → target "MosaicKitWebP" (DefaultMosaicKitWebPEncoder + register())
-├── Tests/MosaicKitTests/              Swift Testing suites (29 files) + embeddedAsset/ (test_video.mp4, rotated_portrait.mp4, pinned config JSON)
+├── Tests/MosaicKitTests/              Swift Testing suites (32 files) + embeddedAsset/ (test_video.mp4, rotated_portrait.mp4, pinned config JSON)
 ├── Examples/                          5 illustrative .swift files (NOT wired as SPM targets)
 ├── Media.xcassets/                    test_video dataset (same fixture, for Xcode)
 ├── .github/workflows/                 swift.yml (macOS + iOS Simulator CI), claude*.yml
@@ -881,7 +881,7 @@ graph LR
 | Mosaic processing | `MosaicError.processingFailed(String)` (missing or duplicate frames, empty layout, empty encoder output, publish errno), `.saveFailed(URL, NSError)`, `.fileExists(URL)` (exclusive create lost a race) | Many messages are free-form strings |
 | GPU | `MetalProcessorError.*`, including `commandBufferExecutionFailed(context:underlying:)` | **Does not conform to `LocalizedError`**, so the user-visible text is generic |
 | Preview | `PreviewError` (14 cases), wrapping AVFoundation `NSError`s in `encodingFailed` / `compositionFailed` | `exportStalled` drives the retry logic |
-| Unused | `VideoError`, `LibraryError` | Declared and tested for descriptions, but **never thrown** anywhere in `Sources/` |
+| Unused | `LibraryError` (and most `VideoError` cases) | Declared and tested for descriptions, but **never thrown** anywhere in `Sources/`; `VideoError.unsupportedCodec` is thrown by inspection since F-6 |
 
 ### 2.9 Cross-cutting concerns
 
@@ -971,7 +971,7 @@ graph LR
     (`.process("Shaders")`), and `Bundle.module` locates `default.metallib`.
   - The test target embeds `embeddedAsset/test_video.mp4` (87 s, 8-bit H.264 High, 720p, video-only).
 - **Tests:**
-  - Swift Testing, 29 files. `CombinationTests` and `PreviewCombinationTests` are `.serialized`.
+  - Swift Testing, 32 files. `CombinationTests` and `PreviewCombinationTests` are `.serialized`.
   - Suites that need a media folder read `MOSAICKIT_SUITE_MODE` (`single` | `folder` | `none`;
     unrecognized values → `single`, missing → `none`) and skip in `none`.
   - `BenchmarkTests` (plan P-1, #39) is an opt-in throughput benchmark, enabled only by
@@ -1021,7 +1021,7 @@ graph LR
    the same input can clobber each other's cancellation and progress. The preview coordinator
    was fixed to use attempt IDs; the mosaic one was not. *(Fixed in S-3: per-attempt keys,
    I-15.)*
-7. `VideoError` and `LibraryError` are dead. `MetalProcessorError` lacks `LocalizedError`.
+7. `LibraryError` and most `VideoError` cases are dead (`VideoError.unsupportedCodec` is live since F-6). `MetalProcessorError` lacks `LocalizedError`.
 8. `prioritizeVideos` is dead. `GenerationJobState.pausing` and `.retryScheduled` are never
    entered.
 9. iOS CI is red on `main` because of the scheme name (not code).
@@ -1132,6 +1132,12 @@ backbone. Read `LayoutProcessor` algorithms, `ThumbnailProcessor` header/label r
     `VideoInput` has no fields for them.
   - `VideoInput` equality and hashing include `id`, so two inspections of the same file are
     **not equal**.
+  - Since F-6 (I-22), inspection on iOS (not Mac Catalyst) throws `VideoError.unsupportedCodec`
+    for H.264 profiles the decoder rejects: High 10 (`profile_idc` 110), High 4:2:2 (122) and
+    High 4:4:4 (244, 44). The profile comes from the `avcC` atom of the first format
+    description (`VideoCodecSupport`). macOS decodes these profiles, so nothing is thrown there.
+    HEVC (including Main 10) is not checked. Inputs created with `VideoInput(url:…)` and
+    supplied metadata skip inspection, so they are not checked either.
 - **Tests:** `InputValidationRegressionTests` (cloning without I/O, inspection keeps custom
   metadata, invalid sources, cancellation).
 
@@ -1800,7 +1806,7 @@ robustness, performance, or cosmetic.
 | I-19 | F2 | `VideoInput(url:)` (legacy) swallows inspection errors and returns metadata-less inputs. `generateMosaicsForFiles` uses it. | Confirmed (static) | Low | `VideoInput.init(url:…) async` | Prefer `VideoInput(from:)` or `VideoSource.inspect()` in new code. |
 | I-20 | F6 | Animated export with `.nochange` holds all full-resolution frames in memory (e.g. 4K × up to 800 frames). | Confirmed (static) | Medium (memory) | `extractFramesForGif` returns `[CGImage]` | Stream frames into `CGImageDestination` / the WebP encoder incrementally, or cap `.nochange` by frame count. |
 | I-21 | CI | iOS job used a scheme with no test action; the tests never compiled for iOS. | **Fixed (PR #33, merged)**; #31 closed as duplicate | — | CI logs | Scheme `MosaicKit-Package` + `URL.homeDirectory` in `CombinationTests` + `TEST_RUNNER_` suite-mode forwarding |
-| I-22 | F2/F3/F6/F8 + CI | **10-bit H.264 ("High 10") sources cannot be decoded on iOS.** Mosaic and animation jobs fail entirely because extraction is strict. The embedded test fixture is itself High 10, so the 10 embedded-media tests fail on the iOS Simulator (178 run, 10 fail). | Confirmed (fixture `avcC`: `profile_idc 110`, 10-bit luma/chroma; CI: VideoToolbox `err=-8969` on every frame) | Medium (iOS) | CI run on PR #33 @ 85c6d5e; local `avcC` parse | CI: **fixture re-encoded to 8-bit H.264 High in PR #33 (merged)**. Product (still open): detect unsupported codec/bit depth at inspection (`formatDescriptions`) and fail fast with a clear `VideoError`/`MosaicError`, or fall back to a software path. |
+| I-22 | F2/F3/F6/F8 + CI | **10-bit H.264 ("High 10") sources cannot be decoded on iOS.** Mosaic and animation jobs fail entirely because extraction is strict. The embedded test fixture is itself High 10, so the 10 embedded-media tests fail on the iOS Simulator (178 run, 10 fail). | Confirmed (fixture `avcC`: `profile_idc 110`, 10-bit luma/chroma; CI: VideoToolbox `err=-8969` on every frame) | Medium (iOS) | CI run on PR #33 @ 85c6d5e; local `avcC` parse | CI: **fixture re-encoded to 8-bit H.264 High in PR #33 (merged)**. **Product: fixed in F-6** — inspection reads the `avcC` profile from the format description and, on iOS, throws `VideoError.unsupportedCodec(url, "H.264 High 10")` (also High 4:2:2 and 4:4:4) before any extraction; the message suggests re-encoding. **Tests:** `VideoCodecSupportTests` (synthetic `avcC` records and format descriptions). No software fallback was added. |
 | I-23 | Deps / logging | `swift-log` is declared in `Package.swift` but never imported. The OSLog subsystem is `com.mosaicKit` in most files but `com.mosaickit` in the preview files, which splits Console filtering. | **Fixed (S-1, #38)**: dependency removed; subsystem unified on `com.mosaicKit`. The stale `swift-log` pin left in `Package.resolved` was dropped in #44 | Low | `grep` finds no `import Logging`; `Logger(subsystem:)` strings | Remove the dependency (or adopt it). Unify the subsystem string. Fix the CLAUDE.md logging guidance. |
 | I-24 | Codable | `MosaicConfiguration.init(from:)` required most keys (`decode`), so configs persisted by older versions failed to decode when a field was added. | **Fixed (S-5)**: every key added after 1.0 (`overlay`, `gifMode`, `gifSize`, `animatedFormat`, `overwrite`, `gifFps`, `createOutputSubdirectory`) uses `decodeIfPresent ?? MissingKeyDefault`, matching the designated init's defaults | Medium (upgrade risk) | `MosaicConfiguration.swift` decoder | Add new keys to `MissingKeyDefault`, never as a required `decode`. **Test:** `LegacyConfigurationDecodingTests` decodes pinned 1.0.0, 1.3.2 and 1.7.0 payloads plus the minimal one; never edit those fixtures to make it pass. |
 | I-25 | Hygiene | Dead or misleading code: `generateallcombinations` ignores the caller's config; unused private helpers in `MetalMosaicGenerator` (`extractFramesWithVideoToolbox`, `calculateExtractionTimes`, `calculateAspectRatio`); unused `MosaicFrameSource`/`makeFrameSource`, `prioritizeVideos`, `VideoError`, `LibraryError`; never-emitted statuses. | **Mostly fixed.** S-1 (#38) removed the unused private helpers and `MosaicFrameSource`. S-6 deprecated the unused public API (`generateallcombinations`, the array-based `ThumbnailProcessor`/`MetalImageProcessor` paths, the job controller, `drawMosaicASCIIArt`, `FFmpegEncodingOptions.forPreview`, two preview-coordinator getters) for removal in 2.0. Still open: `LibraryError` and the never-emitted statuses; `VideoError` stays because F-6 will throw it. | Low | §2.12, §5.4 | Remove, or document as intentionally unused (`MosaicFrameSource` has history, §2.6). |
@@ -2362,7 +2368,7 @@ Enum-typed fields are omitted for readability (see §5.2.3). The source is
 | | `outputDirectoryCreationFailed(url, err)` | `prepareOutputURL` |
 | | `cancelled` → "Preview generation was cancelled" | token or task cancelled |
 | | `extractionFailed`, `saveFailed`, `audioProcessingFailed` | declared; rarely or never thrown |
-| `VideoError`, `LibraryError` | full `LocalizedError` implementations | **never thrown** (legacy) |
+| `VideoError`, `LibraryError` | full `LocalizedError` implementations | `LibraryError` and most `VideoError` cases are **never thrown** (legacy); `VideoError.unsupportedCodec` is (F-6, I-22) |
 | `DecodingError` | — | invalid persisted `DensityConfig` / enums / missing keys |
 | `CancellationError` | — | cooperative cancellation; batch cancelled via epoch |
 
@@ -2485,7 +2491,7 @@ with the code.
 | 4 | ~~Make preview default filenames deterministic (drop the run timestamp or make it a token)~~ **Done** (F-3, with I-11) | I-12, I-11 | Enables incremental preview runs (skip-if-exists) | done |
 | 5 | Destination-aware output publication: local `renamex_np(RENAME_EXCL)`, remote staging, iCloud coordination; ignore zero-byte outputs in skip-if-exists | I-4 | Correctness on NAS and iCloud; maintainer-planned (§F12) | M |
 | 6 | Opt-in **resumable preview export** (iOS/macOS 27) with a stable per-job temp directory | §4.9 | Big win for long exports interrupted in the background | M |
-| 7 | Fail fast on undecodable sources (10-bit H.264 on iOS, …) at inspection time | I-22 | A clear error instead of "Frame extraction failed" | S |
+| 7 | ~~Fail fast on undecodable sources (10-bit H.264 on iOS, …) at inspection time~~ **Done** (F-6) | I-22 | A clear error instead of "Frame extraction failed" | S |
 | 8 | Stream animated-export frames into the encoder instead of `[CGImage]` | I-20 | Memory safety for `.nochange` / long videos | M |
 | 9 | Fix or deprecate `.dynamic`; fix `.auto` units | I-8, I-9 | Broken layout options that are advertised in the README | M |
 | 10 | Housekeeping: ~~`decodeIfPresent` for new keys~~ (done in S-5), ~~remove dead code and swift-log, unify the log subsystem~~ (done in S-1, #38), render or remove `.colorPalette`, and ~~resolve I-13 (4K vs 1080p docs)~~ (done in S-5), ~~deprecate unused public API~~ (done in S-6) | I-10, I-13, I-14, I-23, I-24, I-25 | Lower maintenance cost and fewer surprises | S each |
@@ -2571,8 +2577,8 @@ P1 = core feature, P2 = supporting, P3 = docs/infra.
 | 31 | P2 | `Sources/Processing/Preview/AppLifecycleMonitor.swift` | code | 80 | 8af44e3d | Foreground gate |
 | 32 | P2 | `Sources/Processing/Preview/PreviewError.swift` | code | 143 | 03e8936f | Preview errors |
 | 33 | P2 | `Sources/Processing/ProcessingError.swift` | code | 97 | 9896b38f | MosaicError, LibraryError |
-| 34 | P2 | `Sources/Processing/VideoError.swift` | code | 156 | b03a4f41 | VideoError |
-| 35 | P2 | `Sources/Processing/VideoMetadataExtractor.swift` | code | 166 | 2c642c56 | Metadata actor |
+| 34 | P2 | `Sources/Processing/VideoError.swift` | code | 169 | 49827fa2 | VideoError (incl. `unsupportedCodec`, F-6) |
+| 35 | P2 | `Sources/Processing/VideoMetadataExtractor.swift` | code | 176 | 6aae6db3 | Metadata actor |
 | 36 | P2 | `Sources/VideoInputScanner.swift` | code | 106 | 3eee6885 | Discovery |
 | 37 | P2 | `Sources/Shaders/MetalShaders.metal` | shader | 160 | 69c46806 | 5 kernels |
 | 38 | P2 | `Tests/MosaicKitTests/CombinationTests.swift` | test | 709 | ca867ab4 | Serialized mosaic matrix |
@@ -2598,6 +2604,8 @@ P1 = core feature, P2 = supporting, P3 = docs/infra.
 | 58 | P2 | `Tests/MosaicKitTests/ConfigurationInitializerTests.swift` | test | 90 | 2b40144c | Secondary/deprecated config initializers keep their values; 1080p default (S-5) |
 | 59 | P2 | `Tests/MosaicKitTests/ExportStressTests.swift` | test | 150 | 96d6633d | Opt-in export stress (`MOSAICKIT_STRESS`); found the I-26 cause |
 | 60 | P2 | `Tests/MosaicKitTests/ProcessScheduling.swift` | test | 54 | e051e059 | Test helper: detect/leave macOS background scheduling (I-26) |
+| 61 | P1 | `Sources/Processing/VideoCodecSupport.swift` | code | 50 | afd909fd | Detects H.264 profiles iOS cannot decode (F-6, I-22) |
+| 62 | P2 | `Tests/MosaicKitTests/VideoCodecSupportTests.swift` | test | 90 | 372e7fad | avcC profile detection, format descriptions, error text (F-6) |
 
 Excluded or low value: `Media.xcassets/**` (binary fixture), `Tests/MosaicKitTests/embeddedAsset/test_video.mp4`
 (87 s 8-bit H.264 video-only fixture), `scripts/**` + `Makefile` (xcodebuild agent scaffold for a
@@ -2622,7 +2630,7 @@ RELATED PRs (merged): #32 this doc (+README unreleased note); #33 iOS CI scheme 
              #34 ffmpeg watchdog (I-16); #35 review path filter; #36 fast animated tests;
              #31 closed (duplicate of #33). Open: #37 CLAUDE.md/AGENTS.md rewrite + this refresh
 
-FILE_MAP_SUMMARY: Appendix A (60 files; P0 = 8, P1 = 15)
+FILE_MAP_SUMMARY: Appendix A (62 files; P0 = 8, P1 = 16)
 ISSUE REGISTER:   §4.2 I-1 … I-27   (High: I-1, I-2; Medium: I-3 I-4 I-8 I-12 I-16 I-20 I-22 I-24 I-26 I-27; fixed: I-1 I-2 I-3 I-11 I-12 I-15 I-16 I-23 I-24 I-27)
 ROADMAP:          §6.1 → IMPLEMENTATION_PLAN.md (decisions §6.4)
 OPEN_QUESTIONS:   §6.2 (Q11 Q14 Q16 Q17; Q13 answered in F-2)
