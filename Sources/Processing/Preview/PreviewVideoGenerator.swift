@@ -1129,8 +1129,6 @@ struct PreviewGenerationLogic {
         }
         
         let naturalSize = try await compositionVideoTrack.load(.naturalSize)
-        let originalWidth = Int(naturalSize.width)
-        let originalHeight = Int(naturalSize.height)
         
         // Prepare output URL
         let finalURL = try prepareOutputURL(config: config, video: video)
@@ -1182,10 +1180,7 @@ struct PreviewGenerationLogic {
             // Determine video settings based on quality, using original dimensions
             let (videoConfig, audioBitrate) = videoSettings(
                 for: config.compressionQuality,
-                format: config.format,
                 presetname: config.sJSExportPresetName,
-                width: originalWidth,
-                height: originalHeight,
                 renderSize: renderSize
             )
             
@@ -1328,90 +1323,17 @@ struct PreviewGenerationLogic {
         /// does not reference `ExportMaxResolution` directly and is available on all OS versions.
         private static func videoSettings(
             for quality: Double,
-            format: VideoFormat,
             presetname: SjSExportPreset?,
-            width: Int,
-            height: Int,
             renderSize: CGSize
         ) -> (video: VideoOutputSettings, audioBitrate: Int) {
-            // Use original dimensions and adjust codec/bitrate based on quality
-            // Quality ranges determine codec and bitrate, but dimensions stay original
-            
-            let videoConfig: VideoOutputSettings
-            let audioBitrate: Int
-            
-            // Calculate bitrate based on resolution and quality
-            // Base formula: pixels * quality_multiplier
-            
-            
-            // Helper function to scale dimensions to a maximum resolution
-            
-            func scaleDimensions(width: Int, height: Int, maxHeight: Int) -> (width: Int, height: Int) {
-                // Determine orientation
-                let isPortrait = height > width
-                
-                // If already at or below target, return original dimensions
-                if isPortrait && height <= maxHeight {
-                    return (width, height)
-                } else if !isPortrait && width <= maxHeight {
-                    return (width, height)
-                }
-                
-                // Scale down maintaining aspect ratio
-                let aspectRatio = Double(width) / Double(height)
-                
-                if isPortrait {
-                    // For portrait videos, maxHeight is the limiting dimension
-                    let scaledHeight = maxHeight
-                    let scaledWidth = Int(round(Double(scaledHeight) * aspectRatio))
-                    return (scaledWidth, scaledHeight)
-                } else {
-                    // For landscape videos, maxHeight becomes the limiting width
-                    let scaledWidth = maxHeight
-                    let scaledHeight = Int(round(Double(scaledWidth) / aspectRatio))
-                    return (scaledWidth, scaledHeight)
-                }
-            }
-            
-            let targetDimensions: (width: Int, height: Int)
-            
-            if presetname != nil {
-                //targetDimensions = scaleDimensions(width: width, height: height, maxHeight: exportMaxResolution.maxHeight)
-                videoConfig = .codec(presetname?.SJSCodec ?? .hevc, width: Int(renderSize.width), height: Int(renderSize.height))
-                audioBitrate = 128_000  // 128 kbps
-                return (videoConfig, audioBitrate)
-            }else {
-                
-                if quality == 1.0 {
-                    // Maximum resolution: 4K (3840x2160 for landscape, 2160x3840 for portrait)
-                    targetDimensions = scaleDimensions(width: width, height: height, maxHeight: 2160)
-                    videoConfig = .codec(.hevc, width: targetDimensions.width, height: targetDimensions.height)
-                    audioBitrate = 128_000  // 128 kbps
-                } else if quality == 0.75 {
-                    // Maximum resolution: 4K (3840x2160 for landscape, 2160x3840 for portrait)
-                    targetDimensions = scaleDimensions(width: width, height: height, maxHeight: 2160)
-                    videoConfig = .codec(.h264(.highAuto), width: targetDimensions.width, height: targetDimensions.height)
-                    audioBitrate = 128_000  // 128 kbps
-                } else if quality == 0.5 {
-                    // Maximum resolution: 1080p (1920x1080 for landscape, 1080x1920 for portrait)
-                    targetDimensions = scaleDimensions(width: width, height: height, maxHeight: 1920)
-                    videoConfig = .codec(.h264(.mainAuto), width: targetDimensions.width, height: targetDimensions.height)
-                    audioBitrate = 128_000  // 128 kbps
-                } else if quality == 0.25 {
-                    // Maximum resolution: 720p (1280x720 for landscape, 720x1280 for portrait)
-                    targetDimensions = scaleDimensions(width: width, height: height, maxHeight: 2160)
-                    videoConfig = .codec(.h264(.baselineAuto), width: targetDimensions.width, height: targetDimensions.height)
-                    audioBitrate = 128_000  // 128 kbps
-                } else {
-                    // Maximum resolution: 540p (960x540 for landscape, 540x960 for portrait)
-                    targetDimensions = scaleDimensions(width: width, height: height, maxHeight: 2160)
-                    videoConfig = .codec(.h264(.baselineAuto), width: targetDimensions.width, height: targetDimensions.height)
-                    audioBitrate = 128_000  // 128 kbps
-                }
-                return (videoConfig, audioBitrate)
-            }
+            // The codec comes from the explicit preset, or from the quality tier shared with
+            // `PreviewExportDescription` (I-6). The writer always uses `renderSize`, the size
+            // the composition renders at after the resolution cap (I-7).
+            let codec = presetname?.SJSCodec ?? PreviewQualityTier(quality: quality).sjsCodec
+            let videoConfig: VideoOutputSettings = .codec(codec, width: Int(renderSize.width), height: Int(renderSize.height))
+            return (videoConfig, 128_000)  // 128 kbps audio
         }
-    
+
     private static func resolutionLimit(for presetName: String) -> CGSize? {
         nativeExportPreset.maxResolution(forPresetName: presetName)
     }

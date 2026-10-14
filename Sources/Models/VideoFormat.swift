@@ -399,26 +399,32 @@ public enum VideoFormat: String, Codable, Sendable, CaseIterable, CustomDebugStr
 
     /// Returns the recommended export preset string based on the target quality.
     ///
+    /// Each preset covers a range of qualities, so any value in 0...1 gets a sensible preset
+    /// (matching exact floats sent values such as 0.85 to Passthrough, I-5):
+    ///
+    /// | Quality | Preset |
+    /// |---|---|
+    /// | ≥ 0.95 | HEVC highest quality |
+    /// | ≥ 0.85 | HEVC 1920×1080 |
+    /// | ≥ 0.75 | Highest quality (H.264) |
+    /// | ≥ 0.65 | H.264 1920×1080 |
+    /// | ≥ 0.55 | Medium quality |
+    /// | ≥ 0.45 | Low quality |
+    /// | ≥ 0.35 | H.264 960×540 |
+    /// | below  | Passthrough |
+    ///
     /// - Parameter quality: The compression quality (ranging from 0.0 to 1.0).
     /// - Returns: An `AVAssetExportSession` preset identifier.
     public func exportPreset(quality: Double) -> String {
-        // Higher quality -> higher resolution preset
-        if quality == 1.0 {
-            return AVAssetExportPresetHEVCHighestQuality
-        } else if quality == 0.9 {
-            return  AVAssetExportPresetHEVC1920x1080 // Highest quality H.265
-        } else if quality == 0.8 {
-            return AVAssetExportPresetHighestQuality
-        } else if quality == 0.7 {
-            return AVAssetExportPreset1920x1080// 1080p HEVC
-        } else if quality == 0.7 {
-            return AVAssetExportPresetMediumQuality // 1080p H.264
-        } else if quality == 0.5 {
-            return AVAssetExportPresetLowQuality // Medium quality H.264
-        } else if quality == 0.4 {
-            return AVAssetExportPreset960x540 // Low quality H.264
-        } else {
-            return AVAssetExportPresetPassthrough // passthrough
+        switch quality {
+        case 0.95...: return AVAssetExportPresetHEVCHighestQuality
+        case 0.85...: return AVAssetExportPresetHEVC1920x1080
+        case 0.75...: return AVAssetExportPresetHighestQuality
+        case 0.65...: return AVAssetExportPreset1920x1080
+        case 0.55...: return AVAssetExportPresetMediumQuality
+        case 0.45...: return AVAssetExportPresetLowQuality
+        case 0.35...: return AVAssetExportPreset960x540
+        default:      return AVAssetExportPresetPassthrough
         }
     }
 }
