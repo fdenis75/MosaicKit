@@ -63,7 +63,8 @@ public enum OverlayProcessor {
 
         let mosaicW = mosaic.width
         let mosaicH = mosaic.height
-        let stripH  = Int(config.height)
+        // `height` is a public var, so clamp here as well as in `ColorDNAConfig.init` (I-18).
+        let stripH  = Int(ColorDNAConfig.clampedHeight(config.height))
         let totalH  = mosaicH + stripH
         let colW    = CGFloat(mosaicW) / CGFloat(frameColors.count)
         let colorSpace = CGColorSpaceCreateDeviceRGB()

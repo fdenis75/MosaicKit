@@ -411,12 +411,18 @@ public actor MetalMosaicGenerator: MosaicGeneratorProtocol {
             if let dnaImage = OverlayProcessor.applyColorDNA(
                 to: mosaic, frameColors: frameColors, config: overlayConfig.colorDNA) {
                 mosaic = dnaImage
+            } else {
+                // The mosaic is kept without the strip; say so instead of dropping it silently (I-18).
+                logger.warning("ColorDNA strip requested for \(video.title, privacy: .public) but not drawn (\(frameColors.count) frame colors)")
             }
         }
 
-        if let wmConfig = overlayConfig.watermark,
-           let watermarked = OverlayProcessor.applyWatermark(to: mosaic, config: wmConfig) {
-            mosaic = watermarked
+        if let wmConfig = overlayConfig.watermark {
+            if let watermarked = OverlayProcessor.applyWatermark(to: mosaic, config: wmConfig) {
+                mosaic = watermarked
+            } else {
+                logger.warning("Watermark requested for \(video.title, privacy: .public) but not drawn")
+            }
         }
         return mosaic
     }

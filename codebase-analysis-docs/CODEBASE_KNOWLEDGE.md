@@ -453,7 +453,7 @@ register:
 2. **Mosaic output-dimension limit.** `MetalMosaicGenerator` rejects `config.width > 16_384`
    inside generation (not in `validate()`) and videos shorter than 5 s, both as
    `MosaicError.invalidVideo`.
-   [[F:Sources/Processing/MetalMosaicGenerator.swift#321-324#a7c60fde]]
+   [[F:Sources/Processing/MetalMosaicGenerator.swift#321-324#a3f405fe]]
 3. **Preview skip-if-exists never matches in default naming mode.** With `fullPathInName ==
    false` and no `filenameTemplate`, `PreviewConfiguration.generateFilename` embeds a
    run-time timestamp (`yyyy-MM-dd_HH-mm-ss`). As a result, `overwrite == false` never finds an
@@ -631,9 +631,9 @@ Full sequence including the coordinator: `codebase-analysis-docs/assets/mosaic-s
 #### Stage-by-stage table
 
 The stage body is `MetalMosaicGenerator.generate`
-[[F:Sources/Processing/MetalMosaicGenerator.swift#98-236#a7c60fde]]. Since S-2, stages 2–5 run in
+[[F:Sources/Processing/MetalMosaicGenerator.swift#98-236#a3f405fe]]. Since S-2, stages 2–5 run in
 `planMosaic`, stages 6–12 in `composeMosaic` and stage 14 in `exportAnimation`
-[[F:Sources/Processing/MetalMosaicGenerator.swift#299-442#a7c60fde]]. `generateMosaicImage` calls
+[[F:Sources/Processing/MetalMosaicGenerator.swift#299-448#a3f405fe]]. `generateMosaicImage` calls
 the same `planMosaic` + `composeMosaic`, so both entry points compose the same image.
 
 | # | Stage | Code | Runs on | Key facts |
@@ -651,7 +651,7 @@ the same `planMosaic` + `composeMosaic`, so both entry points compose the same i
 | 10 | Compositing | `generateMosaicStream` [[F:Sources/Processing/MetalImageProcessor.swift#864-998#04cfcb88]], `processBatch` @L1000, `renderFrame` @L1077 | nonisolated async | One setup command buffer (fill + header), awaited. Frames are then rendered in **20-frame command buffers**, committed without waiting. Each frame: `createTexture(from: CGImage)`, `scaleTexture` if the size differs, `compositeTexture`, optional `addBorder`. The shadow path draws a CPU `CGContext` shadow and composites that. Duplicate or out-of-range indices throw. **All** positions must be filled, or it throws "Missing mosaic frames". |
 | 11 | GPU sync + readback | `synchronizeGPU` @L1058, `createCGImage(from:)` | nonisolated | An empty barrier command buffer is committed last and awaited. GPU errors from completion handlers are collected in `CommandBufferErrorState` and rethrown as `MetalProcessorError.commandBufferExecutionFailed`. |
 | 12 | Have the macOS stall retry wait until the app is active again, as iOS waits for foreground, and document background exporting for apps. Done: mechanism reproduced (background scheduling, background QoS cap; #46), CI attributed to the runner VM (known issue there, #47) | I-26 | A stalled export fails after 120 s and retries while still throttled | S |
-| 13 | Encode + commit | `saveMosaic` [[F:Sources/Processing/MetalMosaicGenerator.swift#524-633#a7c60fde]] | generator actor (synchronous CPU) | Output path = `generateOutputDirectory` + `generateFilename`. Encodes with `CGImageDestination` (HEIF embeds a thumbnail, `HasAlpha = false`), or the injected WebP encoder, into the staging file. Then `OutputTransaction.commit()`. |
+| 13 | Encode + commit | `saveMosaic` [[F:Sources/Processing/MetalMosaicGenerator.swift#530-639#a3f405fe]] | generator actor (synchronous CPU) | Output path = `generateOutputDirectory` + `generateFilename`. Encodes with `CGImageDestination` (HEIF embeds a thumbnail, `HasAlpha = false`), or the injected WebP encoder, into the staging file. Then `OutputTransaction.commit()`. |
 | 14 | Animation | `exportAnimation` (`extractFramesForGif` + `AnimatedGifGenerator.save`), shared by the `.gifOnly`, `.withMosaic` and skip-if-exists backfill sites | generator actor → global | This is a **second, full decode pass** with a separate generator: `.large` caps at 1280×720, `.small` at 960×540. Missing frames are skipped and then checked by count, so any missing frame throws. `frameDelay = 1 / gifFps`. |
 
 **Progress reported to handlers** (`MosaicGenerationProgress.progress`):
@@ -1260,14 +1260,16 @@ backbone. Read `LayoutProcessor` algorithms, `ThumbnailProcessor` header/label r
     fails, it is logged and the mosaic is returned **without** a watermark (no error).
   - Text watermarks are always white bold.
   - DNA: one column per frame in index order. Colors come from a 1×1 downsample of each
-    *un-labeled* frame. `ColorDNAConfig.init` clamps height to ≥ 8, but **Codable decoding
-    bypasses the clamp**. A decoded height of 0 passes `validate()` (≥ 0), the CGContext
-    creation fails, and the strip is **silently skipped**.
-  - Any `nil` return from `OverlayProcessor` (context failure) keeps the un-annotated mosaic
-    silently.
+    *un-labeled* frame. `ColorDNAConfig.init` clamps height to ≥ 8, and since F-8a (I-18)
+    Codable decoding and `OverlayProcessor.applyColorDNA` clamp it too (a non-finite height
+    becomes 8), so a saved `"height": 0` still draws a strip. Before, decoding bypassed the
+    clamp and the strip was silently skipped.
+  - Any `nil` return from `OverlayProcessor` (context failure, empty frame colors) keeps the
+    un-annotated mosaic. Since F-8a (I-18) `MetalMosaicGenerator` logs a warning for the DNA
+    strip and the watermark instead of dropping them silently.
 - **Tests:** `ThumbnailProcessorTests` (labels: all positions, styles, formats; header width
-  and sizing), `OverlayProcessorTests` (average color, DNA shapes), `OverlayConfigurationTests`
-  (Codable). No test covers `.colorPalette` actually rendering.
+  and sizing), `OverlayProcessorTests` (average color, DNA shapes, strip-height clamping),
+  `OverlayConfigurationTests` (Codable). No test covers `.colorPalette` actually rendering.
 
 ### F6 — Animated export (GIF / HEICS / animated WebP)
 
@@ -1805,8 +1807,8 @@ robustness, performance, or cosmetic.
 | I-15 | F10 | **Mosaic coordinator keys state by `video.id`.** Concurrent jobs on the same input clobber each other's cancellation and progress. | **Fixed (S-3)**: tasks, handlers and sources keyed per attempt; `activeTasks` is a read-only view by video ID. **Test:** `BatchRunnerTests` "Cancelling a video cancels every concurrent attempt on it" | Low | `attemptTasks[attemptID]`, `attemptSources`, `progressHandlers[attemptID]` | The generator's own `setProgressHandler(for:)` is still keyed by video; two concurrent attempts on one video can swap per-stage progress handlers there (cancellation is unaffected). |
 | I-16 | F3/F9 | **Slow ffmpeg cancellation under load** (16–20 s instead of ~4 s). This makes `ffmpegCancellationKillsUncooperativeProcess` fail intermittently in CI. | **Fixed (PR #34, merged)** | Medium | CI logs on PR #32/#33; the watchdog is a `Task` that polls every 2 s and escalates with `Task.sleep` | **Fixed in PR #34**: `DispatchSourceTimer` watchdog on a dedicated queue plus termination from `onCancel`. macOS CI is green, including this test. The native/SJS/passthrough watchdogs moved to the same `DispatchSourceTimer` approach in S-4 (`ExportWatchdog`). |
 | I-17 | F1 | `discoverVideos` fails the whole scan on one undecodable file. The extension list includes formats AVFoundation rarely decodes (mkv, webm, avi, wmv, flv, asf). | Confirmed (static) | Low–Medium | `discoverVideos` rethrows the first inspection error | Collect per-file failures (a result type), or skip them with a report. |
-| I-18 | F5 | ColorDNA height decoded as 0 (bypassing the init clamp) → strip **silently skipped**. Watermark image load failure → **silently omitted**. | Confirmed (static) | Low | `OverlayProcessor` returns `nil`; the generator keeps the un-annotated image | Validate DNA height ≥ 8. Surface overlay failures (log at least, or throw in strict mode). |
-| I-19 | F2 | `VideoInput(url:)` (legacy) swallows inspection errors and returns metadata-less inputs. `generateMosaicsForFiles` uses it. | Confirmed (static) | Low | `VideoInput.init(url:…) async` | Prefer `VideoInput(from:)` or `VideoSource.inspect()` in new code. |
+| I-18 | F5 | ColorDNA height decoded as 0 (bypassing the init clamp) → strip **silently skipped**. Watermark image load failure → **silently omitted**. | **Fixed (F-8a)**: `ColorDNAConfig` decoding and `applyColorDNA` clamp the height (≥ 8, non-finite → 8); `MetalMosaicGenerator` logs a warning when the strip or watermark is requested but not drawn. **Tests:** `OverlayProcessorTests` (clamping, decoding). Throwing in a strict mode was not added. | Low | `OverlayProcessor` returns `nil`; the generator keeps the un-annotated image | Validate DNA height ≥ 8. Surface overlay failures (log at least, or throw in strict mode). |
+| I-19 | F2 | `VideoInput(url:)` (legacy) swallows inspection errors and returns metadata-less inputs. `generateMosaicsForFiles` uses it. | **Fixed (F-8a, docs)**: the `VideoInput(url:…)` doc comment says it never throws and keeps only the supplied values; README "Custom Video Input" shows `VideoSource(url:title:).inspect()`. The legacy initializer is unchanged (`generateMosaicsForFiles` still uses it). | Low | `VideoInput.init(url:…) async` | Prefer `VideoInput(from:)` or `VideoSource.inspect()` in new code. |
 | I-20 | F6 | Animated export with `.nochange` holds all full-resolution frames in memory (e.g. 4K × up to 800 frames). | Confirmed (static) | Medium (memory) | `extractFramesForGif` returns `[CGImage]` | Stream frames into `CGImageDestination` / the WebP encoder incrementally, or cap `.nochange` by frame count. |
 | I-21 | CI | iOS job used a scheme with no test action; the tests never compiled for iOS. | **Fixed (PR #33, merged)**; #31 closed as duplicate | — | CI logs | Scheme `MosaicKit-Package` + `URL.homeDirectory` in `CombinationTests` + `TEST_RUNNER_` suite-mode forwarding |
 | I-22 | F2/F3/F6/F8 + CI | **10-bit H.264 ("High 10") sources cannot be decoded on iOS.** Mosaic and animation jobs fail entirely because extraction is strict. The embedded test fixture is itself High 10, so the 10 embedded-media tests fail on the iOS Simulator (178 run, 10 fail). | Confirmed (fixture `avcC`: `profile_idc 110`, 10-bit luma/chroma; CI: VideoToolbox `err=-8969` on every frame) | Medium (iOS) | CI run on PR #33 @ 85c6d5e; local `avcC` parse | CI: **fixture re-encoded to 8-bit H.264 High in PR #33 (merged)**. **Product: fixed in F-6** — inspection reads the `avcC` profile from the format description and, on iOS, throws `VideoError.unsupportedCodec(url, "H.264 High 10")` (also High 4:2:2 and 4:4:4) before any extraction; the message suggests re-encoding. **Tests:** `VideoCodecSupportTests` (synthetic `avcC` records and format descriptions). No software fallback was added. |
@@ -2548,7 +2550,7 @@ P1 = core feature, P2 = supporting, P3 = docs/infra.
 | # | Pri | Path | Type | Lines | Hash8 | Notes |
 |---|---|---|---|---|---|---|
 | 1 | P0 | `Package.swift` | config | 61 | 721e2854 | Products, targets, deps, platforms |
-| 2 | P0 | `Sources/Processing/MetalMosaicGenerator.swift` | code | 646 | a7c60fde | Mosaic entry actor; pipeline orchestration; shared `planMosaic`/`composeMosaic`/`exportAnimation` @L299; `saveMosaic` @L524 |
+| 2 | P0 | `Sources/Processing/MetalMosaicGenerator.swift` | code | 652 | a3f405fe | Mosaic entry actor; pipeline orchestration; shared `planMosaic`/`composeMosaic`/`exportAnimation` @L299; `saveMosaic` @L524 |
 | 3 | P0 | `Sources/Processing/MosaicGeneratorProtocol.swift` | code | 56 | 5685ed03 | Actor protocol |
 | 4 | P0 | `Sources/Processing/MosaicGeneratorCoordinator.swift` | code | 730 | 62277ee6 | Batch actor (per-attempt tracking, `runBatch`), progress/result/status types, factory funcs at the end |
 | 5 | P0 | `Sources/Processing/Preview/PreviewVideoGenerator.swift` | code | 1546 | f459c3b8 | Preview actor + `PreviewGenerationLogic` (compose @L604, export paths @L1093/1115/1425) |
@@ -2558,15 +2560,15 @@ P1 = core feature, P2 = supporting, P3 = docs/infra.
 | 9 | P1 | `Sources/Processing/ThumbnailProcessor.swift` | code | 1581 | 844677b3 | Frame stream @L140, GIF frames @L76, header @L598/862 |
 | 10 | P1 | `Sources/Processing/MetalImageProcessor.swift` | code | 1336 | 04cfcb88 | Metal pipeline, `generateMosaicStream` @L864, DominantColors @L601 |
 | 11 | P1 | `Sources/Processing/LayoutProcessor.swift` | code | 592 | b6049426 | Layout algorithms, cache @L22/114/148 |
-| 12 | P1 | `Sources/Models/VideoInput.swift` | model | 133 | 08cdafc0 | Unit of work |
+| 12 | P1 | `Sources/Models/VideoInput.swift` | model | 139 | 6b6bfcbf | Unit of work |
 | 13 | P1 | `Sources/Models/VideoSource.swift` | model | 61 | 4e63687f | Lazy source + inspect + validate |
 | 14 | P1 | `Sources/Processing/GenerationJobs.swift` | code | 109 | df980649 | Job controller (deprecated, S-6) |
 | 15 | P1 | `Sources/Processing/OutputTransaction.swift` | code | 62 | e5da241b | Atomic commit |
 | 16 | P1 | `Sources/Processing/MosaicFrameSource.swift` | code | 0 | — | **Removed in S-1 (#38)** (reverted 1.7.0 pull-based frame source) |
 | 17 | P1 | `Sources/Models/ConfigurationValidation.swift` | model | 102 | 83f12470 | All `validate()` |
 | 18 | P1 | `Sources/Processing/Preview/FFmpegEncoder.swift` | code | 422 | d99fd279 | ffmpeg pipeline (macOS) |
-| 19 | P1 | `Sources/Processing/OverlayProcessor.swift` | code | 302 | 47e12c52 | DNA strip, watermark |
-| 20 | P1 | `Sources/Models/OverlayConfiguration.swift` | model | 329 | 50177235 | Overlay configs |
+| 19 | P1 | `Sources/Processing/OverlayProcessor.swift` | code | 303 | 417dd3da | DNA strip, watermark |
+| 20 | P1 | `Sources/Models/OverlayConfiguration.swift` | model | 352 | a5ccbc5b | Overlay configs |
 | 21 | P1 | `Sources/Processing/AnimatedGifGenerator.swift` | code | 141 | bd92de71 | Animated writer |
 | 22 | P1 | `Sources/Processing/WebPSupport.swift` | code | 45 | 8f928b72 | WebP injection |
 | 23 | P1 | `SourcesWebP/MosaicKitWebP.swift` | code | 72 | dc374b7e | WebP encoder impl |
@@ -2634,7 +2636,7 @@ RELATED PRs (merged): #32 this doc (+README unreleased note); #33 iOS CI scheme 
              #31 closed (duplicate of #33). Open: #37 CLAUDE.md/AGENTS.md rewrite + this refresh
 
 FILE_MAP_SUMMARY: Appendix A (60 files; P0 = 8, P1 = 15)
-ISSUE REGISTER:   §4.2 I-1 … I-27   (High: I-1, I-2; Medium: I-3 I-4 I-8 I-12 I-16 I-20 I-22 I-24 I-26 I-27; fixed: I-1 I-2 I-3 I-9 I-11 I-12 I-15 I-22 I-16 I-23 I-24 I-27)
+ISSUE REGISTER:   §4.2 I-1 … I-27   (High: I-1, I-2; Medium: I-3 I-4 I-8 I-12 I-16 I-20 I-22 I-24 I-26 I-27; fixed: I-1 I-2 I-3 I-9 I-11 I-12 I-15 I-18 I-19 I-22 I-16 I-23 I-24 I-27)
 ROADMAP:          §6.1 → IMPLEMENTATION_PLAN.md (decisions §6.4)
 OPEN_QUESTIONS:   §6.2 (Q11 Q14 Q16 Q17; Q13 answered in F-2)
 GLOSSARY:         §5.1

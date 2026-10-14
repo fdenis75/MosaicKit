@@ -21,7 +21,9 @@ A high-performance Swift package for generating video mosaics with Metal-acceler
 
 ## Unreleased
 
-- Nothing yet. Add a line here for every change; output-naming and location changes (📁) also get a **Behavior changes** note.
+- **A saved `ColorDNAConfig` height below 8 is clamped when decoded** (I-18) — `"height": 0` used to decode as-is, so the strip was silently never drawn; it now decodes as 8 like the initializer. A non-finite height is treated as 8.
+- **Skipped overlays are logged** (I-18) — when a Color DNA strip or a watermark is requested but can't be drawn, `MetalMosaicGenerator` logs a warning (subsystem `com.mosaicKit`) and still returns the mosaic without it.
+- **Docs: prefer `VideoInput(from:)`** (I-19) — the `VideoInput(url:…)` documentation now says it never throws and returns only the values you passed when inspection fails; the README shows `VideoSource(url:title:).inspect()` for a custom title.
 
 ## New in 1.9.0
 
@@ -639,19 +641,21 @@ let result = try await coordinator.generateMosaic(
 
 ### Custom Video Input
 
-Give a video a custom display `title` (metadata like duration/dimensions/frame rate is always
-re-extracted from the file itself via `AVAsset`, regardless of what you pass for those parameters):
+Give a video a custom display `title` and inspect it, so a bad file is reported instead of
+producing an input without metadata:
 
 ```swift
-let video = await VideoInput(
-    url: videoURL,
-    title: "My Video"
-)
+let video = try await VideoSource(url: videoURL, title: "My Video").inspect()
 ```
 
-`VideoInput(from:postID:)` is the throwing async initializer used elsewhere in this guide; it
-acquires security-scoped access to the URL before extracting metadata and throws
-`MosaicError.invalidVideo` if that access can't be obtained.
+`VideoInput(from:postID:)` (used elsewhere in this guide) is the same call without a custom
+title. Both are throwing and async: they acquire security-scoped access to the URL, load the
+metadata once, and throw `MosaicError.invalidVideo` (or `VideoError` on iOS for undecodable
+video) if the file can't be used.
+
+The older `VideoInput(url:title:…) async` never throws. If inspection fails it quietly returns an
+input with only the values you passed (no duration or dimensions), and values you pass are used
+as given. Avoid it in new code.
 
 ### Performance Metrics
 
