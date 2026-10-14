@@ -191,3 +191,18 @@ do {
 
 Native preview export can still stall under macOS background scheduling (I-26), as in 1.8.0. See
 the `PreviewExporting` article, section "macOS Background Scheduling".
+
+## 6. Changes in 1.9.1
+
+1.9.1 is a patch release for apps on 1.9.0. It changes no public API and no output file names. It
+changes behavior in four places that matter only if you use the settings below.
+
+| If your app… | Change | What to do |
+|---|---|---|
+| exports previews with no explicit `exportPresetName` (configs decoded without that key, or set to `nil`) | `compressionQuality` now maps to a native preset by **range**. Before, only the exact values 1.0, 0.9, 0.8, 0.7, 0.5 and 0.4 matched; any other value (for example 0.85 or 0.6) silently exported as Passthrough. The values that worked before keep their preset. Only qualities below 0.35 still map to Passthrough. | Set `exportPresetName` explicitly if you need a specific preset. Expect different output for qualities that used to fall through. |
+| exports with `exportMode: .sjs` and `sJSExportPresetName == nil` | The codec is chosen by quality range (0.875+ HEVC, 0.625+ H.264 High, 0.375+ Main, below Baseline). `PreviewConfiguration.exportDescription` now reports that same codec (it used to say HEVC), and the output size is the size the video composition renders. For portrait sources the old size was squeezed (about 607×1080 instead of 1080×1920). | Nothing, unless you pinned the old output. With an explicit preset only the size fix applies. |
+| saves `ColorDNAConfig` or draws the Color DNA strip | A decoded `height` below 8 (including `0`) is clamped to 8, so the strip is drawn. It used to be silently skipped. A non-finite height is treated as 8. | Remove any workaround that detected a missing strip. |
+| reads logs | When a Color DNA strip or watermark is requested but not drawn, `MetalMosaicGenerator` logs a warning under `com.mosaicKit` and still returns the mosaic. | Nothing. |
+
+Documentation only: `VideoInput(url:…)` never throws and returns only the values you passed when
+inspection fails. Prefer `VideoInput(from:)` or `VideoSource(url:title:).inspect()`.
