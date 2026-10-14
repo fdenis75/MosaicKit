@@ -83,8 +83,8 @@ let classicLayout = MosaicConfiguration(
     layout: LayoutConfiguration(layoutType: .classic)
 )
 
-let dynamicLayout = MosaicConfiguration(
-    layout: LayoutConfiguration(layoutType: .dynamic)
+let customLayout = MosaicConfiguration(
+    layout: LayoutConfiguration(layoutType: .custom)
 )
 ```
 

@@ -141,7 +141,7 @@ Every PR updates its row here (status) and the matching §4.2 / §6.1 entries in
 | F-4 | planned | |
 | F-5 | planned | |
 | F-6 | planned | |
-| F-7 | planned | |
+| F-7 | done (I-8, I-9) | #55 |
 | F-8 | planned | |
 
 ### 8.1 Benchmark baseline

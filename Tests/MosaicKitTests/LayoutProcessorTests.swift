@@ -164,39 +164,78 @@ struct LayoutProcessorTests {
         #expect(uniqueWidths.count >= 2, "Expected at least 2 distinct thumbnail widths in custom layout")
     }
 
-    // MARK: - calculateLayout: dynamic
+    // MARK: - calculateLayout: dynamic (deprecated, I-8)
 
-    @Test("Dynamic layout returns non-empty positions and sizes")
-    func dynamicLayoutNonEmpty() {
-        let proc   = makeProcessor()
-        let layout = proc.calculateLayout(
-            originalAspectRatio: wideAR,
-            mosaicAspectRatio: .widescreen,
-            thumbnailCount: 20,
-            mosaicWidth: 2000,
-            density: .m,
-            layoutType: .dynamic
-        )
-        #expect(layout.positions.count   > 0)
-        #expect(layout.thumbnailSizes.count == layout.positions.count)
+    /// `.dynamic` is deprecated; build it from its persisted raw value so the tests don't
+    /// reference the deprecated case.
+    private func legacyDynamic() throws -> LayoutType {
+        try #require(LayoutType(rawValue: "dynamic"), "The persisted raw value \"dynamic\" must keep decoding")
     }
 
-    @Test("Dynamic layout: center thumbnails are larger than edge thumbnails")
-    func dynamicLayoutCenterEmphasis() {
-        let proc   = makeProcessor()
-        let layout = proc.calculateLayout(
-            originalAspectRatio: wideAR,
-            mosaicAspectRatio: .widescreen,
-            thumbnailCount: 16,
-            mosaicWidth: 2000,
-            density: .m,
-            layoutType: .dynamic
+    @Test("Deprecated dynamic layout is laid out exactly as custom (I-8)")
+    func dynamicLayoutIsCustom() throws {
+        let dynamic = try legacyDynamic()
+        for (count, width) in [(20, 2000), (107, 5120), (800, 5120)] {
+            let custom = makeProcessor().calculateLayout(
+                originalAspectRatio: wideAR, mosaicAspectRatio: .widescreen,
+                thumbnailCount: count, mosaicWidth: width, density: .m, layoutType: .custom
+            )
+            let legacy = makeProcessor().calculateLayout(
+                originalAspectRatio: wideAR, mosaicAspectRatio: .widescreen,
+                thumbnailCount: count, mosaicWidth: width, density: .m, layoutType: dynamic
+            )
+            #expect(legacy.positions.count > 0)
+            #expect(legacy.positions.map(\.x) == custom.positions.map(\.x))
+            #expect(legacy.positions.map(\.y) == custom.positions.map(\.y))
+            #expect(legacy.thumbnailSizes == custom.thumbnailSizes)
+            #expect(legacy.mosaicSize == custom.mosaicSize)
+        }
+    }
+
+    @Test("Dynamic still decodes, and is not listed in allCases")
+    func dynamicStillDecodes() throws {
+        let decoded = try JSONDecoder().decode(LayoutType.self, from: Data(#""dynamic""#.utf8))
+        #expect(decoded.rawValue == "dynamic")
+        #expect(!LayoutType.allCases.contains(decoded))
+        #expect(LayoutType.allCases.count == 4)
+    }
+
+    // MARK: - calculateLayout: auto (I-9)
+
+    @Test("Auto layout fits an iPhone-sized screen instead of failing (I-9)")
+    func autoLayoutOnIPhoneScreen() {
+        let proc = makeProcessor()
+        let phone = CGSize(width: 390, height: 844)
+        let maxCount = proc.calculateMaxThumbnails(screenSize: phone, scale: 3, videoAR: 16.0 / 9.0)
+        #expect(maxCount >= 4, "An iPhone screen fits \(maxCount) thumbnails")
+
+        let layout = proc.calculateAutoLayout(
+            originalAspectRatio: wideAR, thumbnailCount: 6, screenSize: phone, scale: 3
         )
-        guard layout.thumbnailSizes.count > 2 else { return }
-        let maxWidth = layout.thumbnailSizes.map(\.width).max() ?? 0
-        let minWidth = layout.thumbnailSizes.map(\.width).min() ?? 0
-        // Dynamic layout deliberately varies sizes; max should exceed min
-        #expect(maxWidth > minWidth, "Expected size variation in dynamic layout")
+        #expect(layout.positions.count == 6)
+        #expect(layout.cols >= 1 && layout.rows >= 1)
+        // The canvas is in pixels: 390 x 3 = 1170 wide.
+        #expect(layout.mosaicSize.width == 1170)
+    }
+
+    @Test("Auto layout never indexes an empty range on a tiny screen")
+    func autoLayoutOnTinyScreen() {
+        let proc = makeProcessor()
+        let tiny = CGSize(width: 100, height: 100)
+        #expect(proc.calculateMaxThumbnails(screenSize: tiny, scale: 2, videoAR: 16.0 / 9.0) >= 1)
+        let layout = proc.calculateAutoLayout(
+            originalAspectRatio: wideAR, thumbnailCount: 4, screenSize: tiny, scale: 2
+        )
+        #expect(layout.positions.count > 0)
+    }
+
+    @Test("Auto layout on a desktop screen is unchanged in shape")
+    func autoLayoutOnDesktopScreen() {
+        let layout = makeProcessor().calculateAutoLayout(
+            originalAspectRatio: wideAR, thumbnailCount: 30, screenSize: CGSize(width: 1512, height: 944), scale: 2
+        )
+        #expect(layout.positions.count == 30)
+        #expect(layout.mosaicSize.width == 3024)
     }
 
     // MARK: - calculateLayout: iphone
@@ -264,9 +303,9 @@ struct LayoutProcessorTests {
     // MARK: - calculateLayout: consistent invariants across all layout types
 
     @Test("All layout types produce non-negative thumbnail positions")
-    func allLayoutTypesNonNegativePositions() {
+    func allLayoutTypesNonNegativePositions() throws {
         let proc = makeProcessor()
-        for layoutType in [LayoutType.classic, .custom, .dynamic, .iphone] {
+        for layoutType in [LayoutType.classic, .custom, .iphone] + [try legacyDynamic()] {
             let layout = proc.calculateLayout(
                 originalAspectRatio: wideAR,
                 mosaicAspectRatio: .widescreen,
@@ -283,9 +322,9 @@ struct LayoutProcessorTests {
     }
 
     @Test("All layout types produce at least one thumbnail")
-    func allLayoutTypesAtLeastOneThumb() {
+    func allLayoutTypesAtLeastOneThumb() throws {
         let proc = makeProcessor()
-        for layoutType in [LayoutType.classic, .custom, .dynamic, .iphone] {
+        for layoutType in [LayoutType.classic, .custom, .iphone] + [try legacyDynamic()] {
             let layout = proc.calculateLayout(
                 originalAspectRatio: wideAR,
                 mosaicAspectRatio: .widescreen,

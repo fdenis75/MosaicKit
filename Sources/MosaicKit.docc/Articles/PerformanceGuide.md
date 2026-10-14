@@ -230,9 +230,6 @@ let autoLayout = LayoutConfiguration(layoutType: .auto)
 
 // Slower - optimization algorithm
 let customLayout = LayoutConfiguration(layoutType: .custom)
-
-// Slowest - variable sizing
-let dynamicLayout = LayoutConfiguration(layoutType: .dynamic)
 ```
 
 **Layout Calculation Time:**
@@ -396,7 +393,7 @@ let maxQualityConfig = MosaicConfiguration(
     density: .xxs,             // Maximum frames
     format: .png,              // Lossless
     layout: LayoutConfiguration(
-        layoutType: .dynamic    // Best visual
+        layoutType: .custom     // Default three-zone layout
     ),
     includeMetadata: true,
     compressionQuality: 1.0
