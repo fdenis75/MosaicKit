@@ -1,6 +1,7 @@
 import Foundation
 import CoreGraphics
 import OSLog
+import Synchronization
 #if canImport(AppKit)
 import AppKit
 #elseif canImport(UIKit)
@@ -19,6 +20,26 @@ public final class LayoutProcessor {
         set { stateLock.withLock { storedAspectRatio = newValue.isFinite && newValue > 0 ? newValue : 16.0 / 9.0 } }
     }
     private var layoutCache: [String: MosaicLayout] = [:]
+
+    /// Whether the one-time `.dynamic` deprecation warning was already logged (I-8, F-7).
+    private static let dynamicWarningLogged = Mutex(false)
+
+    /// The layout type that is actually calculated for `layoutType`.
+    ///
+    /// `.dynamic` is deprecated (I-8): it still decodes, because persisted raw values must
+    /// stay valid, but it is laid out as `.custom`. The warning is logged once per process.
+    static func resolved(_ layoutType: LayoutType, logger: Logger) -> LayoutType {
+        // Compared by raw value so this file doesn't trip the case's own deprecation warning.
+        guard layoutType.rawValue == "dynamic" else { return layoutType }
+        let firstUse = dynamicWarningLogged.withLock { logged -> Bool in
+            defer { logged = true }
+            return !logged
+        }
+        if firstUse {
+            logger.warning("LayoutType.dynamic is deprecated and is laid out as .custom; use .custom instead")
+        }
+        return .custom
+    }
     
     /// Get the screen with the largest size
     private func getLargestScreen() -> (size: CGSize, scale: CGFloat)? {
@@ -84,6 +105,7 @@ public final class LayoutProcessor {
             return MosaicLayout(rows: 0, cols: 0, thumbnailSize: .zero, positions: [], thumbCount: 0,
                                 thumbnailSizes: [], mosaicSize: .zero)
         }
+        let layoutType = Self.resolved(layoutType, logger: logger)
         storedAspectRatio = mosaicAspectRatio.ratio
         logger.debug("🎯 Starting layout calculation - AR: \(originalAspectRatio), Count: \(thumbnailCount), Width: \(mosaicWidth), target AR: \(self.mosaicAspectRatio)")
         logger.debug("⚙️ Layout mode: \(layoutType.rawValue), Density: \(density.name)")
@@ -105,26 +127,20 @@ public final class LayoutProcessor {
                 originalAspectRatio: originalAspectRatio,
                 thumbnailCount: thumbnailCount
             )
-        case .custom:
+        case .classic:
+            layout = calculateClassicLayout(
+                originalAspectRatio: originalAspectRatio,
+                thumbnailCount: thumbnailCount,
+                mosaicWidth: mosaicWidth
+            )
+        default:
+            // `.custom`, and the deprecated `.dynamic`, which `resolved(_:logger:)` maps to `.custom`.
             layout = calculateCustomLayout(
                 originalAspectRatio: originalAspectRatio,
                 thumbnailCount: thumbnailCount,
                 mosaicWidth: mosaicWidth,
                 mosaicAspectRatio: mosaicAspectRatio,
                 density: density.name
-            )
-        case .dynamic:
-            layout = calculateDynamicLayout(
-                originalAspectRatio: originalAspectRatio,
-                thumbnailCount: thumbnailCount,
-                mosaicWidth: mosaicWidth,
-                density: density
-            )
-        case .classic:
-            layout = calculateClassicLayout(
-                originalAspectRatio: originalAspectRatio,
-                thumbnailCount: thumbnailCount,
-                mosaicWidth: mosaicWidth
             )
         }
 
@@ -151,18 +167,35 @@ public final class LayoutProcessor {
                 mosaicWidth: 1920
             )
         }
-        
-        let screenSize = screenInfo.size
-        let scaleFactor = screenInfo.scale
-        logger.debug("📺 Screen details - Size: \(screenSize.width)x\(screenSize.height), Scale: \(scaleFactor)")
-        
+        return calculateAutoLayout(
+            originalAspectRatio: originalAspectRatio,
+            thumbnailCount: thumbnailCount,
+            screenSize: screenInfo.size,
+            scale: screenInfo.scale
+        )
+    }
+
+    /// Auto layout for a screen of `screenSize` points at `scale` pixels per point.
+    ///
+    /// Everything below is in pixels: the grid is sized for the screen's pixel dimensions, and
+    /// the minimum readable thumbnail is 160 points (`160 * scale` pixels). Mixing points and
+    /// pixels gave 0 columns on iPhone (390 pt / 480 px) and an empty layout (I-9).
+    func calculateAutoLayout(
+        originalAspectRatio: CGFloat,
+        thumbnailCount: Int,
+        screenSize points: CGSize,
+        scale scaleFactor: CGFloat
+    ) -> MosaicLayout {
+        let screenSize = CGSize(width: points.width * scaleFactor, height: points.height * scaleFactor)
+        logger.debug("📺 Screen details - Size: \(screenSize.width)x\(screenSize.height) px, Scale: \(scaleFactor)")
+
         // Calculate minimum readable thumbnail size (scaled for DPI)
         let minThumbWidth: CGFloat = 160 * scaleFactor
         let minThumbHeight = minThumbWidth / originalAspectRatio
         logger.debug("min thumb width: \(minThumbWidth), min thumb height: \(minThumbHeight)")
-        // Calculate maximum possible thumbnails
-        let maxHorizontal = Int(floor(screenSize.width / minThumbWidth))
-        let maxVertical = Int(floor(screenSize.height / minThumbHeight))
+        // Calculate maximum possible thumbnails (at least one cell per axis)
+        let maxHorizontal = max(Int(floor(screenSize.width / minThumbWidth)), 1)
+        let maxVertical = max(Int(floor(screenSize.height / minThumbHeight)), 1)
         logger.debug("max horizontal: \(maxHorizontal), max vertical: \(maxVertical)")
         var bestLayout: MosaicLayout?
         var bestScore: CGFloat = 0
@@ -446,126 +479,6 @@ public final class LayoutProcessor {
         return bestLayout!
     }
     
-    private func calculateDynamicLayout(
-        originalAspectRatio: CGFloat,
-        thumbnailCount: Int,
-        mosaicWidth: Int,
-        density: DensityConfig
-    ) -> MosaicLayout {
-        let state = signposter.beginInterval("Calculate Dynamic Layout")
-        defer { signposter.endInterval("Calculate Dynamic Layout", state) }
-        
-        logger.debug("🎨 Calculating dynamic layout with center emphasis")
-        
-        // Calculate base dimensions
-        let baseSpacing: CGFloat = 4
-        
-        // Calculate grid dimensions based on thumbnail count
-        let gridSize = calculateOptimalGridSize(for: thumbnailCount)
-        let (rows, cols) = gridSize
-        
-        // Calculate center point
-        let centerRow = rows / 2
-        let centerCol = cols / 2
-        
-        // Calculate maximum thumbnail size (center)
-        let maxThumbWidth = CGFloat(mosaicWidth) / CGFloat(cols) * 1.5
-        let maxThumbHeight = maxThumbWidth / originalAspectRatio
-        
-        // Calculate minimum thumbnail size (edges)
-        let minThumbWidth = CGFloat(mosaicWidth) / CGFloat(cols) * 0.8
-        let minThumbHeight = minThumbWidth / originalAspectRatio
-        
-        // Generate positions and sizes with dynamic scaling
-        var positions: [(x: Int, y: Int)] = []
-        var thumbnailSizes: [CGSize] = []
-        positions.reserveCapacity(thumbnailCount)
-        thumbnailSizes.reserveCapacity(thumbnailCount)
-        var currentY: CGFloat = 0
-        var currentX: CGFloat = 0
-        for row in 0..<rows {
-            currentX = 0
-            let rowHeight = calculateRowHeight(
-                row: row,
-                centerRow: centerRow,
-                minHeight: minThumbHeight,
-                maxHeight: maxThumbHeight
-            )
-            
-            for col in 0..<cols {
-                if positions.count < thumbnailCount {
-                    let thumbWidth = calculateThumbWidth(
-                        col: col,
-                        centerCol: centerCol,
-                        minWidth: minThumbWidth,
-                        maxWidth: maxThumbWidth
-                    )
-                    let thumbHeight = thumbWidth / originalAspectRatio
-                    
-                    positions.append((x: Int(currentX), y: Int(currentY)))
-                    thumbnailSizes.append(CGSize(width: thumbWidth, height: thumbHeight))
-                    
-                    currentX += thumbWidth + baseSpacing
-                }
-            }
-            
-            currentY += rowHeight + baseSpacing
-        }
-        
-        // Calculate final mosaic dimensions
-        let finalWidth = Int(currentX)
-        let finalHeight = Int(currentY)
-        
-        return MosaicLayout(
-            rows: rows,
-            cols: cols,
-            thumbnailSize: CGSize(width: minThumbWidth, height: minThumbHeight),
-            positions: positions,
-            thumbCount: thumbnailCount,
-            thumbnailSizes: thumbnailSizes,
-            mosaicSize: CGSize(width: finalWidth, height: finalHeight)
-        )
-    }
-    
-    private func calculateOptimalGridSize(for thumbnailCount: Int) -> (rows: Int, cols: Int) {
-        // Calculate base grid size
-        let baseSize = Int(sqrt(Double(thumbnailCount)))
-        let rows = baseSize
-        let cols = Int(ceil(Double(thumbnailCount) / Double(rows)))
-        
-        // Adjust for better visual balance
-        let aspectRatio = CGFloat(cols) / CGFloat(rows)
-        if aspectRatio > 2.0 {
-            return (rows: rows + 1, cols: cols - 1)
-        } else if aspectRatio < 0.5 {
-            return (rows: rows - 1, cols: cols + 1)
-        }
-        
-        return (rows: rows, cols: cols)
-    }
-    
-    private func calculateRowHeight(
-        row: Int,
-        centerRow: Int,
-        minHeight: CGFloat,
-        maxHeight: CGFloat
-    ) -> CGFloat {
-        let distanceFromCenter = abs(row - centerRow)
-        let scale = 1.0 - (CGFloat(distanceFromCenter) * 0.15)
-        return minHeight + (maxHeight - minHeight) * scale
-    }
-    
-    private func calculateThumbWidth(
-        col: Int,
-        centerCol: Int,
-        minWidth: CGFloat,
-        maxWidth: CGFloat
-    ) -> CGFloat {
-        let distanceFromCenter = abs(col - centerCol)
-        let scale = 1.0 - (CGFloat(distanceFromCenter) * 0.15)
-        return minWidth + (maxWidth - minWidth) * scale
-    }
-    
     // MARK: - Helper Methods
 
     /// Calculate thumbnail count based on video duration and width
@@ -591,7 +504,7 @@ public final class LayoutProcessor {
                 logger.debug("⚠️ No screen found, using minimum count: 4")
                 return 4
             }
-            let maxCount = min(calculateMaxThumbnails(screenSize: screenInfo.size, scale: screenInfo.scale, videoAR: videoAR), 800)
+            let maxCount = max(min(calculateMaxThumbnails(screenSize: screenInfo.size, scale: screenInfo.scale, videoAR: videoAR), 800), 4)
             logger.debug("🖥️ Auto layout max thumbnails: \(maxCount)")
             return maxCount
         } else {
@@ -605,10 +518,12 @@ public final class LayoutProcessor {
     
     }
     
-    private func calculateMaxThumbnails(screenSize: CGSize, scale: CGFloat, videoAR: Double) -> Int {
+    /// How many 160-point-wide thumbnails of aspect ratio `videoAR` fit on a screen of
+    /// `screenSize` points at `scale` pixels per point. Measured in pixels on both sides (I-9).
+    func calculateMaxThumbnails(screenSize: CGSize, scale: CGFloat, videoAR: Double) -> Int {
         let minThumbWidth: CGFloat = 160 * scale
-        let maxHorizontal = Int(floor(screenSize.width / minThumbWidth))
-        let maxVertical = Int(floor(screenSize.height / (minThumbWidth / videoAR)))
+        let maxHorizontal = max(Int(floor(screenSize.width * scale / minThumbWidth)), 1)
+        let maxVertical = max(Int(floor(screenSize.height * scale / (minThumbWidth / videoAR))), 1)
         return maxHorizontal * maxVertical
     }
     

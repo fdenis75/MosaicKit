@@ -163,8 +163,8 @@ knowledge base §5.2–§5.3.
 - **`LayoutType`:**
   - `custom`: three-zone, **default**.
   - `classic`: uniform grid.
-  - `auto`: screen-aware; broken on iPhone, see I-9.
-  - `dynamic`: center-emphasized; geometrically broken, see I-8.
+  - `auto`: screen-aware, measured in pixels (fixed in F-7, I-9).
+  - `dynamic`: deprecated (removed in 2.0); laid out as `custom` (F-7, I-8).
   - `iphone`: mobile-optimized.
 - **`AspectRatio`:** `16:9`, `4:3`, `1:1`, `21:9`, `9:16`.
 - **Codable rule:** add new keys with `decodeIfPresent` plus a default (in `MosaicConfiguration`,

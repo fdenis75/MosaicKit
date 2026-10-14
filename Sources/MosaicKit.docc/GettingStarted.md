@@ -200,9 +200,6 @@ let classicLayout = LayoutConfiguration(layoutType: .classic)
 // Auto layout - adapts to screen size
 let autoLayout = LayoutConfiguration(layoutType: .auto)
 
-// Dynamic layout - center-emphasized with variable sizes
-let dynamicLayout = LayoutConfiguration(layoutType: .dynamic)
-
 // iPhone layout - optimized for vertical scrolling
 let iphoneLayout = LayoutConfiguration(layoutType: .iphone)
 ```

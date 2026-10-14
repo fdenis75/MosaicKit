@@ -13,7 +13,7 @@ MosaicKit provides five distinct layout algorithms, each optimized for different
 | **Custom** | Most videos | Three-zone layout, centered large thumbnails |
 | **Classic** | Traditional grid | Uniform spacing, consistent sizing |
 | **Auto** | Screen-aware | Adapts to display dimensions |
-| **Dynamic** | Artistic style | Center emphasis, variable sizing |
+| **Dynamic** (deprecated) | — | Laid out as Custom; removed in 2.0 |
 | **iPhone** | Mobile viewing | Vertical scrolling, fixed width |
 
 ## Custom Layout
@@ -188,68 +188,9 @@ let config = MosaicConfiguration(
 - Presentations on unknown display configurations
 - Adaptive UIs
 
-## Dynamic Layout
+## Dynamic Layout (deprecated)
 
-### Description
-
-Center-emphasized layout with variable thumbnail sizes. Creates visual interest by varying sizes based on position, with larger thumbnails in the center.
-
-### Algorithm
-
-```swift
-// 1. Define size zones
-let centerZone = 0.4 * mosaicHeight    // 40% center
-let transitionZone = 0.3 * mosaicHeight // 30% each side
-
-// 2. Calculate size multipliers
-func sizeMultiplier(for position: CGFloat) -> CGFloat {
-    let distanceFromCenter = abs(position - 0.5)
-    return 1.0 + (1.0 - distanceFromCenter * 2.0) * 0.5
-    // Center: 1.5x, Edges: 1.0x
-}
-
-// 3. Apply multipliers to create gradient of sizes
-for (index, thumbnail) in thumbnails.enumerated() {
-    let position = CGFloat(index) / CGFloat(thumbnailCount)
-    let multiplier = sizeMultiplier(for: position)
-    let size = baseSize * multiplier
-}
-```
-
-### Visual Representation
-
-```
-┌─────────────────────────────────┐
-│   □   │   □   │   □   │   □     │  Smaller
-├─────────────────────────────────┤
-│     ■     │     ■     │     ■   │  Medium
-├─────────────────────────────────┤
-│         ███       ███           │  Larger (center)
-├─────────────────────────────────┤
-│     ■     │     ■     │     ■   │  Medium
-├─────────────────────────────────┤
-│   □   │   □   │   □   │   □     │  Smaller
-└─────────────────────────────────┘
-```
-
-### Configuration
-
-```swift
-let config = MosaicConfiguration(
-    layout: LayoutConfiguration(
-        aspectRatio: .widescreen,
-        layoutType: .dynamic
-    ),
-    density: .s  // Higher density recommended
-)
-```
-
-### Best For
-
-- Artistic presentations
-- Highlighting key moments (center frames)
-- Music videos and creative content
-- Visual storytelling
+`LayoutType.dynamic` is deprecated and is removed in 2.0. Its algorithm produced overlapping rows and clipped cells, so it is now laid out exactly like ``LayoutType/custom``. Configurations that stored `"dynamic"` still decode, and a one-time warning is logged. Use `.custom` instead.
 
 ## iPhone Layout
 
@@ -333,7 +274,6 @@ For a 60-second video with M density (~100 frames):
 | Custom | 50 | 50 | 100 | 7-9 |
 | Classic | 0 | 100 | 100 | 7 |
 | Auto | 0 | 75-150 | 75-150 | Varies |
-| Dynamic | 30 | 40 | 100 | 8-10 |
 | iPhone | 0 | 100 | 100 | 100 |
 
 ### Performance Characteristics
@@ -343,7 +283,6 @@ For a 60-second video with M density (~100 frames):
 | Custom | ~15ms | Medium | High |
 | Classic | ~5ms | Low | Low |
 | Auto | ~20ms | Medium | Medium |
-| Dynamic | ~25ms | High | High |
 | iPhone | ~3ms | Low | Low |
 
 ## Choosing the Right Layout
@@ -368,7 +307,7 @@ let config = MosaicConfiguration(
 
 // For artistic style
 let config = MosaicConfiguration(
-    layout: LayoutConfiguration(layoutType: .dynamic)
+    layout: LayoutConfiguration(layoutType: .custom)
 )
 
 // For mobile apps
@@ -398,7 +337,7 @@ MosaicConfiguration(
     density: .s,
     layout: LayoutConfiguration(
         aspectRatio: .square,
-        layoutType: .dynamic
+        layoutType: .custom
     )
 )
 ```
@@ -448,11 +387,11 @@ var config = MosaicConfiguration(
     layout: LayoutConfiguration(aspectRatio: .square, layoutType: .custom)
 )
 
-// Ultrawide mosaic with dynamic layout
+// Ultrawide mosaic
 var ultrawideConfig = MosaicConfiguration(
     layout: LayoutConfiguration(
         aspectRatio: .ultrawide,
-        layoutType: .dynamic
+        layoutType: .custom
     )
 )
 ```
@@ -462,7 +401,7 @@ var ultrawideConfig = MosaicConfiguration(
 Compare layouts for the same video:
 
 ```swift
-let layouts: [LayoutType] = [.custom, .classic, .auto, .dynamic, .iphone]
+let layouts: [LayoutType] = [.custom, .classic, .auto, .iphone]
 
 for layoutType in layouts {
     let config = MosaicConfiguration(

@@ -9,7 +9,7 @@ A high-performance Swift package for generating video mosaics with Metal-acceler
 ## Features
 
 - 🚀 **Metal GPU Acceleration** - Hardware-accelerated mosaic generation on macOS, iOS, and macCatalyst
-- 🎨 **Multiple Layout Algorithms** - Classic, custom, auto-screen, dynamic, and iPhone-optimized layouts
+- 🎨 **Multiple Layout Algorithms** - Classic, custom, auto-screen and iPhone-optimized layouts
 - ⚙️ **Configurable Density Levels** - From XXL (minimal) to XXS (maximal) frame extraction
 - 📦 **Multiple Output Formats** - JPEG, PNG, HEIF, and WebP (via the optional `MosaicKitWebP` product) with configurable compression
 - 🔄 **Batch Processing** - Intelligent concurrency management for processing multiple videos
@@ -23,7 +23,8 @@ A high-performance Swift package for generating video mosaics with Metal-acceler
 
 ### Behavior changes
 
-- **iOS fails fast on undecodable H.264** (I-22) — inspecting a video whose H.264 profile iOS cannot decode (High 10, High 4:2:2, High 4:4:4) now throws the new `VideoError.unsupportedCodec(URL, String)`, which names the codec and suggests re-encoding, instead of every frame extraction failing later. macOS and Mac Catalyst are unaffected. Code that switches exhaustively over `VideoError` needs a new case.
+- **`LayoutType.dynamic` is deprecated and laid out as `.custom`** (I-8) — the old algorithm produced overlapping rows and clipped cells. Configurations that store `"dynamic"` still decode; a one-time warning is logged, and `LayoutType.allCases` no longer lists it. Output for `.dynamic` users changes to the `.custom` layout. Removed in 2.0.
+- **`.auto` layout works on small screens** (I-9) — it now measures the screen in pixels throughout (the minimum cell is 160 points), so an iPhone no longer ends with 0 columns and an empty layout; the automatic frame count is at least 4.
 - **Preview default file names are deterministic** (I-12) — the default name no longer contains the run timestamp (`_preview_<name>_<config>.<ext>` instead of `…_<yyyy-MM-dd_HH-mm-ss>_.<ext>`), so `overwrite == false` now skips a preview that already exists. Previews saved under the old names are not recognized and are regenerated once. The timestamp is available as the opt-in `{time}` token (`HH-mm-ss`) of `PreviewConfiguration.filenameTemplate`; a template with `{time}` never matches an earlier run.
 - **`{aspectRatio}` renders as `16-9`** (I-11) — in `MosaicConfiguration` directory and filename templates the token no longer inserts a colon (`16:9`), which Finder shows as `/` and SMB or exFAT reject. Outputs of users of the token move, and so do animation names derived from the mosaic name.
 
@@ -321,7 +322,6 @@ layout.aspectRatio = .vertical    // 9:16 (portrait)
 layout.layoutType = .custom       // Three-zone layout with large center thumbnails (default)
 layout.layoutType = .auto         // Adapt to screen size
 layout.layoutType = .classic      // Uniform grid
-layout.layoutType = .dynamic      // Center-emphasized, variable sizing
 layout.layoutType = .iphone       // Mobile-optimized vertical scrolling
 
 // Visual settings
@@ -866,14 +866,9 @@ config.layout.layoutType = .auto
 // - Minimum readable thumbnail size
 ```
 
-### Dynamic Layout
+### Dynamic Layout (deprecated)
 
-Center-emphasized layout with variable thumbnail sizes:
-
-```swift
-config.layout.layoutType = .dynamic
-// Larger thumbnails in center, smaller at edges
-```
+`.dynamic` is deprecated and is removed in 2.0: its algorithm overlapped and clipped cells, so it is now laid out as `.custom`. Saved configurations that contain `"dynamic"` still decode.
 
 ## Examples
 

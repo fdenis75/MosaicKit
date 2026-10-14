@@ -58,7 +58,7 @@ AVAssetExportSession, SJS, or an external ffmpeg for encoding.
 | High | ~~**I-2** the ffmpeg scale filter distorts non-16:9 and portrait video~~ (fixed in F-2) |
 | Medium | ~~**I-3** ffmpeg HEVC forced to 30 fps~~ (fixed in F-2) |
 | Medium | **I-4** no-overwrite placeholder race |
-| Medium | **I-8** `.dynamic` layout overlaps and clips cells |
+| Medium | ~~**I-8** `.dynamic` layout overlaps and clips cells~~ (deprecated in F-7; laid out as `.custom`) |
 | Medium | ~~**I-12** preview skip-if-exists never matches~~ (fixed in F-3) |
 | Medium | **I-16** slow ffmpeg cancellation (fix in #34) |
 | Medium | **I-20** `.nochange` animation holds all frames in memory |
@@ -640,8 +640,8 @@ the same `planMosaic` + `composeMosaic`, so both entry points compose the same i
 | 0 | Validate | `MosaicConfiguration.validate()` [[F:Sources/Models/ConfigurationValidation.swift#15-66#83f12470]] | caller → actor | Checks geometry, quality, fps, colors, and whether WebP is registered. |
 | 1 | Skip-if-exists | inside `generate` | generator actor | Uses one `referenceDate` for both the check and the save, so `{time}` resolves identically. With `.withMosaic`, a missing animation is backfilled. |
 | 2 | Duration / AR | inside `generate` | generator actor | Uses `video.duration` if known, else loads it. Rejects `< 5 s`, `width > 16 384`, and non-finite dimensions. Aspect ratio = `video.width / video.height`, which are display dimensions since F-1 (`preferredTransform` is applied in the extractor). |
-| 3 | Thumbnail count | `LayoutProcessor.calculateThumbnailCount` [[F:Sources/Processing/LayoutProcessor.swift#577-607#43311084]] | generator actor | `count = clamp((width/200 + 10·ln(duration)) × density.factor, 4, 800)`. `.auto` uses the largest screen instead: `(screenW / (160·scale)) × (screenH / (160·scale / videoAR))`, capped at 800. |
-| 4 | Layout | `LayoutProcessor.calculateLayout` [[F:Sources/Processing/LayoutProcessor.swift#72-134#43311084]] | generator actor (under `NSRecursiveLock`) | Cache key: `aspectRatio-originalAR-count-width-density-layoutType`. `.auto` is never cached. Invalid input returns an **empty** layout, which later throws "Empty mosaic layout". `.iphone` forces width 1200, 1 column, max height 8000. |
+| 3 | Thumbnail count | `LayoutProcessor.calculateThumbnailCount` [[F:Sources/Processing/LayoutProcessor.swift#490-519#b6049426]] | generator actor | `count = clamp((width/200 + 10·ln(duration)) × density.factor, 4, 800)`. `.auto` uses the largest screen instead: `⌊screenW/160⌋ × ⌊screenH/(160/videoAR)⌋` (points, so the same in pixels; F-7), clamped to 4…800. |
+| 4 | Layout | `LayoutProcessor.calculateLayout` [[F:Sources/Processing/LayoutProcessor.swift#93-150#b6049426]] | generator actor (under `NSRecursiveLock`) | Cache key: `aspectRatio-originalAR-count-width-density-layoutType`. `.auto` is never cached. `.dynamic` is mapped to `.custom` first (F-7). Invalid input returns an **empty** layout, which later throws "Empty mosaic layout". `.iphone` forces width 1200, 1 column, max height 8000. |
 | 5 | Aspect normalization | `planMosaic`: `adjustedConfig.updateAspectRatio(AspectRatio.findNearest(to: layout.mosaicSize))` | generator actor | The config passed down may carry a **different** `layout.aspectRatio` than the caller set. Path/filename generation still uses the caller's original `config`. |
 | 6 | Header | `ThumbnailProcessor.createMetadataHeader` | generator actor (synchronous CPU) | Only when `includeMetadata`. Height is added on top of the layout height. |
 | 7 | Frame extraction | `ThumbnailProcessor.processedFramesStream` [[F:Sources/Processing/ThumbnailProcessor.swift#140-192#844677b3]] | producer `Task` on the global executor | One `AVAssetImageGenerator` with the batched `images(for:)` API. `maximumSize` = largest cell × `decodeQualityScale` (1). Tolerance ±1 s, or 0 when `useAccurateTimestamps`. Sampling: first 20 % of frames in the first 33 % of the 5–95 % window, 60 % in the middle, 20 % in the last third [[F:Sources/Processing/ThumbnailProcessor.swift#505-538#844677b3]]. Any `.failure` throws: mosaics are strict (**no placeholder frames**). |
@@ -1201,8 +1201,8 @@ backbone. Read `LayoutProcessor` algorithms, `ThumbnailProcessor` header/label r
   |---|---|---|---|---|
   | `.custom` (default) | 3 zones stacked: `smallRows` rows of small cells, then `midRows` of large cells (centered), then `smallRows` small | Chooses the `smallRows ∈ 1…max(8, n/10)` whose total is **closest to n within [0.5n, 2.5n]**. If none fits, retries with 0.8·n recursively, and below 4 falls back to classic with 4. | Large/small ratio depends on the target AR (≥2.0 → 2.0, ≥1.6 → 1.6, ≥1.33 → 1.33, else 1.25). Padding is fixed at 4 px. **Height = actual content**, not width/AR. | The `density` string parameter is unused. |
   | `.classic` | Uniform grid | Tries rows 1…n and scores `(1 − fillRatio) + |count − n|/n`. Rows are capped by the target height; up to **1.2·n + 1** cells. | 5 px spacing; width is exact | Uses `LayoutProcessor.mosaicAspectRatio` (set from the requested AR at the start of `calculateLayout`). |
-  | `.dynamic` | Near-square grid (√n rows); cell width grows toward the center column (0.8× → 1.5× base), row height grows toward the center row | Exactly n | 4 px spacing. **Width = the last row's x-cursor, height = the sum of row heights.** | ⚠ Each cell's height comes from its *column* width, but rows advance by a *row* height, so tall cells can **overlap** the next row. The scale factor `1 − 0.15·d` goes **negative** beyond 6 rows/columns from center (n ≳ 170). The mosaic width comes from the *last* (possibly partial) row, so wider rows can be **clipped**. |
-  | `.auto` | Grid filling the **largest screen** (`NSScreen.screens` / `UIScreen.main`) | The count itself comes from the screen: `(W/(160·scale)) × (H/(160·scale/videoAR))`, capped at 800 | Size = screen **points** while the minimum cell is in **pixels** (160·scale), so units are mixed | Never cached. Requires screen access (UI frameworks). On iPhone, `160·3 = 480 px > 390 pt` wide, so the count is 0, which gives an empty layout, which throws "Empty mosaic layout". **`.auto` is effectively unusable on iPhone.** |
+  | `.dynamic` (deprecated, F-7) | Laid out exactly as `.custom` (I-8); a one-time warning is logged. The old algorithm (near-square grid with center-weighted sizes) overlapped rows and clipped wide ones, and was removed | As `.custom` | As `.custom` | Still decodes, because persisted raw values must stay; not listed in `LayoutType.allCases`. Removed in 2.0. |
+  | `.auto` | Grid filling the **largest screen** (`NSScreen.screens` / `UIScreen.main`), measured in **pixels** (F-7, I-9) | The count itself comes from the screen: `⌊W·scale/(160·scale)⌋ × ⌊H·scale/(160·scale/videoAR)⌋` (each factor at least 1), clamped to 4…800 | Canvas = screen pixels; the minimum cell is 160 points (`160·scale` px) | Never cached. Requires screen access (UI frameworks); `calculateAutoLayout(…screenSize:scale:)` takes the screen explicitly for tests. Before F-7 it mixed points and pixels and produced an empty layout on iPhone. |
   | `.iphone` (or `forIphone: true`) | 1 column, fixed width **1200 px**, max height 8000 px | `min(n, rows that fit in 8000)` | 4 px spacing | Ignores `config.width`. |
 
 - **Rendering spacing:** `LayoutConfiguration.spacing` (default 4) is **not** used by the
@@ -1215,8 +1215,9 @@ backbone. Read `LayoutProcessor` algorithms, `ThumbnailProcessor` header/label r
   - `.classic`'s result is force-unwrapped (`bestLayout!`); it is safe only because the √n
     starting layout is non-nil for valid input.
 - **Tests:** `LayoutProcessorTests` (24 tests): count bounds, positive sizes, classic count ≥
-  requested, custom three size groups. `MosaicPipelineReliabilityTests`: non-finite inputs,
-  cache includes target AR. No tests cover `.dynamic` overlap or `.auto` on small screens.
+  requested, custom three size groups, `.dynamic` equals `.custom` and still decodes, `.auto` on an
+  iPhone-sized, a tiny and a desktop screen (F-7). `MosaicPipelineReliabilityTests`: non-finite
+  inputs, cache includes target AR.
 
 ### F5 — Overlays & annotations
 
@@ -1679,10 +1680,10 @@ none.
 6. **The default `VisualSettings.addShadow = true`** routes every frame through a CPU shadow
    render (F5 performance).
 7. **The rounded-corner and vignette treatment is always applied**, even with labels off (F5).
-8. **`.dynamic` layout** can overlap rows, produce negative scale for large counts, and clip
-   wide rows (F4).
-9. **`.auto` layout** mixes points and pixels, and yields an empty layout (error) on iPhone
-   (F4).
+8. **`.dynamic` layout** could overlap rows, produce negative scale for large counts, and clip
+   wide rows (F4). *(Fixed in F-7, I-8: deprecated and laid out as `.custom`.)*
+9. **`.auto` layout** mixed points and pixels, and yielded an empty layout (error) on iPhone
+   (F4). *(Fixed in F-7, I-9: pixels throughout, count floored at 4.)*
 10. **`LayoutConfiguration.spacing` is not a layout input.** It only insets cells (F4).
 11. **`discoverVideos` fails the whole scan on one undecodable file**, and the extension list
     includes formats AVFoundation usually can't read (F1).
@@ -1793,8 +1794,8 @@ robustness, performance, or cosmetic.
 | I-5 | F9 | **Native `exportPreset(quality:)` matches exact floats.** Unmatched values → **Passthrough**; 0.7 → H.264 1080p (the comment says HEVC); the MediumQuality branch is unreachable (duplicate `0.7`). Reached only when `exportPresetName == nil`: **configs decoded without that key** (the decoder uses `decodeIfPresent` with no default) or explicit `nil`. The `init` default is HEVC 1920×1080. | Confirmed (static) | Low–Medium | `VideoFormat.swift` @L397–416 | Use ranges (`>= 0.95`, …). Decide what the 0.7 mapping should be. Reject Passthrough when a composition or audio mix is required (overlays, resize, speed ≠ 1). |
 | I-6 | F9 | **SJS with `sJSExportPresetName` explicitly `nil`** produces H.264 Baseline at 0.8 (exact matching), while `PreviewExportDescription.sjs` reports **HEVC**. *(Corrected: `init` and decoding both default to `.hevc`, so the default config is fine.)* | Confirmed (static) | Low | `videoSettings(for:…)` matches only 1.0/0.75/0.5/0.25; `PreviewExportDescription.sjs` defaults to `.hevc` when no preset is set | Use range mapping and make the description call the same resolver as the exporter (one source of truth). |
 | I-7 | F9 | In the same explicit-`nil` SJS branch, writer dimensions come from `scaleDimensions(naturalSize)`, but the composition renders at the capped `renderSize`. | Suspected | Low | `exportWithSJSSession` | Always pass `renderSize` to `VideoOutputSettings` (as the preset branch already does). |
-| I-8 | F4 | **`.dynamic` layout is geometrically broken.** Rows overlap, wide rows are clipped, and the width ignores `config.width`. | Confirmed (simulated) | Medium | Simulation (5120 px, 16:9): n=107 → canvas width 4737 but widest row 6257 (**clipped**); 40/107 cells taller than their row (**overlap**). n=30 → width 6897 > 5120. n=800 → 15 rows with negative scale, cells as narrow as 5 px. | Normalize each row to `mosaicWidth`, use a single height per row, clamp the scale at ≥ 0, and compute the canvas from the max row width. Or deprecate `.dynamic`. **Decision D4 (deprecate) → plan F-7.** |
-| I-9 | F4 | **`.auto` fails on iPhone.** It mixes points and pixels; the count is 0, the layout is empty, and it throws "Empty mosaic layout". | Confirmed (static) | Low–Medium | `calculateMaxThumbnails`: 390 pt / (160·3) → 0 columns | Use pixels consistently (points × scale), or points consistently. Floor the count at 4. |
+| I-8 | F4 | **`.dynamic` layout is geometrically broken.** Rows overlap, wide rows are clipped, and the width ignores `config.width`. | **Deprecated (F-7)**: `.dynamic` is `@available(*, deprecated)`, laid out as `.custom` with a one-time warning, dropped from `allCases`; the broken algorithm is deleted. **Test:** `LayoutProcessorTests` "Deprecated dynamic layout is laid out exactly as custom" | Medium | Simulation (5120 px, 16:9): n=107 → canvas width 4737 but widest row 6257 (**clipped**); 40/107 cells taller than their row (**overlap**). n=30 → width 6897 > 5120. n=800 → 15 rows with negative scale, cells as narrow as 5 px. | Normalize each row to `mosaicWidth`, use a single height per row, clamp the scale at ≥ 0, and compute the canvas from the max row width. Or deprecate `.dynamic`. **Decision D4 (deprecate) → plan F-7.** |
+| I-9 | F4 | **`.auto` fails on iPhone.** It mixes points and pixels; the count is 0, the layout is empty, and it throws "Empty mosaic layout". | **Fixed (F-7)**: `calculateAutoLayout(…screenSize:scale:)` and `calculateMaxThumbnails` work in pixels, each axis has at least one cell, and the automatic count is at least 4. **Tests:** `LayoutProcessorTests` (iPhone-sized, tiny and desktop screens) | Low–Medium | `calculateMaxThumbnails`: 390 pt / (160·3) → 0 columns | Use pixels consistently (points × scale), or points consistently. Floor the count at 4. |
 | I-10 | F5 | **`MetadataField.colorPalette` never renders.** | Confirmed (static) | Low | The generator never passes `swatchColors` to `createMetadataHeader` | Compute swatches from the dominant colors (already computed for the background) and pass them in. This requires generating the header **after** the first frames. |
 | I-11 | F12 | **The `{aspectRatio}` template token inserts `:`** into paths. | **Fixed (F-3)**: both token maps (`generateOutputDirectory`/`animatedOutputURL` and the filename template) render `16-9`. **Test:** `MosaicConfigurationTests` "{aspectRatio} renders with a dash…", and the pinned `3840_S_9-16_classic` path | Low–Medium | `layout.aspectRatio.rawValue` ("16:9") was used verbatim; `configurationHash` already replaced `:` with `-` | Used the hash-style `16-9` in templates (D5). This moves outputs for users of the token and the animation names derived from the mosaic name. |
 | I-12 | F8 | **Preview skip-if-exists never matches** with default naming (run timestamp in the filename). | **Fixed (F-3)**: the default name no longer has the run timestamp; `{time}` is an opt-in `filenameTemplate` token. **Tests:** `PreviewConfigurationTests` (deterministic name, `{time}` token) and `PreviewSkipExistingTests` (existing file returned, nothing exported) | Medium | `PreviewConfiguration.generateFilename` | Dropped the run timestamp from the default name (D2). This is a naming change (rule 4): existing default-named previews are regenerated once. |
@@ -2203,7 +2204,7 @@ Factories: `from(quality:format:)` and `forPreview(quality:)` (deprecated, S-6) 
 | Enum | Cases (raw values) |
 |---|---|
 | `DensityConfig` (struct presets) | `xxl`(0.25, ×0.125) `xl`(0.5, ×0.25) `l`(0.75, ×0.5) `m`(1.0, ×1.0) `s`(2.0, ×2.0) `xs`(3.0, ×4.0) `xxs`(4.0, ×8.0). Format: factor, extractsMultiplier |
-| `LayoutType` | `auto` `custom` `dynamic` `classic` `iphone` |
+| `LayoutType` | `auto` `custom` `classic` `iphone` (`dynamic` is deprecated and laid out as `custom`; not in `allCases`) |
 | `AspectRatio` | `16:9` `4:3` `1:1` `21:9` `9:16` |
 | `BorderColor` | `white` `black` `gray` |
 | `OutputFormat` | `jpeg`(jpg) `png` `heif`(heic) `webp` |
@@ -2444,7 +2445,7 @@ let out = try await jobs.value(for: id)                    // starts the work
 | Need | Go to |
 |---|---|
 | First use | `README.md` Quick Start; DocC `GettingStarted.md`, `QuickStart.md` |
-| Layout details | DocC `LayoutAlgorithms.md` + §F4 (with the `.dynamic`/`.auto` caveats, I-8/I-9) |
+| Layout details | DocC `LayoutAlgorithms.md` + §F4 (`.dynamic` deprecated, I-8; `.auto` in pixels, I-9) |
 | Architecture | §Part 2 (authoritative); DocC `Architecture.md` (accurate, but shows the array-based path) |
 | Performance | §4.3; DocC `PerformanceGuide.md` (benchmarks unverified) |
 | Preview export modes & stalls | §F8/F9; DocC `PreviewExporting.md` |
@@ -2494,7 +2495,7 @@ with the code.
 | 6 | Opt-in **resumable preview export** (iOS/macOS 27) with a stable per-job temp directory | §4.9 | Big win for long exports interrupted in the background | M |
 | 7 | ~~Fail fast on undecodable sources (10-bit H.264 on iOS, …) at inspection time~~ **Done** (F-6) | I-22 | A clear error instead of "Frame extraction failed" | S |
 | 8 | Stream animated-export frames into the encoder instead of `[CGImage]` | I-20 | Memory safety for `.nochange` / long videos | M |
-| 9 | Fix or deprecate `.dynamic`; fix `.auto` units | I-8, I-9 | Broken layout options that are advertised in the README | M |
+| 9 | ~~Fix or deprecate `.dynamic`; fix `.auto` units~~ **Done** (F-7) | I-8, I-9 | Broken layout options that are advertised in the README | done |
 | 10 | Housekeeping: ~~`decodeIfPresent` for new keys~~ (done in S-5), ~~remove dead code and swift-log, unify the log subsystem~~ (done in S-1, #38), render or remove `.colorPalette`, and ~~resolve I-13 (4K vs 1080p docs)~~ (done in S-5), ~~deprecate unused public API~~ (done in S-6) | I-10, I-13, I-14, I-23, I-24, I-25 | Lower maintenance cost and fewer surprises | S each |
 | 11 | Performance exploration (always benchmark against the batched path): CVPixelBuffer → Metal zero-copy path, GPU-side frame treatment, moving encoding off the generator actor, the VideoToolbox constant-quality factor for SJS | §4.3, §4.9 | Throughput is a hard requirement | L |
 | 12 | ~~Root-cause the intermittent native export stall~~ (done: macOS background scheduling, #46). Remaining: have the macOS stall retry wait until the app is active again, as iOS waits for foreground, and document background exporting for apps | I-26 | A stalled export fails after 120 s and retries while still throttled | S |
@@ -2555,7 +2556,7 @@ P1 = core feature, P2 = supporting, P3 = docs/infra.
 | 8 | P0 | `Sources/Models/PreviewConfiguration.swift` | model | 817 | ee2900f9 | Config + extract math + path templating |
 | 9 | P1 | `Sources/Processing/ThumbnailProcessor.swift` | code | 1581 | 844677b3 | Frame stream @L140, GIF frames @L76, header @L598/862 |
 | 10 | P1 | `Sources/Processing/MetalImageProcessor.swift` | code | 1336 | 04cfcb88 | Metal pipeline, `generateMosaicStream` @L864, DominantColors @L601 |
-| 11 | P1 | `Sources/Processing/LayoutProcessor.swift` | code | 677 | 43311084 | Layout algorithms, cache @L21/92/131 |
+| 11 | P1 | `Sources/Processing/LayoutProcessor.swift` | code | 592 | b6049426 | Layout algorithms, cache @L22/114/148 |
 | 12 | P1 | `Sources/Models/VideoInput.swift` | model | 133 | 08cdafc0 | Unit of work |
 | 13 | P1 | `Sources/Models/VideoSource.swift` | model | 61 | 4e63687f | Lazy source + inspect + validate |
 | 14 | P1 | `Sources/Processing/GenerationJobs.swift` | code | 109 | df980649 | Job controller (deprecated, S-6) |
@@ -2569,7 +2570,7 @@ P1 = core feature, P2 = supporting, P3 = docs/infra.
 | 22 | P1 | `Sources/Processing/WebPSupport.swift` | code | 45 | 8f928b72 | WebP injection |
 | 23 | P1 | `SourcesWebP/MosaicKitWebP.swift` | code | 72 | dc374b7e | WebP encoder impl |
 | 24 | P2 | `Sources/Models/DensityConfig.swift` | model | 84 | 5f791dc8 | Density presets |
-| 25 | P2 | `Sources/Models/LayoutConfiguration.swift` | model | 195 | 3832ee5d | LayoutType, AspectRatio, visuals |
+| 25 | P2 | `Sources/Models/LayoutConfiguration.swift` | model | 199 | 4fd17c92 | LayoutType, AspectRatio, visuals |
 | 26 | P2 | `Sources/Models/MosaicLayout.swift` | model | 172 | bffb3bda | Layout result |
 | 27 | P2 | `Sources/Models/VideoFormat.swift` | model | 417 | 26c5e961 | Preview containers & presets |
 | 28 | P2 | `Sources/Models/FFmpegEncodingOptions.swift` | model | 311 | db3a64a2 | ffmpeg options |
@@ -2631,8 +2632,8 @@ RELATED PRs (merged): #32 this doc (+README unreleased note); #33 iOS CI scheme 
              #34 ffmpeg watchdog (I-16); #35 review path filter; #36 fast animated tests;
              #31 closed (duplicate of #33). Open: #37 CLAUDE.md/AGENTS.md rewrite + this refresh
 
-FILE_MAP_SUMMARY: Appendix A (62 files; P0 = 8, P1 = 16)
-ISSUE REGISTER:   §4.2 I-1 … I-27   (High: I-1, I-2; Medium: I-3 I-4 I-8 I-12 I-16 I-20 I-22 I-24 I-26 I-27; fixed: I-1 I-2 I-3 I-11 I-12 I-15 I-16 I-23 I-24 I-27)
+FILE_MAP_SUMMARY: Appendix A (60 files; P0 = 8, P1 = 15)
+ISSUE REGISTER:   §4.2 I-1 … I-27   (High: I-1, I-2; Medium: I-3 I-4 I-8 I-12 I-16 I-20 I-22 I-24 I-26 I-27; fixed: I-1 I-2 I-3 I-9 I-11 I-12 I-15 I-16 I-23 I-24 I-27)
 ROADMAP:          §6.1 → IMPLEMENTATION_PLAN.md (decisions §6.4)
 OPEN_QUESTIONS:   §6.2 (Q11 Q14 Q16 Q17; Q13 answered in F-2)
 GLOSSARY:         §5.1

@@ -46,14 +46,18 @@ public enum LayoutType: String, Codable, Sendable {
     /// A custom layout with specific zone-based arrangements.
     case custom
     /// A dynamic layout emphasizing center frames.
+    ///
+    /// Deprecated (I-8): the algorithm produced overlapping and clipped rows, so it is laid out
+    /// as ``custom`` instead. Existing configurations that store `"dynamic"` still decode.
+    @available(*, deprecated, message: "Laid out as .custom; use .custom instead. Removed in 2.0.")
     case dynamic
     /// A classic uniform grid layout.
     case classic
     /// A layout optimized for portrait iPhone screens.
     case iphone
     
-    /// An array of all available layout types.
-    public static let allCases: [LayoutType] = [.auto, .custom, .dynamic, .classic, .iphone]
+    /// An array of all available layout types. The deprecated ``dynamic`` is not listed.
+    public static let allCases: [LayoutType] = [.auto, .custom, .classic, .iphone]
 }
 
 /// An enumeration representing the predefined aspect ratios for a mosaic layout.
