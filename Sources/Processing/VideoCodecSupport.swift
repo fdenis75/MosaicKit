@@ -47,4 +47,15 @@ enum VideoCodecSupport {
         guard isEnforced, let avcC = avcC(of: formatDescription) else { return nil }
         return unsupportedH264Description(avcC: avcC)
     }
+
+    /// The first unsupported codec/profile among all of a track's format descriptions.
+    ///
+    /// A track can carry several sample descriptions and switch between them mid-stream, so
+    /// checking only the first one would accept a source that fails later during extraction.
+    static func unsupportedCodecName(in formatDescriptions: [CMFormatDescription]) -> String? {
+        for description in formatDescriptions {
+            if let name = unsupportedCodecName(of: description) { return name }
+        }
+        return nil
+    }
 }

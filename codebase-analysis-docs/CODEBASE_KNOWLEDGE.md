@@ -1134,8 +1134,8 @@ backbone. Read `LayoutProcessor` algorithms, `ThumbnailProcessor` header/label r
     **not equal**.
   - Since F-6 (I-22), inspection on iOS (not Mac Catalyst) throws `VideoError.unsupportedCodec`
     for H.264 profiles the decoder rejects: High 10 (`profile_idc` 110), High 4:2:2 (122) and
-    High 4:4:4 (244, 44). The profile comes from the `avcC` atom of the first format
-    description (`VideoCodecSupport`). macOS decodes these profiles, so nothing is thrown there.
+    High 4:4:4 (244, 44). The profile comes from the `avcC` atom of every format
+    description of the track (`VideoCodecSupport`), since a track can switch descriptions. macOS decodes these profiles, so nothing is thrown there.
     HEVC (including Main 10) is not checked. Inputs created with `VideoInput(url:…)` and
     supplied metadata skip inspection, so they are not checked either.
 - **Tests:** `InputValidationRegressionTests` (cloning without I/O, inspection keeps custom
@@ -2578,7 +2578,7 @@ P1 = core feature, P2 = supporting, P3 = docs/infra.
 | 32 | P2 | `Sources/Processing/Preview/PreviewError.swift` | code | 143 | 03e8936f | Preview errors |
 | 33 | P2 | `Sources/Processing/ProcessingError.swift` | code | 97 | 9896b38f | MosaicError, LibraryError |
 | 34 | P2 | `Sources/Processing/VideoError.swift` | code | 169 | 49827fa2 | VideoError (incl. `unsupportedCodec`, F-6) |
-| 35 | P2 | `Sources/Processing/VideoMetadataExtractor.swift` | code | 176 | 6aae6db3 | Metadata actor |
+| 35 | P2 | `Sources/Processing/VideoMetadataExtractor.swift` | code | 177 | 3f894c78 | Metadata actor |
 | 36 | P2 | `Sources/VideoInputScanner.swift` | code | 106 | 3eee6885 | Discovery |
 | 37 | P2 | `Sources/Shaders/MetalShaders.metal` | shader | 160 | 69c46806 | 5 kernels |
 | 38 | P2 | `Tests/MosaicKitTests/CombinationTests.swift` | test | 709 | ca867ab4 | Serialized mosaic matrix |
@@ -2604,8 +2604,8 @@ P1 = core feature, P2 = supporting, P3 = docs/infra.
 | 58 | P2 | `Tests/MosaicKitTests/ConfigurationInitializerTests.swift` | test | 90 | 2b40144c | Secondary/deprecated config initializers keep their values; 1080p default (S-5) |
 | 59 | P2 | `Tests/MosaicKitTests/ExportStressTests.swift` | test | 150 | 96d6633d | Opt-in export stress (`MOSAICKIT_STRESS`); found the I-26 cause |
 | 60 | P2 | `Tests/MosaicKitTests/ProcessScheduling.swift` | test | 54 | e051e059 | Test helper: detect/leave macOS background scheduling (I-26) |
-| 61 | P1 | `Sources/Processing/VideoCodecSupport.swift` | code | 50 | afd909fd | Detects H.264 profiles iOS cannot decode (F-6, I-22) |
-| 62 | P2 | `Tests/MosaicKitTests/VideoCodecSupportTests.swift` | test | 90 | 372e7fad | avcC profile detection, format descriptions, error text (F-6) |
+| 61 | P1 | `Sources/Processing/VideoCodecSupport.swift` | code | 61 | f82ab846 | Detects H.264 profiles iOS cannot decode (F-6, I-22) |
+| 62 | P2 | `Tests/MosaicKitTests/VideoCodecSupportTests.swift` | test | 103 | 2ff12cf6 | avcC profile detection, format descriptions, error text (F-6) |
 
 Excluded or low value: `Media.xcassets/**` (binary fixture), `Tests/MosaicKitTests/embeddedAsset/test_video.mp4`
 (87 s 8-bit H.264 video-only fixture), `scripts/**` + `Makefile` (xcodebuild agent scaffold for a

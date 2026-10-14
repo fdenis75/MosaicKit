@@ -68,6 +68,19 @@ struct VideoCodecSupportTests {
         #endif
     }
 
+    @Test("Every format description of a track is checked, not just the first")
+    func checksAllFormatDescriptions() throws {
+        let supported = try formatDescription(profile: 100)
+        let high10 = try formatDescription(profile: 110)
+        #expect(VideoCodecSupport.unsupportedCodecName(in: []) == nil)
+        #expect(VideoCodecSupport.unsupportedCodecName(in: [supported]) == nil)
+        #if os(iOS) && !targetEnvironment(macCatalyst)
+        #expect(VideoCodecSupport.unsupportedCodecName(in: [supported, high10]) == "H.264 High 10")
+        #else
+        #expect(VideoCodecSupport.unsupportedCodecName(in: [supported, high10]) == nil)
+        #endif
+    }
+
     @Test("The embedded 8-bit fixture still inspects")
     func fixtureStillInspects() async throws {
         let url = try #require(Bundle.module.url(forResource: "test_video", withExtension: "mp4"))
