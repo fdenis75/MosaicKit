@@ -21,7 +21,10 @@ A high-performance Swift package for generating video mosaics with Metal-acceler
 
 ## Unreleased
 
-- Nothing yet. Add a line here for every change; output-naming and location changes (📁) also get a **Behavior changes** note.
+### Behavior changes
+
+- **Preview default file names are deterministic** (I-12) — the default name no longer contains the run timestamp (`_preview_<name>_<config>.<ext>` instead of `…_<yyyy-MM-dd_HH-mm-ss>_.<ext>`), so `overwrite == false` now skips a preview that already exists. Previews saved under the old names are not recognized and are regenerated once. The timestamp is available as the opt-in `{time}` token (`HH-mm-ss`) of `PreviewConfiguration.filenameTemplate`; a template with `{time}` never matches an earlier run.
+- **`{aspectRatio}` renders as `16-9`** (I-11) — in `MosaicConfiguration` directory and filename templates the token no longer inserts a colon (`16:9`), which Finder shows as `/` and SMB or exFAT reject. Outputs of users of the token move, and so do animation names derived from the mosaic name.
 
 ## New in 1.8.0
 

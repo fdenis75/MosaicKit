@@ -147,7 +147,8 @@ public struct PreviewConfiguration: Codable, Sendable, Hashable {
     ///
     /// When `nil` (default), the legacy filename layout is used. When set, the
     /// template is resolved against the following tokens: `{name}`, `{ext}`,
-    /// `{duration}`, `{density}`, `{format}`, `{audio}`, `{date}`. The template
+    /// `{duration}`, `{density}`, `{format}`, `{audio}`, `{date}`, `{time}` (`HH-mm-ss`,
+    /// opt-in run timestamp; the default name has none). The template
     /// must end with `{ext}` or a literal extension; if no extension is
     /// present, `.{ext}` is appended automatically.
     public var filenameTemplate: String? = nil
@@ -497,17 +498,24 @@ public struct PreviewConfiguration: Codable, Sendable, Hashable {
     }
 
     /// Generate filename for the preview video
+    ///
+    /// The default name is deterministic: the same configuration and input always give the
+    /// same name, so `overwrite == false` can skip work that already exists. A run timestamp
+    /// is available only through the opt-in `{time}` token of `filenameTemplate`.
     /// - Parameters:
     ///   - videoInput: The source video
+    ///   - referenceDate: The date/time used to resolve `{date}`/`{time}` in `filenameTemplate`.
+    ///     Defaults to `Date()`.
     /// - Returns: Filename string
-    public func generateFilename(for videoInput: VideoInput) -> String {
+    public func generateFilename(for videoInput: VideoInput, referenceDate: Date = Date()) -> String {
         let originalFilename = videoInput.url.deletingPathExtension().lastPathComponent.replacingNonAlphanumerics(with: "_")
 
         if let template = filenameTemplate {
             return resolveFilenameTemplate(
                 template,
                 originalFilename: originalFilename,
-                videoInput: videoInput
+                videoInput: videoInput,
+                referenceDate: referenceDate
             )
         }
 
@@ -535,18 +543,12 @@ public struct PreviewConfiguration: Codable, Sendable, Hashable {
         }
         let timingLabel = extractTimingFilenameComponent.map { "_\($0)" } ?? ""
         let configHash = "\(durationLabel)_\(density.name)_\(format.rawValue)_\(audioLabel)_\(exportLabel)_\(resolution)\(timingLabel)"
-        let runTimestamp: String = {
-            let f = DateFormatter()
-            f.locale = Locale(identifier: "en_US_POSIX")
-            f.dateFormat = "yyyy-MM-dd_HH-mm-ss"
-            return f.string(from: Date())
-        }()
         if fullPathInName {
             // Use full path in filename
             let sanitizedPath = videoInput.url.deletingLastPathComponent().path.replacingNonAlphanumerics(with: "_")
             return "\(sanitizedPath)_\(originalFilename)_preview_\(configHash).\(format.fileExtension)"
         } else {
-            return "_preview_\(originalFilename)_\(configHash)_\(runTimestamp)_.\(format.fileExtension)"
+            return "_preview_\(originalFilename)_\(configHash).\(format.fileExtension)"
         }
       
     }
@@ -611,9 +613,10 @@ public struct PreviewConfiguration: Codable, Sendable, Hashable {
     private func resolveFilenameTemplate(
         _ template: String,
         originalFilename: String,
-        videoInput: VideoInput
+        videoInput: VideoInput,
+        referenceDate: Date
     ) -> String {
-        let today = Self.todayString()
+        let today = Self.todayString(referenceDate)
         let values: [String: String?] = [
             "name": Self.sanitizeForFilePath(originalFilename),
             "ext": format.fileExtension,
@@ -622,7 +625,8 @@ public struct PreviewConfiguration: Codable, Sendable, Hashable {
             "format": format.rawValue,
             "exportMode": exportMode.displayString,
             "audio": includeAudio ? "audio" : "noaudio",
-            "date": today
+            "date": today,
+            "time": Self.timeString(referenceDate)
         ]
 
         var resolved = Self.applyTokens(to: template, values: values)
@@ -654,12 +658,20 @@ public struct PreviewConfiguration: Codable, Sendable, Hashable {
         return string.replacingNonAlphanumerics(with: "_")
     }
 
-    /// Current date formatted as `yyyy-MM-dd`.
-    fileprivate static func todayString() -> String {
+    /// `date` formatted as `yyyy-MM-dd`.
+    fileprivate static func todayString(_ date: Date = Date()) -> String {
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.dateFormat = "yyyy-MM-dd"
-        return formatter.string(from: Date())
+        return formatter.string(from: date)
+    }
+
+    /// `date` formatted as `HH-mm-ss` (filesystem-safe, no colons).
+    fileprivate static func timeString(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "HH-mm-ss"
+        return formatter.string(from: date)
     }
 
     /// Format duration for filename (e.g., "30s", "1m", "2m30s")

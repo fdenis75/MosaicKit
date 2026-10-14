@@ -45,6 +45,37 @@ struct PreviewConfigurationTests {
         #expect(customFilename.contains("min2p5s_max2x"))
     }
 
+    @Test("Default preview filename is deterministic (I-12)")
+    func defaultFilenameIsDeterministic() async {
+        let video = await makeVideoInput(path: "/tmp/preview-tests/source clip.mov")
+        let earlier = Date(timeIntervalSince1970: 1_700_000_000)
+        let later = earlier.addingTimeInterval(3_700)
+
+        for fullPath in [false, true] {
+            var config = PreviewConfiguration()
+            config.fullPathInName = fullPath
+            #expect(config.generateFilename(for: video, referenceDate: earlier)
+                    == config.generateFilename(for: video, referenceDate: later))
+            #expect(config.generateFilename(for: video) == config.generateFilename(for: video))
+        }
+
+        let name = PreviewConfiguration().generateFilename(for: video)
+        #expect(name.hasPrefix("_preview_source_clip_"))
+        #expect(name.wholeMatch(of: /.*\d{4}-\d{2}-\d{2}.*/) == nil, "Default name still has a date: \(name)")
+    }
+
+    @Test("filenameTemplate {time} is an opt-in run timestamp (I-12)")
+    func filenameTemplateTimeToken() async {
+        let video = await makeVideoInput(path: "/tmp/preview-tests/source clip.mov")
+        var config = PreviewConfiguration()
+        config.filenameTemplate = "{name}_{time}"
+        let first = Date(timeIntervalSince1970: 1_700_000_000)
+        let a = config.generateFilename(for: video, referenceDate: first)
+        let b = config.generateFilename(for: video, referenceDate: first.addingTimeInterval(61))
+        #expect(a != b)
+        #expect(a.wholeMatch(of: /source_clip_\d{2}-\d{2}-\d{2}\.\w+/) != nil, "Got \(a)")
+    }
+
     @Test("PreviewConfiguration base extract count map matches density")
     func baseExtractCountMap() {
         #expect(PreviewConfiguration(density: .xxl).baseExtractCount == 4)
