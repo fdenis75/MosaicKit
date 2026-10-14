@@ -316,8 +316,17 @@ MOSAICKIT_SUITE_MODE=none swift test                    # CI mode: skip extended
   - Use `@Test` with `#expect` / `#require`, and `async throws` for async code.
   - Don't hard-code file paths.
   - Keep per-test runtime small. The whole suite runs in about 40 s on macOS (tests run in
-    parallel, so the ~20 s preview smoke test overlaps the mosaic tests) and 4–7 min on the iOS
-    Simulator (mostly the HEIC animated-export test); keep it that way.
+    parallel, so the ~20 s preview smoke test overlaps the mosaic tests) and about 3 min of tests
+    on the iOS Simulator; keep it that way.
+  - **Slow animated-export tests (nightly only).** The six end-to-end tests in
+    `AnimatedGifGeneratorTests` (embedded video through the real pipeline) were about 80 % of the
+    iOS test time. They carry `.enabled(if: animatedIntegrationEnabled, …)`: CI sets
+    `MOSAICKIT_SKIP_ANIMATED=1` (`TEST_RUNNER_` prefix on iOS) on push and pull_request, so they
+    do not run there, and the nightly `Swift` workflow run (03:17 UTC, `main`) runs them. Locally
+    the variable is unset and they always run. **If you change animated export** (`AnimatedGifGenerator`,
+    `extractFramesForGif`, the animation sites in `MetalMosaicGenerator`), run them before
+    merging: `swift test --filter AnimatedGifGeneratorTests`, and for iOS
+    `gh workflow run Swift --ref <branch>`. The fast synthetic-frame encoder tests always run.
 
 ---
 
@@ -371,7 +380,7 @@ Follow `CONTRIBUTING.md`.
 
 | File | Purpose |
 |---|---|
-| `swift.yml` | macOS: `swift build --build-tests` + `swift test --skip-build`. iOS Simulator: `xcodebuild build-for-testing` / `test-without-building` on the `MosaicKit-Package` scheme. Both set `MOSAICKIT_SUITE_MODE=none`; iOS gets it as `TEST_RUNNER_MOSAICKIT_SUITE_MODE`. |
+| `swift.yml` | macOS: `swift build --build-tests` + `swift test --skip-build`. iOS Simulator: `xcodebuild build-for-testing` / `test-without-building` on the `MosaicKit-Package` scheme. Both set `MOSAICKIT_SUITE_MODE=none`; iOS gets it as `TEST_RUNNER_MOSAICKIT_SUITE_MODE`. On push and pull_request iOS also sets `MOSAICKIT_SKIP_ANIMATED=1` (the slow animated-export tests run only in the nightly schedule and `workflow_dispatch` runs of this workflow). |
 | `claude-code-review.yml` | Automated PR review. Runs only when code changes: `**/*.swift`, `**/*.metal`, `Package.resolved`, `Makefile`, `scripts/**`, `**/*.xctestplan`. |
 | `claude.yml` | `@claude` mentions |
 

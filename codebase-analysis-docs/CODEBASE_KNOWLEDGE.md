@@ -992,6 +992,13 @@ graph LR
   - *Runtime (PR #36, merged):* the 108-run "create all versions" animated matrix is skipped when
     `MOSAICKIT_SUITE_MODE=none` and replaced by a millisecond format × fps frame-delay test.
     Test runs dropped from 156 s to 41 s (macOS) and from 961 s to 253 s (iOS Simulator).
+  - *Nightly animated tests:* the six end-to-end tests in `AnimatedGifGeneratorTests` took 273 s of
+    the 343 s iOS test run (one software HEIC encode alone took 172 s). They are gated by
+    `MOSAICKIT_SKIP_ANIMATED`: the iOS job sets it to `1` on push and pull_request, and the
+    `schedule` (03:17 UTC) and `workflow_dispatch` triggers of the same workflow leave it empty, so
+    they run every night on `main` and on demand (`gh workflow run Swift --ref <branch>`). The
+    macOS job still runs them (seconds). The HEIC integration test now uses density `.xxl`.
+    The two diagnostic steps (simulator list, `xcodebuild -list`) were removed.
   - Plus `claude-code-review.yml` (PR review bot; since PR #35 it runs only when code paths
     change) and `claude.yml` (@claude mentions).
 
@@ -2596,7 +2603,7 @@ P1 = core feature, P2 = supporting, P3 = docs/infra.
 | 41 | P2 | `Tests/MosaicKitTests/PreviewCancellationTests.swift` | test | 371 | a144428d | Skipped when `MOSAICKIT_SUITE_MODE=none` |
 | 42 | P2 | `Tests/MosaicKitTests/InputValidationRegressionTests.swift` | test | 129 | 1f41f0d4 | Validation regressions |
 | 43 | P2 | `Tests/MosaicKitTests/OutputTransactionTests.swift` | test | 43 | cd1a7e9a | Atomic commit |
-| 44 | P3 | `.github/workflows/swift.yml` | ci | 156 | dd1fed58 | macOS `swift test` + iOS Sim `xcodebuild`; skipped for docs-only changes |
+| 44 | P3 | `.github/workflows/swift.yml` | ci | 148 | cb5b4d47 | macOS `swift test` + iOS Sim `xcodebuild`; skipped for docs-only changes; animated tests nightly only |
 | 45 | P3 | `README.md` | doc | 998 | 149953d1 | Changelog + usage |
 | 46 | P3 | `spec.md` | doc | 78 | 4508df31 | Reliability spec (partially implemented) |
 | 47 | P3 | `MosaicKit-DeepDive.md` | doc | 199 | 1e67bef6 | Stale architecture |

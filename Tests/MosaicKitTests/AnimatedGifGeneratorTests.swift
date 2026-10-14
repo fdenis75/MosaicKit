@@ -5,6 +5,15 @@ import Testing
 @testable import MosaicKit
 import MosaicKitWebP
 
+
+/// The end-to-end animated-export tests (embedded video, real mosaic pipeline) are about 80 % of
+/// the iOS Simulator test time, mostly software HEIC encoding. CI skips them on push and
+/// pull_request (`MOSAICKIT_SKIP_ANIMATED=1`) and runs them in the nightly `Swift` workflow run,
+/// or on demand with `gh workflow run Swift --ref <branch>`. Locally the variable is unset, so
+/// they always run. The fast synthetic-frame encoder tests below are never skipped.
+private let animatedIntegrationEnabled = ProcessInfo.processInfo.environment["MOSAICKIT_SKIP_ANIMATED"] != "1"
+private let animatedIntegrationSkipReason: Comment = "Skipped when MOSAICKIT_SKIP_ANIMATED=1; runs nightly in CI"
+
 struct AnimatedGifGeneratorTests {
 
     init() {
@@ -184,7 +193,8 @@ struct AnimatedGifGeneratorTests {
 
     // MARK: - Integration tests using the embedded test video
 
-    @Test("withMosaic mode creates both the mosaic and a GIF file")
+    @Test("withMosaic mode creates both the mosaic and a GIF file",
+          .enabled(if: animatedIntegrationEnabled, animatedIntegrationSkipReason))
     func gifWithMosaicModeCreatesBothFiles() async throws {
         let videoURL = try embeddedVideoURL
         let video = try await VideoInput(from: videoURL)
@@ -223,7 +233,8 @@ struct AnimatedGifGeneratorTests {
         #expect(header == "GIF")
     }
 
-    @Test("gifOnly mode creates the GIF and skips the mosaic")
+    @Test("gifOnly mode creates the GIF and skips the mosaic",
+          .enabled(if: animatedIntegrationEnabled, animatedIntegrationSkipReason))
     func gifOnlyModeSkipsMosaic() async throws {
         let videoURL = try embeddedVideoURL
         let video = try await VideoInput(from: videoURL)
@@ -263,7 +274,8 @@ struct AnimatedGifGeneratorTests {
         }
     }
 
-    @Test("gifOnly with HEIC format creates .heics file and skips mosaic")
+    @Test("gifOnly with HEIC format creates .heics file and skips mosaic",
+          .enabled(if: animatedIntegrationEnabled, animatedIntegrationSkipReason))
     func heicOnlyModeCreatesHeicsFile() async throws {
         let videoURL = try embeddedVideoURL
         let video = try await VideoInput(from: videoURL)
@@ -277,6 +289,9 @@ struct AnimatedGifGeneratorTests {
         var config = makeMinimalConfig(outputDirectory: outputDir)
         config.gifMode = .gifOnly
         config.gifSize = .small
+        // The assertions only need a valid .heics file, not many frames. Software HEIC
+        // encoding on the simulator took about 170 s at the helper's default density.
+        config.density = .xxl
         config.animatedFormat = .heic
 
         let result = try await coordinator.generateMosaic(for: video, config: config) { _ in }
@@ -291,7 +306,8 @@ struct AnimatedGifGeneratorTests {
         #expect((attrs[.size] as? Int ?? 0) > 0)
     }
 
-    @Test("gifOnly with WebP format creates .webp file and skips mosaic")
+    @Test("gifOnly with WebP format creates .webp file and skips mosaic",
+          .enabled(if: animatedIntegrationEnabled, animatedIntegrationSkipReason))
     func webpOnlyModeCreatesWebpFile() async throws {
         let videoURL = try embeddedVideoURL
         let video = try await VideoInput(from: videoURL)
@@ -367,7 +383,8 @@ struct AnimatedGifGeneratorTests {
         
     }
 
-    @Test("GifSize.large produces a non-empty GIF")
+    @Test("GifSize.large produces a non-empty GIF",
+          .enabled(if: animatedIntegrationEnabled, animatedIntegrationSkipReason))
     func gifSizeLargeProducesValidFile() async throws {
         let videoURL = try embeddedVideoURL
         let video = try await VideoInput(from: videoURL)
@@ -392,7 +409,8 @@ struct AnimatedGifGeneratorTests {
         }
     }
 
-    @Test("GifSize.nochange produces a non-empty GIF")
+    @Test("GifSize.nochange produces a non-empty GIF",
+          .enabled(if: animatedIntegrationEnabled, animatedIntegrationSkipReason))
     func gifSizeNochangeProducesValidFile() async throws {
         let videoURL = try embeddedVideoURL
         let video = try await VideoInput(from: videoURL)
