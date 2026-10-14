@@ -1,4 +1,5 @@
 import Foundation
+import AVFoundation
 import Testing
 @testable import MosaicKit
 
@@ -85,6 +86,61 @@ struct PreviewConfigurationTests {
         #expect(PreviewConfiguration(density: .s).baseExtractCount == 24)
         #expect(PreviewConfiguration(density: .xs).baseExtractCount == 32)
         #expect(PreviewConfiguration(density: .xxs).baseExtractCount == 48)
+    }
+
+    // MARK: - Quality to preset mapping (I-5, I-6)
+
+    @Test("Native preset follows ranges: every quality gets a preset, none falls through by float luck (I-5)")
+    func nativePresetRanges() {
+        let format = VideoFormat.mp4
+        // The values the old exact matching handled keep their preset.
+        #expect(format.exportPreset(quality: 1.0) == AVAssetExportPresetHEVCHighestQuality)
+        #expect(format.exportPreset(quality: 0.9) == AVAssetExportPresetHEVC1920x1080)
+        #expect(format.exportPreset(quality: 0.8) == AVAssetExportPresetHighestQuality)
+        #expect(format.exportPreset(quality: 0.7) == AVAssetExportPreset1920x1080)
+        #expect(format.exportPreset(quality: 0.5) == AVAssetExportPresetLowQuality)
+        #expect(format.exportPreset(quality: 0.4) == AVAssetExportPreset960x540)
+        // Values that used to fall through to Passthrough now land in their range.
+        #expect(format.exportPreset(quality: 0.85) == AVAssetExportPresetHEVC1920x1080)
+        #expect(format.exportPreset(quality: 0.77) == AVAssetExportPresetHighestQuality)
+        #expect(format.exportPreset(quality: 0.6) == AVAssetExportPresetMediumQuality)
+        #expect(format.exportPreset(quality: 0.45) == AVAssetExportPresetLowQuality)
+        #expect(format.exportPreset(quality: 0.35) == AVAssetExportPreset960x540)
+        #expect(format.exportPreset(quality: 0.3) == AVAssetExportPresetPassthrough)
+        #expect(format.exportPreset(quality: 0.0) == AVAssetExportPresetPassthrough)
+        // Only the lowest range is passthrough.
+        for step in 35...100 {
+            #expect(format.exportPreset(quality: Double(step) / 100) != AVAssetExportPresetPassthrough, "quality \(step)%")
+        }
+    }
+
+    @Test("SJS quality tiers cover the whole range (I-6)")
+    func sjsQualityTiers() {
+        #expect(PreviewQualityTier(quality: 1.0) == .hevc)
+        #expect(PreviewQualityTier(quality: 0.9) == .hevc)
+        #expect(PreviewQualityTier(quality: 0.75) == .h264High)
+        #expect(PreviewQualityTier(quality: 0.7) == .h264High)
+        #expect(PreviewQualityTier(quality: 0.5) == .h264Main)
+        #expect(PreviewQualityTier(quality: 0.4) == .h264Main)
+        #expect(PreviewQualityTier(quality: 0.25) == .h264Baseline)
+        #expect(PreviewQualityTier(quality: 0.0) == .h264Baseline)
+    }
+
+    @Test("SJS export description matches the exporter when no preset is set (I-6)")
+    func sjsDescriptionWithoutPreset() {
+        var config = PreviewConfiguration(exportMode: .sjs)
+        config.sJSExportPresetName = nil
+        for (quality, profile) in [(0.5, "Main"), (0.8, "High"), (0.1, "Baseline")] {
+            config.compressionQuality = quality
+            let description = config.exportDescription
+            #expect(description.videoCodec == .h264, "quality \(quality)")
+            #expect(description.videoProfile == profile, "quality \(quality)")
+        }
+        config.compressionQuality = 1.0
+        #expect(config.exportDescription.videoCodec == .hevc)
+        // An explicit preset still wins.
+        config.sJSExportPresetName = .h264_lowAutoLevel
+        #expect(config.exportDescription.videoProfile == "Baseline")
     }
 
     @Test("PreviewConfiguration exportDescription is mode-agnostic across native/sjs/ffmpeg")

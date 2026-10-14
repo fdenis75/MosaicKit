@@ -21,6 +21,8 @@ A high-performance Swift package for generating video mosaics with Metal-acceler
 
 ## Unreleased
 
+- **Preview quality maps to export presets by range** (I-5) — with no explicit `exportPresetName` (a config decoded without that key, or set to `nil`), `VideoFormat.exportPreset(quality:)` used to match exact values such as 0.9 and 0.8, so 0.85 or 0.6 silently exported as Passthrough. It now covers the whole range: 0.95+ HEVC highest, 0.85+ HEVC 1080p, 0.75+ H.264 highest, 0.65+ H.264 1080p, 0.55+ medium, 0.45+ low, 0.35+ 540p; only qualities below 0.35 are Passthrough. The exact values that worked before keep their preset. Exports whose quality fell between the old values change.
+- **SJS export with no explicit preset** (I-6, I-7) — the codec is chosen by quality range (0.875+ HEVC, 0.625+ H.264 High, 0.375+ Main, below Baseline) instead of exact values, `PreviewExportDescription` reports the same codec, and the writer uses the size the video composition renders (for portrait sources the estimate used landscape bounds, which squeezed the output).
 - **A saved `ColorDNAConfig` height below 8 is clamped when decoded** (I-18) — `"height": 0` used to decode as-is, so the strip was silently never drawn; it now decodes as 8 like the initializer. A non-finite height is treated as 8.
 - **Skipped overlays are logged** (I-18) — when a Color DNA strip or a watermark is requested but can't be drawn, `MetalMosaicGenerator` logs a warning (subsystem `com.mosaicKit`) and still returns the mosaic without it.
 - **Docs: prefer `VideoInput(from:)`** (I-19) — the `VideoInput(url:…)` documentation now says it never throws and returns only the values you passed when inspection fails; the README shows `VideoSource(url:title:).inspect()` for a custom title.

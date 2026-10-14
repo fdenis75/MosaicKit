@@ -87,8 +87,10 @@ extension PreviewExportDescription {
 
     /// Builds the description for ``PreviewExportMode/sjs``.
     static func sjs(config: PreviewConfiguration) -> PreviewExportDescription {
-        let preset = config.sJSExportPresetName ?? .hevc
-        let codec = preset.SJSCodec
+        // With no explicit preset the exporter picks a codec from `compressionQuality`; ask the
+        // same resolver so the description matches what is produced (I-6).
+        let preset = config.sJSExportPresetName
+        let codec = preset?.SJSCodec ?? PreviewQualityTier(quality: config.compressionQuality).sjsCodec
 
         let videoCodec: Codec?
         let videoProfile: String?
@@ -112,7 +114,7 @@ extension PreviewExportDescription {
 
         return PreviewExportDescription(
             exportMode: .sjs,
-            presetName: preset.displayString,
+            presetName: preset?.displayString ?? "Automatic (from compression quality)",
             videoCodec: videoCodec,
             videoProfile: videoProfile,
             videoLevel: videoLevel,
@@ -120,7 +122,7 @@ extension PreviewExportDescription {
             resolutionDescription: resolutionDescription,
             audioCodec: config.includeAudio ? "AAC" : nil,
             audioBitrate: nil,
-            additionalDetail: preset.exportQuality == .NonApplicable ? nil : "Quality: \(preset.exportQuality.rawValue.capitalized)"
+            additionalDetail: preset.flatMap { $0.exportQuality == .NonApplicable ? nil : "Quality: \($0.exportQuality.rawValue.capitalized)" }
         )
     }
 
