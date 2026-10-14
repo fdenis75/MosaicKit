@@ -977,7 +977,9 @@ graph LR
     `MOSAICKIT_BENCHMARK=/path/to/videos`. It is the before/after gate for pipeline changes
     (§4.3).
 - **CI (`.github/workflows/swift.yml`):**
-  - Triggers: push to `main`/`claude/**`, and PRs to `main`.
+  - Triggers: push to `main`/`claude/**`, and PRs to `main`. Docs-only changes skip the
+    workflow (`paths-ignore`: `**/*.md`, `codebase-analysis-docs/**`, `tasks/**`, `LICENSE`, #52);
+    a docs-only PR therefore shows no macOS or iOS check.
   - *macOS job:* `swift build --build-tests` + `swift test --skip-build`, currently green.
   - *iOS Simulator job:* `xcodebuild build-for-testing` / `test-without-building` on the
     `MosaicKit-Package` scheme, with `TEST_RUNNER_MOSAICKIT_SUITE_MODE=none` (**PR #33,
@@ -2574,7 +2576,7 @@ P1 = core feature, P2 = supporting, P3 = docs/infra.
 | 41 | P2 | `Tests/MosaicKitTests/PreviewCancellationTests.swift` | test | 371 | a144428d | Skipped when `MOSAICKIT_SUITE_MODE=none` |
 | 42 | P2 | `Tests/MosaicKitTests/InputValidationRegressionTests.swift` | test | 129 | 1f41f0d4 | Validation regressions |
 | 43 | P2 | `Tests/MosaicKitTests/OutputTransactionTests.swift` | test | 43 | cd1a7e9a | Atomic commit |
-| 44 | P3 | `.github/workflows/swift.yml` | ci | 144 | e7ba040c | macOS `swift test` + iOS Sim `xcodebuild` |
+| 44 | P3 | `.github/workflows/swift.yml` | ci | 156 | dd1fed58 | macOS `swift test` + iOS Sim `xcodebuild`; skipped for docs-only changes |
 | 45 | P3 | `README.md` | doc | 998 | 149953d1 | Changelog + usage |
 | 46 | P3 | `spec.md` | doc | 78 | 4508df31 | Reliability spec (partially implemented) |
 | 47 | P3 | `MosaicKit-DeepDive.md` | doc | 199 | 1e67bef6 | Stale architecture |
