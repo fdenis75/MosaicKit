@@ -73,6 +73,11 @@ actor VideoMetadataExtractor {
             height = Double(size.height)
             frameRate = fps > 0 ? Double(fps) : nil
 
+            // I-22: fail before any extraction on streams this platform cannot decode. Every
+            // sample description counts, not just the first one, which only names the codec.
+            if let unsupported = VideoCodecSupport.unsupportedCodecName(in: formats) {
+                throw VideoError.unsupportedCodec(url, unsupported)
+            }
             if let formatDescription = formats.first {
                 let codecType = CMFormatDescriptionGetMediaSubType(formatDescription)
                 videoCodec = codecTypeToString(codecType)

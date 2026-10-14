@@ -23,6 +23,7 @@ A high-performance Swift package for generating video mosaics with Metal-acceler
 
 ### Behavior changes
 
+- **iOS fails fast on undecodable H.264** (I-22) — inspecting a video whose H.264 profile iOS cannot decode (High 10, High 4:2:2, High 4:4:4) now throws the new `VideoError.unsupportedCodec(URL, String)`, which names the codec and suggests re-encoding, instead of every frame extraction failing later. macOS and Mac Catalyst are unaffected. Code that switches exhaustively over `VideoError` needs a new case.
 - **Preview default file names are deterministic** (I-12) — the default name no longer contains the run timestamp (`_preview_<name>_<config>.<ext>` instead of `…_<yyyy-MM-dd_HH-mm-ss>_.<ext>`), so `overwrite == false` now skips a preview that already exists. Previews saved under the old names are not recognized and are regenerated once. The timestamp is available as the opt-in `{time}` token (`HH-mm-ss`) of `PreviewConfiguration.filenameTemplate`; a template with `{time}` never matches an earlier run.
 - **`{aspectRatio}` renders as `16-9`** (I-11) — in `MosaicConfiguration` directory and filename templates the token no longer inserts a colon (`16:9`), which Finder shows as `/` and SMB or exFAT reject. Outputs of users of the token move, and so do animation names derived from the mosaic name.
 
