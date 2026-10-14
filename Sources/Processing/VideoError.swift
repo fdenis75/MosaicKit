@@ -27,6 +27,10 @@ public enum VideoError: Error, LocalizedError, Equatable {
     /// The video frame extraction failed.
     case frameExtractionFailed(URL, Error)
     
+    /// The video uses a codec or profile this platform cannot decode (for example H.264 High 10
+    /// on iOS). The string names it.
+    case unsupportedCodec(URL, String)
+
     /// The video processing operation was cancelled.
     case cancelled
     
@@ -49,6 +53,8 @@ public enum VideoError: Error, LocalizedError, Equatable {
             return "Failed to generate thumbnail for \(url.lastPathComponent): \(error.localizedDescription)"
         case .frameExtractionFailed(let url, let error):
             return "Failed to extract frames from video at \(url.path): \(error.localizedDescription)"
+        case .unsupportedCodec(let url, let codec):
+            return "\(url.lastPathComponent) uses \(codec), which this device cannot decode."
         case .cancelled:
             return "Video processing operation was cancelled."
         }
@@ -62,7 +68,7 @@ public enum VideoError: Error, LocalizedError, Equatable {
              .processingFailed(_, let error),
              .frameExtractionFailed(_, let error):
             return error
-        case .fileNotFound, .videoTrackNotFound, .accessDenied, .invalidFormat, .cancelled:
+        case .fileNotFound, .videoTrackNotFound, .accessDenied, .invalidFormat, .unsupportedCodec, .cancelled:
             return nil
         }
     }
@@ -77,6 +83,7 @@ public enum VideoError: Error, LocalizedError, Equatable {
              .processingFailed(let url, _),
              .accessDenied(let url),
              .invalidFormat(let url),
+             .unsupportedCodec(let url, _),
              .frameExtractionFailed(let url, _):
             return url
         case .cancelled:
@@ -102,6 +109,8 @@ public enum VideoError: Error, LocalizedError, Equatable {
             return error.localizedDescription
         case .frameExtractionFailed(_, let error):
             return error.localizedDescription
+        case .unsupportedCodec(_, let codec):
+            return "\(codec) is not supported by this platform's video decoder"
         case .cancelled:
             return "Processing cancelled"
         }
@@ -125,6 +134,8 @@ public enum VideoError: Error, LocalizedError, Equatable {
             return "Please try again or adjust the thumbnail generation settings"
         case .frameExtractionFailed:
             return "Please try again or adjust the frame extraction settings"
+        case .unsupportedCodec:
+            return "Re-encode the video as 8-bit H.264 (High profile or lower) or HEVC, then try again"
         case .cancelled:
             return "Processing cancelled"
         }
@@ -147,6 +158,8 @@ public enum VideoError: Error, LocalizedError, Equatable {
          case (.processingFailed(let lUrl, _), .processingFailed(let rUrl, _)):
              // Comparing underlying errors directly can be tricky.
             return lUrl == rUrl
+        case (.unsupportedCodec(let lUrl, let lCodec), .unsupportedCodec(let rUrl, let rCodec)):
+            return lUrl == rUrl && lCodec == rCodec
         case (.cancelled, .cancelled):
             return true
         default:
