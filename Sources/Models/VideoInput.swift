@@ -91,7 +91,13 @@ public struct VideoInput: Codable, Hashable, Sendable {
                    metadata: metadata, postID: postID)
     }
 
-    /// Initializes a new video input with explicit values and automatically extracts metadata from the file.
+    /// Initializes a video input and tries to fill in missing metadata from the file.
+    ///
+    /// This initializer never throws: if the file can't be inspected (unreadable, no video track,
+    /// invalid geometry), the error is swallowed and the input keeps only the values you passed,
+    /// with no duration or dimensions (I-19). Values you pass are always kept, never overridden.
+    /// Prefer `VideoInput(from:postID:)` or `VideoSource.inspect()`, which throw so you can show
+    /// the real error.
     ///
     /// - Parameters:
     ///   - id: A unique identifier.

@@ -279,6 +279,9 @@ public struct ColorDNAConfig: Codable, Sendable {
     /// Rendering style.
     public var style: ColorDNAStyle
 
+    /// The smallest strip height that is drawn, in pixels.
+    public static let minimumHeight: CGFloat = 8
+
     public init(
         show: Bool = false,
         height: CGFloat = 24,
@@ -286,9 +289,29 @@ public struct ColorDNAConfig: Codable, Sendable {
         style: ColorDNAStyle = .barcode
     ) {
         self.show = show
-        self.height = max(8, height)
+        self.height = Self.clampedHeight(height)
         self.position = position
         self.style = style
+    }
+
+    /// `height` raised to ``minimumHeight``; a non-finite value becomes the minimum.
+    static func clampedHeight(_ height: CGFloat) -> CGFloat {
+        height.isFinite ? max(Self.minimumHeight, height) : Self.minimumHeight
+    }
+
+    // Decoding goes through the same clamp as `init`: the synthesized decoder bypassed it, so a
+    // saved `"height": 0` produced a strip that was silently never drawn (I-18).
+    private enum CodingKeys: String, CodingKey { case show, height, position, style }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let defaults = ColorDNAConfig()
+        self.init(
+            show: try container.decodeIfPresent(Bool.self, forKey: .show) ?? defaults.show,
+            height: try container.decodeIfPresent(CGFloat.self, forKey: .height) ?? defaults.height,
+            position: try container.decodeIfPresent(ColorDNAPosition.self, forKey: .position) ?? defaults.position,
+            style: try container.decodeIfPresent(ColorDNAStyle.self, forKey: .style) ?? defaults.style
+        )
     }
 
     /// Default: hidden, 24 px tall, bottom, barcode style.

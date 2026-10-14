@@ -115,6 +115,40 @@ struct OverlayProcessorTests {
         #expect(result!.height == mosaicH + stripH)
     }
 
+    // MARK: - applyColorDNA: strip height (I-18)
+
+    @Test("A decoded ColorDNA height below the minimum is clamped, like the initializer")
+    func decodedColorDNAHeightIsClamped() throws {
+        for json in [#"{"show":true,"height":0,"position":"bottom","style":"barcode"}"#,
+                     #"{"show":true,"height":-5}"#] {
+            let decoded = try JSONDecoder().decode(ColorDNAConfig.self, from: Data(json.utf8))
+            #expect(decoded.height == ColorDNAConfig.minimumHeight, "\(json)")
+            #expect(decoded.show)
+        }
+        let keep = try JSONDecoder().decode(ColorDNAConfig.self, from: Data(#"{"height":40}"#.utf8))
+        #expect(keep.height == 40)
+    }
+
+    @Test("A ColorDNA config with missing keys decodes with the defaults")
+    func decodedColorDNAMissingKeys() throws {
+        let decoded = try JSONDecoder().decode(ColorDNAConfig.self, from: Data("{}".utf8))
+        let defaults = ColorDNAConfig.default
+        #expect(decoded.show == defaults.show && decoded.height == defaults.height)
+        #expect(decoded.position == defaults.position && decoded.style == defaults.style)
+    }
+
+    @Test("applyColorDNA draws the minimum strip when the public height var is set too low or non-finite")
+    func applyColorDNAClampsMutatedHeight() {
+        let mosaicH = 100
+        let mosaic = makeImage(width: 200, height: mosaicH)
+        var config = ColorDNAConfig(show: true, height: 24, position: .bottom, style: .barcode)
+        for bad: CGFloat in [0, -3, .nan, .infinity] {
+            config.height = bad
+            let result = OverlayProcessor.applyColorDNA(to: mosaic, frameColors: [redColor()], config: config)
+            #expect(result?.height == mosaicH + Int(ColorDNAConfig.minimumHeight), "height \(bad)")
+        }
+    }
+
     // MARK: - applyColorDNA: style and position coverage
 
     @Test("applyColorDNA: all style × position combinations produce non-nil results")
