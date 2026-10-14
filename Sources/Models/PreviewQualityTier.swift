@@ -7,13 +7,13 @@ import SJSAssetExportSession
 /// ``PreviewExportDescription`` uses it to report what that export will produce, so the two
 /// can't disagree (I-6). Tiers are ranges, not exact values: the former exact matching sent
 /// every quality that wasn't 1.0, 0.75, 0.5 or 0.25 to the lowest tier.
-enum PreviewQualityTier: Equatable, Sendable {
+internal enum PreviewQualityTier: Equatable, Sendable {
     case hevc
     case h264High
     case h264Main
     case h264Baseline
 
-    init(quality: Double) {
+    internal init(quality: Double) {
         switch quality {
         case 0.875...: self = .hevc
         case 0.625...: self = .h264High
@@ -22,7 +22,7 @@ enum PreviewQualityTier: Equatable, Sendable {
         }
     }
 
-    var sjsCodec: VideoOutputSettings.Codec {
+    internal var sjsCodec: VideoOutputSettings.Codec {
         switch self {
         case .hevc:         return .hevc
         case .h264High:     return .h264(.highAuto)

@@ -1177,11 +1177,17 @@ struct PreviewGenerationLogic {
             // Create export session with SJSAssetExportSession
             let exporter = ExportSession()
             
-            // Determine video settings based on quality, using original dimensions
+            // The writer must match what the video composition renders. `renderSize` above is the
+            // landscape-bound estimate (used when there is no composition); the composition's own
+            // size also swaps the bounds for portrait sources (I-7).
+            let writerSize: CGSize = {
+                if let size = videoComposition?.renderSize, size.width > 0, size.height > 0 { return size }
+                return renderSize
+            }()
             let (videoConfig, audioBitrate) = videoSettings(
                 for: config.compressionQuality,
                 presetname: config.sJSExportPresetName,
-                renderSize: renderSize
+                renderSize: writerSize
             )
             
             logger.info("SJS export: format=\(config.format.rawValue), q.uality=, audioBitrate=\(audioBitrate)")
@@ -1327,8 +1333,8 @@ struct PreviewGenerationLogic {
             renderSize: CGSize
         ) -> (video: VideoOutputSettings, audioBitrate: Int) {
             // The codec comes from the explicit preset, or from the quality tier shared with
-            // `PreviewExportDescription` (I-6). The writer always uses `renderSize`, the size
-            // the composition renders at after the resolution cap (I-7).
+            // `PreviewExportDescription` (I-6). The writer always uses `renderSize`, which the
+            // caller takes from the video composition so it matches what is rendered (I-7).
             let codec = presetname?.SJSCodec ?? PreviewQualityTier(quality: quality).sjsCodec
             let videoConfig: VideoOutputSettings = .codec(codec, width: Int(renderSize.width), height: Int(renderSize.height))
             return (videoConfig, 128_000)  // 128 kbps audio
