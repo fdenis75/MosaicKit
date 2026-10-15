@@ -33,6 +33,37 @@ struct ColorPaletteSwatchTests {
         #expect(try await processor.paletteSwatchColors(url: url, duration: 0, count: 6).isEmpty)
     }
 
+    @Test("A missing duration is loaded from the file instead of dropping the swatches")
+    func unknownDurationIsLoaded() async throws {
+        let url = try fixtureURL()
+        let processor = ThumbnailProcessor(config: .default)
+        let colors = try await processor.paletteSwatchColors(url: url, duration: nil, count: 5)
+        #expect(colors.count == 5)
+
+        // And through the generator, for an input that carries no duration.
+        let video = VideoInput(canonicalID: UUID(), url: url, title: "No duration")
+        #expect(video.duration == nil)
+        let layout = LayoutProcessor().calculateLayout(
+            originalAspectRatio: 16.0 / 9.0, mosaicAspectRatio: .widescreen,
+            thumbnailCount: 12, mosaicWidth: 1200, density: .m, layoutType: .classic
+        )
+        func config(fields: [MetadataField]) -> MosaicConfiguration {
+            var config = MosaicConfiguration(
+                width: 1200, density: .xxl, format: .png,
+                layout: LayoutConfiguration(aspectRatio: .widescreen, layoutType: .classic),
+                includeMetadata: true, useAccurateTimestamps: false, compressionQuality: 0.5
+            )
+            config.overlay.header = HeaderConfig(fields: fields, height: .fixed(80))
+            return config
+        }
+        let generator = try MetalMosaicGenerator()
+        let plain = try #require(try await generator.makeMetadataHeader(
+            for: video, layout: layout, config: config(fields: [.title]), forIphone: false))
+        let withPalette = try #require(try await generator.makeMetadataHeader(
+            for: video, layout: layout, config: config(fields: [.title, .colorPalette(swatchCount: 6)]), forIphone: false))
+        #expect(pixels(of: plain) != pixels(of: withPalette), "No duration must not hide the palette")
+    }
+
     @Test("A header with a .colorPalette field finds its swatch count; one without does not")
     func headerSwatchCount() {
         #expect(HeaderConfig(fields: [.title, .colorPalette(swatchCount: 7)]).paletteSwatchCount == 7)

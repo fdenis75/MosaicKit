@@ -367,7 +367,7 @@ public actor MetalMosaicGenerator: MosaicGeneratorProtocol {
         if let swatchCount = headerConfig.paletteSwatchCount {
             do {
                 swatchColors = try await thumbnailProcessor.paletteSwatchColors(
-                    url: video.url, duration: video.duration ?? 0, count: swatchCount
+                    url: video.url, duration: video.duration, count: swatchCount
                 )
             } catch is CancellationError {
                 throw CancellationError()

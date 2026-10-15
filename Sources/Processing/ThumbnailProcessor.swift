@@ -473,19 +473,30 @@ public final class ThumbnailProcessor: Sendable {
     /// The colors for the header's `.colorPalette` swatches: the average color of `count` frames
     /// spread evenly over the middle 90 % of the video (I-10).
     ///
+    /// `duration` is the known duration in seconds; `nil` (a `VideoInput` created without one)
+    /// loads it from the file, as the layout planning does. A duration of zero or less gives no swatches.
+    ///
     /// Only called when the header asks for a palette, so the default pipeline pays nothing. The
     /// frames are decoded at thumbnail size with a loose time tolerance; a frame that can't be
     /// read is skipped, and an empty result simply leaves the swatch row out.
-    func paletteSwatchColors(url: URL, duration: Double, count: Int) async throws -> [CGColor] {
+    func paletteSwatchColors(url: URL, duration knownDuration: Double?, count: Int) async throws -> [CGColor] {
         signposter.emitEvent("paletteSwatchColors")
         let intervalState = signposter.beginInterval("paletteSwatchColors")
         defer { signposter.endInterval("paletteSwatchColors", intervalState) }
-        guard duration.isFinite, duration > 0, count > 0 else { return [] }
+        guard count > 0 else { return [] }
         let swatches = min(count, Self.maximumPaletteSwatches)
         try Task.checkCancellation()
         // Takes the URL, not an `AVAsset`: assets are not Sendable, and this runs off the
         // generator's actor.
-        let generator = AVAssetImageGenerator(asset: AVURLAsset(url: url))
+        let asset = AVURLAsset(url: url)
+        let duration: Double
+        if let knownDuration {
+            duration = knownDuration
+        } else {
+            duration = try await asset.load(.duration).seconds
+        }
+        guard duration.isFinite, duration > 0 else { return [] }
+        let generator = AVAssetImageGenerator(asset: asset)
         generator.appliesPreferredTrackTransform = true
         generator.requestedTimeToleranceBefore = CMTime(seconds: 1.0, preferredTimescale: 600)
         generator.requestedTimeToleranceAfter = CMTime(seconds: 1.0, preferredTimescale: 600)
