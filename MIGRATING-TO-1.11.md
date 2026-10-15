@@ -1,14 +1,11 @@
 # Migrating to MosaicKit 1.11.0
 
-> **Status: unreleased.** This guide describes `main` after the fixed-grid series (plan G-1 to
-> G-6, PRs #68 to #72 and the G-6 docs PR). It becomes final with the 1.11.0 release PR.
-
 This guide is for apps that already use MosaicKit 1.10.x. 1.11.0 adds one layout type,
 `LayoutType.fixedGrid`, and the API around it. Nothing is removed or renamed, every existing
-layout renders exactly as before, and output names of existing configurations do not change.
+layout renders as before (one exception: a watermark too tall for the canvas, section 2.5), and output names of existing configurations do not change.
 Coming from 1.9.x or earlier? Read [MIGRATING-TO-1.10.md](MIGRATING-TO-1.10.md) first.
 
-Checked against the code at tag `1.10.0` and `main` (`git diff 1.10.0 -- Sources`): the public API
+Checked against the code at tags `1.10.0` and `1.11.0` (`git diff 1.10.0 1.11.0 -- Sources`): the public API
 differs only by the additions in section 3 and the one source break in section 2.1.
 
 ## 1. Do I need to change anything?
@@ -18,6 +15,7 @@ differs only by the additions in section 3 and the one source break in section 2
 | has an exhaustive `switch` over `LayoutType` (no `default`) | [2.1](#21-layouttype-has-a-new-case) | **Does not compile** until you add a `.fixedGrid` branch |
 | lists layouts with `LayoutType.allCases` (a picker, a settings screen) | [2.2](#22-layouttypeallcases-lists-fixedgrid) | `.fixedGrid` appears; it needs a grid to work |
 | saves configurations and may read them with an older MosaicKit | [2.3](#23-configurations-with-a-grid-do-not-decode-in-110) | A saved grid config fails to decode in 1.10 |
+| draws a large watermark on a wide, short canvas | [2.5](#25-a-watermark-too-tall-for-the-canvas-is-shrunk) | Watermark smaller (it no longer overflows) |
 | wants a mosaic with an exact number of rows and columns | [3](#3-new-fixed-grid-layout) | New API |
 
 Everything else is unchanged: defaults, the configuration format of existing layouts, output file
@@ -57,6 +55,12 @@ a file is shared between app versions.
 
 `generate(for:config:forIphone: true)` still forces the `.iphone` layout for every other type. With
 `.fixedGrid` the grid wins (a message is logged).
+
+### 2.5 A watermark too tall for the canvas is shrunk
+
+A text or image watermark is still `scale` of the canvas width. When that would not fit the canvas
+height with its margin, it is now reduced to 80 % of the height instead of overflowing (G-3). This
+shows up mostly on one-row grids; any canvas where the watermark already fitted is unchanged.
 
 ## 3. New: fixed grid layout
 

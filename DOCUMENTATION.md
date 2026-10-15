@@ -251,8 +251,8 @@ MosaicKit is available under the MIT License. See the LICENSE file for details.
 ---
 
 **Last Updated**: 2026
-**Documentation Version**: 1.10.0
-**Package Version**: 1.10.0
+**Documentation Version**: 1.11.0
+**Package Version**: 1.11.0
 
 ---
 
