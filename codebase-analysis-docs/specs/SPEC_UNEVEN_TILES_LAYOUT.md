@@ -415,7 +415,9 @@ algorithm's name.
 
 ### 6.2 Codable compatibility
 
-- A new `LayoutType` case is source- and decode-compatible for new libraries. A config saved with
+- A new `LayoutType` case is decode-compatible for new libraries but **source-breaking for clients
+  that switch exhaustively over `LayoutType` without a `default`** (the package is built without
+  library evolution): say so in the release notes, as for `.fixedGrid`. A config saved with
   `"uneven"` **fails to decode in older MosaicKit versions** (unknown raw value): unavoidable,
   note it in the release notes. Optional hardening, independent of this feature: give
   `LayoutType` a decoder that maps unknown raw values to `.custom`, so future additions degrade.
@@ -506,7 +508,7 @@ valid `MosaicLayout` and logs the reason.
 | 10 | Low count, one hero | N = 12, 16:9: 4×4 grid, 12 unit + one 2×2 = 13 tiles | Looks like a grid with one big tile | Accept; first count at which a hero exists is ≈ 10–12 |
 | 11 | Very high frame count | N = 800, x = 5, W = 5120: 36×36 grid, 799 tiles, unit 138 px | Small unit tiles | Fine; cap `N` at 5,000 inside the packer (12 ms) because the public API accepts up to 100,000 |
 | 12 | Counts that do not tile exactly | cells − N is not reachable with `3a + 8b + 15c…` | Residual of 1–2 tiles | Tile count may differ from N by ≤ 2 in normal cases; N is a target for every layout (custom returned 27 for N = 12). `thumbCount` is the actual count, so extraction and animation stay consistent |
-| 13 | 16384 px canvas limit | 16:9 source, 9:16 target, W = 10000: height 17683 > 16384 | `validateTextureSize` throws (`MetalImageProcessor.swift:303`); the header and Color DNA add height after the layout | Cap `R` so `H ≤ 16384 − reserve` (proposal: 819 px = 5 % of the limit) and let the tile count fall; log. Custom and classic have the same latent failure |
+| 13 | 16384 px canvas limit | 16:9 source, 9:16 target, W = 10000: height 17683 > 16384 | `validateTextureSize` throws (`MetalImageProcessor.swift:303`); the header and Color DNA add height after the layout | Cap `R` so `H ≤ 16384 − reserve` and let the tile count fall; log. The reserve is derived from the configuration, as for the fixed grid (`fixedGridReservedHeight`: 0.10·W + 32 when metadata is on, plus the Color DNA height); a fixed header height above that estimate is not covered, so the same bound is checked in `validate()`. Custom and classic have the same latent failure |
 | 14 | `x` larger than the grid allows | x = 5 on a 7×7 grid | A 5×5 hero fills 71 % of the side | `x_eff = min(x, ⌊min(C,R)/2⌋)`; fewer classes than requested (`x_eff < x` in 100 % of the N = 4 cases, 90 % at N = 12, 68 % at N = 30, 20 % at N = 107 and 0 % at N ≥ 400) |
 | 15 | Hero quota cannot be placed | N = 400: bottom rows too short for a 5×5 | Quota missed | The 0.92 slack and 8 seeds bring the miss to 0.29 % of heroes on average; the tile count then exceeds N by the missed area |
 | 16 | Minimum readable tile | W = 2000, N = 800: unit tile 51 px | Labels (15 px minimum font) cover a large part of the tile; 83 % of the W = 2000, N = 400 cases have a tile under 120 px wide | Hard floor of 120 px unit width (a 15 px label is then ≈ 22 % of a 67 px tall tile): cap `C ≤ ⌊(W+g)/(120+g)⌋` and let the count fall; log |
@@ -704,8 +706,8 @@ matrix of 200 cases should take about 40 ms in Swift, estimated from the 0.2 ms 
 |---|---|
 | Exact coverage | Cell occupancy grid: every unit cell covered exactly once; sum of `k²` equals `C·R` |
 | No overlap, inside canvas | Pairwise (or occupancy) check on pixel rects; every rect inside `[0, W] × [0, H]`; gutters between neighbours equal `g` horizontally (±0) and the aspect-matched value ±1 px vertically |
-| Source aspect preserved | `abs(w − h·a) ≤ 1.5` px for every tile (aspect-matched gutter); with the uniform gutter model the bound is `(k−1)·g·|1 − 1/a|` plus rounding |
-| Counts | `thumbCount == positions.count == thumbnailSizes.count`; `abs(tiles − N) ≤ 2` for N ≥ 30 unless a cap bound; `x_eff` classes all present when `x_eff ≥ 2` |
+| Source aspect preserved | `abs(w − h·a) ≤ 2` px for ≥ 98 % of tiles and ≤ 4 px for all (independent rounding of the horizontal and vertical edges; the §4.5 prototype measured 1.0 % of tiles above 2 px; set the hard bound to the measured maximum, not to the code); with the uniform gutter model the bound is `(k−1)·g·|1 − 1/a|` plus rounding |
+| Counts | `thumbCount == positions.count == thumbnailSizes.count`; `abs(tiles − N) / N ≤ 25 %` for N ≥ 30 unless a cap binds (§10.2–§10.3 measured p95 13 % overall and 20 % at N = 30); `x_eff` classes all present when `x_eff ≥ 2` |
 | Size classes | Largest tile = `x_eff` × unit tile (±2 px); no span above `x_eff` |
 | Canvas aspect | `abs(W/H / A − 1) ≤ 2 %` for N ≥ 100 over the matrix; the documented worst cases are asserted with their known values, not hidden |
 | Determinism | Same inputs twice give equal tile lists; **golden layouts** pinned as literal arrays for 4 cases (M 16:9, XXL 16:9, XXS 21:9, 9:16 source) so any algorithm change is deliberate |
