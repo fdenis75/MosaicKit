@@ -339,6 +339,19 @@ public actor MetalMosaicGenerator: MosaicGeneratorProtocol {
         return forIphone ? .iphone : config.layout.layoutType
     }
 
+    /// How frames are spread over the video: evenly for a fixed grid (read left to right, equal
+    /// time steps), the weighted 20/60/20 split for every other layout (KB rules card #9).
+    static func samplingPolicy(for config: MosaicConfiguration) -> ThumbnailProcessor.FrameSamplingPolicy {
+        config.layout.layoutType == .fixedGrid ? .uniform : .weighted
+    }
+
+    /// The most distinct frames a video can fill: 90 % of `duration × frameRate`, since frames are
+    /// sampled over the middle 90 % of the video. `nil` when the frame rate is unknown.
+    static func distinctFrameBudget(duration: Double, frameRate: Double?) -> Int? {
+        guard let frameRate, frameRate.isFinite, frameRate > 0, duration.isFinite, duration > 0 else { return nil }
+        return Int((0.9 * duration * frameRate).rounded(.down))
+    }
+
     /// An upper bound for the height the header and the ColorDNA strip add on top of the cells,
     /// so a grid never plans a canvas the pipeline would reject (§3.4 of the fixed-grid spec).
     static func fixedGridReservedHeight(for config: MosaicConfiguration) -> Int {
@@ -377,6 +390,21 @@ public actor MetalMosaicGenerator: MosaicGeneratorProtocol {
                 mosaicWidth: config.width, spacing: spacing, reservedHeight: reservedHeight
             ) {
                 throw MosaicError.invalidConfiguration(issue.explanation)
+            }
+            // More cells than distinct frames would repeat pictures by construction (T3).
+            let cells = grid.rows * grid.columns
+            if let budget = Self.distinctFrameBudget(duration: duration, frameRate: video.frameRate) {
+                if cells > budget {
+                    throw MosaicError.invalidVideo(
+                        "This video has about \(budget) distinct frames (\(Int(duration.rounded())) s at \(String(format: "%g", video.frameRate ?? 0)) fps); a \(grid.rows) × \(grid.columns) grid needs \(cells). Use fewer cells"
+                    )
+                }
+            } else {
+                logger.debug("Frame rate unknown for \(video.title, privacy: .public): cannot check that \(cells) cells have distinct frames")
+            }
+            // Cells closer than the extraction tolerance snap to the same keyframe in fast mode (T4).
+            if !config.useAccurateTimestamps, duration / Double(cells) < 0.5 {
+                logger.warning("A \(cells)-cell grid takes a frame every \(String(format: "%.2f", duration / Double(cells))) s but fast timestamps tolerate 1 s: neighbors may repeat. Use useAccurateTimestamps for \(video.title, privacy: .public)")
             }
         }
 
@@ -430,10 +458,17 @@ public actor MetalMosaicGenerator: MosaicGeneratorProtocol {
                 logger.warning("Palette swatches skipped for \(video.title, privacy: .public): \(error.localizedDescription, privacy: .public)")
             }
         }
+        // The header's minimum height is a fraction of the cell height, which suits dense layouts
+        // with small cells. A grid can have huge cells (a 1 × 1 grid at 5120 px has 2,880 px
+        // ones), so for grids the cell height is capped at W/20, about the cell size `.custom`
+        // makes at that width.
+        let cellHeight = config.layout.layoutType == .fixedGrid
+            ? min(layout.thumbnailSize.height, layout.mosaicSize.width / 20)
+            : layout.thumbnailSize.height
         return thumbnailProcessor.createMetadataHeader(
             for: video,
             width: Int(layout.mosaicSize.width),
-            thumbnailHeight: layout.thumbnailSize.height,
+            thumbnailHeight: cellHeight,
             forIphone: forIphone,
             headerConfig: headerConfig,
             swatchColors: swatchColors
@@ -461,6 +496,7 @@ public actor MetalMosaicGenerator: MosaicGeneratorProtocol {
             from: video.url, layout: layout, asset: plan.asset,
             accurate: config.useAccurateTimestamps,
             labelConfig: overlayConfig.frameLabel,
+            sampling: Self.samplingPolicy(for: config),
             collectColor: { index, image in
                 if let collector = colorCollector {
                     await collector.store(OverlayProcessor.averageColor(of: image), at: index)
@@ -519,12 +555,13 @@ public actor MetalMosaicGenerator: MosaicGeneratorProtocol {
         config: MosaicConfiguration,
         to url: URL
     ) async throws {
-        let frames = try await thumbnailProcessor.extractFramesForGif(
+        let frames = try await thumbnailProcessor.extractAnimationFrames(
             from: video.url,
             asset: asset,
             count: layout.thumbCount,
             gifSize: config.gifSize,
-            accurate: config.useAccurateTimestamps
+            accurate: config.useAccurateTimestamps,
+            policy: Self.samplingPolicy(for: config)
         )
         try AnimatedGifGenerator.save(frames: frames, to: url, format: config.animatedFormat,
                                       frameDelay: 1.0 / config.gifFps, overwrite: config.overwrite)

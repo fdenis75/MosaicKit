@@ -147,7 +147,7 @@ Every PR updates its row here (status) and the matching §4.2 / §6.1 entries in
 | G-0 | fixed grid: spec and decisions | done (#66; all of O1-O18 agreed 2026-10-15) | #66 |
 | G-1 | fixed grid: model, validation, hash | done | #68 |
 | G-2 | fixed grid: `.adaptCanvas` layout ⚡ | done; A/B/A gate in §8.1 | #69 |
-| G-3 | fixed grid: sampling, header cap, overlays ⚡ | planned | |
+| G-3 | fixed grid: sampling, header cap, overlays ⚡ | in progress: code and tests done; the header-height helper moved to G-4; benchmark pending | |
 | G-4 | fixed grid: letterbox and stretch | planned | |
 | G-5 | fixed grid: crop ⚡ | planned | |
 | G-6 | fixed grid: docs and examples | planned | |
