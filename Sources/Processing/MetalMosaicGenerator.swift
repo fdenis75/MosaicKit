@@ -372,8 +372,11 @@ public actor MetalMosaicGenerator: MosaicGeneratorProtocol {
 
     /// An upper bound for the height the header and the ColorDNA strip add on top of the cells,
     /// so a grid never plans a canvas the pipeline would reject (§3.4 of the fixed-grid spec).
+    /// Also used by ``LayoutType/uneven``. A fixed header taller than the estimate reserves its
+    /// own height.
     static func fixedGridReservedHeight(for config: MosaicConfiguration) -> Int {
-        let header = config.includeMetadata ? Int((0.10 * Double(config.width)).rounded(.up)) + 32 : 0
+        var header = config.includeMetadata ? Int((0.10 * Double(config.width)).rounded(.up)) + 32 : 0
+        if config.includeMetadata, case .fixed(let height) = config.overlay.header.height { header = max(header, height) }
         let strip = config.overlay.colorDNA.show ? Int(config.overlay.colorDNA.height.rounded(.up)) : 0
         return header + strip
     }
@@ -408,7 +411,7 @@ public actor MetalMosaicGenerator: MosaicGeneratorProtocol {
         let grid = layoutType == .fixedGrid ? config.layout.grid : nil
         var aspectRatio = (video.width ?? 1.0) / (video.height ?? 1.0)
         let spacing = config.layout.spacing
-        let reservedHeight = layoutType == .fixedGrid ? Self.fixedGridReservedHeight(for: config) : 0
+        let reservedHeight = layoutType == .fixedGrid || layoutType == .uneven ? Self.fixedGridReservedHeight(for: config) : 0
         let fixedAspect = layoutType == .fixedGrid && (config.layout.grid?.fit ?? .adaptCanvas) != .adaptCanvas
         let overlayHeight = fixedAspect ? fixedGridOverlayHeight(for: video, config: config, forIphone: forIphone) : 0
 

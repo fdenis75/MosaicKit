@@ -31,7 +31,7 @@ struct FixedGridConfigurationTests {
     func layoutTypeCase() throws {
         #expect(LayoutType.fixedGrid.rawValue == "fixedGrid")
         #expect(LayoutType.allCases.contains(.fixedGrid))
-        #expect(LayoutType.allCases.count == 5)
+        #expect(LayoutType.allCases.count == 6)
         #expect(try JSONDecoder().decode(LayoutType.self, from: Data(#""fixedGrid""#.utf8)) == .fixedGrid)
     }
 
