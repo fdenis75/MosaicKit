@@ -66,6 +66,21 @@ Apple platforms (macOS 26+, iOS 26+, macCatalyst 26+).
 
 ---
 
+## Two repos: MosaicKit and Tessera
+
+MosaicKit's main client is the Tessera app (repo `fdenis75/MPGen2`, app, CLI and iOS/macOS
+targets). Tessera pulls MosaicKit by URL in its `project.yml` (`packages: MosaicKit`), not as a
+local path. So a MosaicKit change ships in this order: merge here, tag a release, then bump the
+version in MPGen2's `project.yml` and adapt Tessera. Any public API or behavior change needs a
+`MIGRATING-TO-<version>.md` note, because Tessera's update steps are written from those notes.
+Locally both repos sit side by side (`../MPGen2`); in a cloud session, clone the other one if
+you need it.
+
+Repo-local agents live in `.claude/agents/` (rules-card-reviewer, benchmark-gate,
+ios-compat-checker, issue-picker, kb-doc-keeper, release-notes).
+
+---
+
 ## Repository layout
 
 ```
