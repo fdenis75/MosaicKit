@@ -115,10 +115,6 @@ extension MosaicConfiguration {
                 )
             }
         }
-        // `.crop` is not implemented yet (plan G-5).
-        if grid.fit == .crop {
-            throw MosaicError.invalidConfiguration("The grid fit mode .\(grid.fit.rawValue) is not available in this build yet; use .adaptCanvas")
-        }
     }
 }
 

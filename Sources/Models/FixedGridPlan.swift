@@ -28,7 +28,8 @@ public enum FixedGridIssue: Sendable, Equatable {
     case canvasTooTall(requiredHeight: Int, maximum: Int)
     /// The source's display aspect ratio is not known or not usable.
     case unknownSourceAspect
-    /// The fit mode is not implemented yet (only ``GridFitMode/adaptCanvas`` is, so far).
+    /// The fit mode is not implemented. Every ``GridFitMode`` is implemented now, so this is never
+    /// produced; the case stays so existing `switch` statements keep compiling.
     case fitModeUnavailable(GridFitMode)
 
     /// An English description with the numbers, for error messages and logs.

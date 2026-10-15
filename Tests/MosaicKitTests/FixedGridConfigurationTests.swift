@@ -202,14 +202,12 @@ struct FixedGridConfigurationTests {
         #expect(adapt == nil, "got: \(adapt ?? "no error")")
     }
 
-    @Test("Letterbox and stretch validate; crop says it is not built yet")
+    @Test("Every fit mode validates")
     func fitModesNotBuiltYet() {
         #expect(validationMessage(config()) == nil)
-        for fit in [GridFitMode.letterbox, .stretch] {
+        for fit in GridFitMode.allCases {
             #expect(validationMessage(config(grid: GridSpecification(rows: 3, columns: 4, fit: fit))) == nil, "\(fit)")
         }
-        let message = validationMessage(config(grid: GridSpecification(rows: 6, columns: 8, fit: .crop)))
-        #expect(message == "The grid fit mode .crop is not available in this build yet; use .adaptCanvas")
     }
 
     // MARK: - No silent fall-through

@@ -276,7 +276,7 @@ let config = MosaicConfiguration(
 - `.adaptCanvas` (default): the canvas follows the grid. Every cell has the video's aspect ratio, so no frame is distorted, cropped or letterboxed. `MosaicConfiguration.width` is a maximum: the canvas is trimmed to whole cells and shrunk if the grid would exceed the 16,384 px texture limit.
 - `.stretch`: the canvas keeps the configured `AspectRatio`, header and ColorDNA strip included, so the final image is `width × round(width / aspect)`. The cells must be within `aspectTolerance` (2 % by default) of the video's aspect, otherwise the request fails with `FixedGridIssue/aspectMismatch` and up to three grids that would work.
 - `.letterbox`: same canvas, but a cell that does not match gets bars instead of a stretched picture. It fails with `FixedGridIssue/fillTooLow` when the picture would fill less than `minimumFill` (50 %) of the cell.
-- `.crop` is not available yet.
+- `.crop`: same canvas, but the cell is filled: each frame is cut to the cell's aspect, keeping the center, and the request fails with `FixedGridIssue/fillTooLow` when less than `minimumFill` of the picture would survive.
 
 ### Planning without a video
 

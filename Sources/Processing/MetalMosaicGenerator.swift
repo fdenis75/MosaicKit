@@ -345,6 +345,24 @@ public actor MetalMosaicGenerator: MosaicGeneratorProtocol {
         config.layout.layoutType == .fixedGrid ? .uniform : .weighted
     }
 
+    /// The crop a fixed grid in `.crop` mode applies to every frame: the drawn frame's aspect (the
+    /// cell minus the render inset). `nil` for every other layout or fit, and when the cell is
+    /// already within `aspectTolerance` of the video (then the frame is simply stretched).
+    static func frameCrop(for video: VideoInput, layout: MosaicLayout, config: MosaicConfiguration) -> ThumbnailProcessor.FrameCrop? {
+        guard config.layout.layoutType == .fixedGrid, let grid = config.layout.grid, grid.fit == .crop,
+              let width = video.width, let height = video.height, width > 0, height > 0,
+              let cell = layout.thumbnailSizes.first else { return nil }
+        let inset = max(0, config.layout.spacing.rounded() - 4)
+        let frameWidth = cell.width - inset
+        let frameHeight = cell.height - inset
+        guard frameWidth > 0, frameHeight > 0 else { return nil }
+        let aspect = frameWidth / frameHeight
+        let source = width / height
+        let ratio = aspect / source
+        guard max(ratio, 1 / ratio) - 1 > grid.aspectTolerance else { return nil }
+        return ThumbnailProcessor.FrameCrop(aspect: aspect, sourceAspect: source)
+    }
+
     /// The most distinct frames a video can fill: 90 % of `duration × frameRate`, since frames are
     /// sampled over the middle 90 % of the video. `nil` when the frame rate is unknown.
     static func distinctFrameBudget(duration: Double, frameRate: Double?) -> Int? {
@@ -520,6 +538,7 @@ public actor MetalMosaicGenerator: MosaicGeneratorProtocol {
             accurate: config.useAccurateTimestamps,
             labelConfig: overlayConfig.frameLabel,
             sampling: Self.samplingPolicy(for: config),
+            crop: Self.frameCrop(for: video, layout: layout, config: config),
             collectColor: { index, image in
                 if let collector = colorCollector {
                     await collector.store(OverlayProcessor.averageColor(of: image), at: index)
