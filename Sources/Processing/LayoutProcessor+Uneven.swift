@@ -11,11 +11,6 @@ extension LayoutProcessor {
     /// row or column, so the classic layout is used (spec §8 case 8).
     static let unevenSourceAspects: ClosedRange<CGFloat> = 0.2...5
 
-    /// The largest tile side, in unit cells, until frames are extracted at their own tile size
-    /// (plan step U-3, spec Q-U6): a frame decoded for a larger tile and shrunk 3× or more by the
-    /// GPU's bilinear sampler aliases.
-    static let unevenSpanCap = 2
-
     /// The largest tile side for a density (spec §4.2): `XXL`/`XL` 2, `L`/`M` 3, `S`/`XS` 4,
     /// `XXS` 5. Read from the density factor, so custom densities get the nearest level's value.
     static func unevenMaxSpan(for density: DensityConfig) -> Int {
@@ -50,7 +45,9 @@ extension LayoutProcessor {
         let state = signposter.beginInterval("Uneven Layout")
         defer { signposter.endInterval("Uneven Layout", state) }
 
-        let span = min(Self.unevenMaxSpan(for: density), Self.unevenSpanCap)
+        // Frames are decoded at their own tile size (`ThumbnailProcessor.extractionGroups`, U-3),
+        // so large spans no longer mean a 3× or larger GPU shrink.
+        let span = Self.unevenMaxSpan(for: density)
         let plan = UnevenTilePacker.plan(
             sourceAspect: Double(originalAspectRatio), targetAspect: Double(mosaicAspectRatio.ratio),
             width: mosaicWidth, count: thumbnailCount, maxSpan: span,
