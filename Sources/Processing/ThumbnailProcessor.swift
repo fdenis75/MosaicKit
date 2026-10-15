@@ -80,6 +80,19 @@ public final class ThumbnailProcessor: Sendable {
         gifSize: GifSize,
         accurate: Bool = false
     ) async throws -> [CGImage] {
+        try await extractAnimationFrames(from: file, asset: asset, count: count, gifSize: gifSize, accurate: accurate, policy: .weighted)
+    }
+
+    /// `extractFramesForGif` with a choice of sampling policy; a fixed grid uses `.uniform` so the
+    /// animation shows the same moments as the cells.
+    func extractAnimationFrames(
+        from file: URL,
+        asset: AVAsset,
+        count: Int,
+        gifSize: GifSize,
+        accurate: Bool,
+        policy: FrameSamplingPolicy
+    ) async throws -> [CGImage] {
         signposter.emitEvent("extractFramesForGif")
         let intervalState = signposter.beginInterval("extractFramesForGif")
         defer { signposter.endInterval("extractFramesForGif", intervalState) }
@@ -106,7 +119,7 @@ public final class ThumbnailProcessor: Sendable {
 
         var frames: [CGImage] = []
         let duration = try await asset.load(.duration).seconds
-        let times = calculateExtractionTimes(duration: duration, count: count)
+        let times = calculateExtractionTimes(duration: duration, count: count, policy: policy)
         for try await result in generator.images(for: times) {
             try Task.checkCancellation()
             guard case .success(_, let image, _) = result else { continue }
@@ -140,6 +153,7 @@ public final class ThumbnailProcessor: Sendable {
     internal func processedFramesStream(
         from file: URL, layout: MosaicLayout, asset: AVAsset, accurate: Bool,
         labelConfig: FrameLabelConfig,
+        sampling: FrameSamplingPolicy = .weighted,
         collectColor: (@Sendable (Int, CGImage) async -> Void)? = nil
     ) -> AsyncThrowingStream<(Int, CGImage), Error> {
         signposter.emitEvent("processedFramesStream")
@@ -155,7 +169,7 @@ public final class ThumbnailProcessor: Sendable {
         let producer = Task {
             do {
                 let duration = try await assetRef.load(.duration).seconds
-                let times = calculateExtractionTimes(duration: duration, count: layout.positions.count)
+                let times = calculateExtractionTimes(duration: duration, count: layout.positions.count, policy: sampling)
                 var index = 0
                 try await withThrowingTaskGroup(of: (Int, CGImage).self) { group in
                     var pending = 0
@@ -550,11 +564,28 @@ public final class ThumbnailProcessor: Sendable {
         return generator
     }
     
-    private func calculateExtractionTimes(duration: Double, count: Int) -> [CMTime] {
+    /// How frames are spread over the video.
+    enum FrameSamplingPolicy: Sendable, Equatable {
+        /// 20 % of the frames over the first third, 60 % over the middle third, 20 % over the last
+        /// (all within 5...95 % of the duration): the middle is sampled three times denser. Every
+        /// layout except `.fixedGrid` uses it (KB rules card #9).
+        case weighted
+        /// Cell-centered and evenly spaced over 5...95 %: `t_i = d · (0.05 + 0.90 · (i + 0.5) / n)`.
+        /// A grid read left to right shows equal time steps, and a handful of cells still covers
+        /// the whole video (the weighted policy puts a single frame at 65 %).
+        case uniform
+    }
+
+    func calculateExtractionTimes(duration: Double, count: Int, policy: FrameSamplingPolicy = .weighted) -> [CMTime] {
         signposter.emitEvent("calculateExtractionTimes")
         let intervalState = signposter.beginInterval("calculateExtractionTimes")
         defer { signposter.endInterval("calculateExtractionTimes", intervalState) }
         guard duration.isFinite, duration > 0, count > 0, count <= 100_000 else { return [] }
+        if policy == .uniform {
+            return (0..<count).map { index in
+                CMTime(seconds: duration * (0.05 + 0.90 * (Double(index) + 0.5) / Double(count)), preferredTimescale: 600)
+            }
+        }
         let startPoint = duration * 0.05
         let endPoint = duration * 0.95
         let effectiveDuration = endPoint - startPoint

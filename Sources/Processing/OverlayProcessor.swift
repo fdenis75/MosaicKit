@@ -207,6 +207,32 @@ public enum OverlayProcessor {
 
     // MARK: - Watermark helpers
 
+    /// The share of the canvas height a clamped watermark fills.
+    static let maximumWatermarkHeightFraction: CGFloat = 0.8
+
+    /// The size an image watermark is drawn at: `scale` of the canvas width, keeping the image's
+    /// aspect ratio. Only when it would not fit with its margin (10 % of its width) is it shrunk to
+    /// 80 % of the canvas height (a strip, such as a one-row grid, is much wider than tall), so
+    /// every canvas where it used to fit renders unchanged.
+    static func imageWatermarkSize(imageSize: CGSize, canvas: CGSize, scale: CGFloat) -> CGSize {
+        guard imageSize.width > 0, imageSize.height > 0, canvas.width > 0, canvas.height > 0 else { return .zero }
+        var width = canvas.width * scale
+        var height = width * imageSize.height / imageSize.width
+        let limit = canvas.height * maximumWatermarkHeightFraction
+        if height + width * 0.1 > canvas.height {
+            width *= limit / height
+            height = limit
+        }
+        return CGSize(width: width, height: height)
+    }
+
+    /// The font size of a text watermark: `scale` of the canvas width, reduced to 80 % of the
+    /// canvas height only when it would not fit with its margin (half the font size).
+    static func watermarkFontSize(canvas: CGSize, scale: CGFloat) -> CGFloat {
+        let size = canvas.width * scale
+        return size * 1.5 > canvas.height ? min(size, canvas.height * maximumWatermarkHeightFraction) : size
+    }
+
     private static func applyTextWatermark(
         text: String,
         in ctx: CGContext,
@@ -214,8 +240,9 @@ public enum OverlayProcessor {
         mosaicH: Int,
         config: WatermarkConfig
     ) {
-        // Font size = scale fraction of mosaic width, clamped to a readable range
-        let fontSize = CGFloat(mosaicW) * CGFloat(config.scale)
+        // Font size = scale fraction of mosaic width, but never taller than the canvas allows
+        // (a one-row grid is a strip much wider than it is tall).
+        let fontSize = Self.watermarkFontSize(canvas: CGSize(width: mosaicW, height: mosaicH), scale: CGFloat(config.scale))
 
         #if canImport(AppKit)
         let font = NSFont.boldSystemFont(ofSize: fontSize)
@@ -264,10 +291,12 @@ public enum OverlayProcessor {
             return
         }
 
-        let targetW = CGFloat(mosaicW) * CGFloat(config.scale)
-        let aspect  = CGFloat(wmImage.height) / CGFloat(wmImage.width)
-        let targetH = targetW * aspect
-        let size    = CGSize(width: targetW, height: targetH)
+        let size = Self.imageWatermarkSize(
+            imageSize: CGSize(width: wmImage.width, height: wmImage.height),
+            canvas: CGSize(width: mosaicW, height: mosaicH),
+            scale: CGFloat(config.scale)
+        )
+        let targetW = size.width
 
         let origin = watermarkOrigin(
             itemSize: size,

@@ -147,7 +147,7 @@ Every PR updates its row here (status) and the matching §4.2 / §6.1 entries in
 | G-0 | fixed grid: spec and decisions | done (#66; all of O1-O18 agreed 2026-10-15) | #66 |
 | G-1 | fixed grid: model, validation, hash | done | #68 |
 | G-2 | fixed grid: `.adaptCanvas` layout ⚡ | done; A/B/A gate in §8.1 | #69 |
-| G-3 | fixed grid: sampling, header cap, overlays ⚡ | planned | |
+| G-3 | fixed grid: sampling, header cap, overlays ⚡ | done; A/B/A gate in §8.1; the header-height helper moved to G-4 | |
 | G-4 | fixed grid: letterbox and stretch | planned | |
 | G-5 | fixed grid: crop ⚡ | planned | |
 | G-6 | fixed grid: docs and examples | planned | |
@@ -274,6 +274,36 @@ seconds; peak RSS in MB.
 No regression beyond noise: every row is within -4.4 % and +1.5 % of the mean of A. The existing
 scenarios do not use a grid, so this measures the cost of the refactor (`makeLayout`,
 `effectiveLayoutType`) on the paths that already shipped. A grid scenario is recorded in G-3.
+
+**G-3 A/B/A** (2026-10-15, same machine, `release` build, same 3 files; A = G-2 branch `32dc0f3`, B = G-3
+branch `7a414bc`; each leg in its own worktree, 3 runs per scenario, medians in seconds; the machine
+was about 2.5× slower than during the G-2 run, so only compare within this table):
+
+| Scenario | Conc. | A1 | B | A2 | B vs mean(A) |
+|---|---|---|---|---|---|
+| mosaic-5120-M | 1 | 7.30 | 8.38 | 7.49 | +13.3 % (see below) |
+| mosaic-5120-M | auto | 3.73 | 3.76 | 3.65 | +1.9 % |
+| mosaic-10000-XS | 1 | 24.92 | 25.93 | 24.36 | +5.2 % |
+| mosaic-10000-XS | auto | 19.40 | 18.27 | 19.41 | -5.9 % |
+| anim-gif-small | 1 | 9.82 | 9.41 | 9.84 | -4.3 % |
+| anim-gif-small | auto | 8.10 | 7.57 | 8.35 | -8.0 % |
+| anim-webp-small | 1 | 27.77 | 29.68 | 29.28 | +4.0 % |
+| anim-webp-small | auto | 27.51 | 27.41 | 27.59 | -0.5 % |
+
+Peak RSS is unchanged (5120-M 578 / 577 / 577 MB at concurrency 1; 10000-XS 2297 / 1988 / 2284 MB).
+The one outlier, 5120-M at concurrency 1, did not reproduce in a back-to-back 5-run re-check (A 8.28 s,
+B 5.41 s; the machine had drifted), and the same scenario at auto concurrency is flat, so it is read as
+system noise. G-3 changes nothing for non-grid layouts except the sampling-policy argument, which defaults
+to the old weighted policy.
+
+Grid scenarios (opt-in, `MOSAICKIT_BENCHMARK_GRID=1`, one run of B, no baseline since A has no grids):
+
+| Scenario | Conc. | Median | Source s/s | Input MB/s | Output MB |
+|---|---|---|---|---|---|
+| mosaic-grid-6x10 | 1 | 6.95 | 60.5 | 125.2 | 1.6 |
+| mosaic-grid-6x10 | auto | 3.08 | 136.3 | 282.0 | 1.6 |
+| mosaic-grid-20x20 | 1 | 16.27 | 25.8 | 53.5 | 9.9 |
+| mosaic-grid-20x20 | auto | 10.22 | 41.1 | 85.2 | 9.9 |
 
 ## 9. Decision log (autonomous work)
 

@@ -17,6 +17,7 @@ import MosaicKitWebP
 /// | `MOSAICKIT_BENCHMARK_RUNS` | `3` | Timed runs per scenario, after one untimed warm-up run |
 /// | `MOSAICKIT_BENCHMARK_CONCURRENCY` | `1,0` | Coordinator concurrency limits to measure (`0` = automatic) |
 /// | `MOSAICKIT_BENCHMARK_JSON` | — | Optional path; all measurements are also written there as JSON |
+/// | `MOSAICKIT_BENCHMARK_GRID` | — | Set to `1` to add the fixed-grid scenarios (recorded, not part of any gate) |
 ///
 /// ```bash
 /// MOSAICKIT_BENCHMARK=/path/to/videos swift test -c release --filter BenchmarkTests
@@ -41,6 +42,10 @@ struct BenchmarkTests {
         let density: DensityConfig
         let gifMode: GifCreationMode
         let animatedFormat: AnimatedFormat
+        /// A fixed grid (`rows`, `columns`) instead of the `custom` layout, or `nil`.
+        var grid: (rows: Int, columns: Int)? = nil
+        /// Whether frames get the per-frame shadow (the CPU-bound default).
+        var shadows: Bool = true
     }
 
     private static let scenarios: [Scenario] = [
@@ -48,6 +53,13 @@ struct BenchmarkTests {
         Scenario(name: "mosaic-10000-XS", width: 10_000, density: .xs, gifMode: .disabled, animatedFormat: .gif),
         Scenario(name: "anim-gif-small", width: 5120, density: .m, gifMode: .gifOnly, animatedFormat: .gif),
         Scenario(name: "anim-webp-small", width: 5120, density: .m, gifMode: .gifOnly, animatedFormat: .webp),
+    ]
+
+    /// Opt-in (`MOSAICKIT_BENCHMARK_GRID=1`), recorded and never gated: the cost of a grid grows with
+    /// its cells because extraction dominates, and these numbers set the cell caps (spec O3, O12).
+    private static let gridScenarios: [Scenario] = [
+        Scenario(name: "mosaic-grid-6x10", width: 5120, density: .m, gifMode: .disabled, animatedFormat: .gif, grid: (6, 10), shadows: true),
+        Scenario(name: "mosaic-grid-20x20", width: 10_000, density: .m, gifMode: .disabled, animatedFormat: .gif, grid: (20, 20), shadows: false),
     ]
 
     private struct Measurement: Codable, Sendable {
@@ -74,7 +86,8 @@ struct BenchmarkTests {
         let inputMB = Double(videos.compactMap(\.fileSize).reduce(0, +)) / 1_048_576
 
         var measurements: [Measurement] = []
-        for scenario in Self.scenarios {
+        let includeGrids = env["MOSAICKIT_BENCHMARK_GRID"] == "1"
+        for scenario in Self.scenarios + (includeGrids ? Self.gridScenarios : []) {
             for concurrency in concurrencies {
                 var timings: [Double] = []
                 var outputMB = 0.0
@@ -169,6 +182,10 @@ struct BenchmarkTests {
         config.gifSize = .small
         config.animatedFormat = scenario.animatedFormat
         config.overwrite = true
+        if let grid = scenario.grid {
+            config.layout = .fixedGrid(rows: grid.rows, columns: grid.columns)
+        }
+        config.layout.visual.addShadow = scenario.shadows
 
         let coordinator = try createDefaultMosaicCoordinator(concurrencyLimit: concurrency)
         let clock = ContinuousClock()
