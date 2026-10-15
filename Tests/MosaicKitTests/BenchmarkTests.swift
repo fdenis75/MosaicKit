@@ -43,7 +43,7 @@ struct BenchmarkTests {
         let gifMode: GifCreationMode
         let animatedFormat: AnimatedFormat
         /// A fixed grid (`rows`, `columns`) instead of the `custom` layout, or `nil`.
-        var grid: (rows: Int, columns: Int)? = nil
+        var grid: (rows: Int, columns: Int, fit: GridFitMode)? = nil
         /// Whether frames get the per-frame shadow (the CPU-bound default).
         var shadows: Bool = true
     }
@@ -58,8 +58,11 @@ struct BenchmarkTests {
     /// Opt-in (`MOSAICKIT_BENCHMARK_GRID=1`), recorded and never gated: the cost of a grid grows with
     /// its cells because extraction dominates, and these numbers set the cell caps (spec O3, O12).
     private static let gridScenarios: [Scenario] = [
-        Scenario(name: "mosaic-grid-6x10", width: 5120, density: .m, gifMode: .disabled, animatedFormat: .gif, grid: (6, 10), shadows: true),
-        Scenario(name: "mosaic-grid-20x20", width: 10_000, density: .m, gifMode: .disabled, animatedFormat: .gif, grid: (20, 20), shadows: false),
+        Scenario(name: "mosaic-grid-6x10", width: 5120, density: .m, gifMode: .disabled, animatedFormat: .gif, grid: (6, 10, .adaptCanvas), shadows: true),
+        // Same grid in a fixed 16:9 canvas: the cells are about 1.07:1, so letterbox adds bars and crop cuts every frame.
+        Scenario(name: "mosaic-grid-6x10-letterbox", width: 5120, density: .m, gifMode: .disabled, animatedFormat: .gif, grid: (6, 10, .letterbox), shadows: true),
+        Scenario(name: "mosaic-grid-6x10-crop", width: 5120, density: .m, gifMode: .disabled, animatedFormat: .gif, grid: (6, 10, .crop), shadows: true),
+        Scenario(name: "mosaic-grid-20x20", width: 10_000, density: .m, gifMode: .disabled, animatedFormat: .gif, grid: (20, 20, .adaptCanvas), shadows: false),
     ]
 
     private struct Measurement: Codable, Sendable {
@@ -183,7 +186,7 @@ struct BenchmarkTests {
         config.animatedFormat = scenario.animatedFormat
         config.overwrite = true
         if let grid = scenario.grid {
-            config.layout = .fixedGrid(rows: grid.rows, columns: grid.columns)
+            config.layout = .fixedGrid(rows: grid.rows, columns: grid.columns, fit: grid.fit)
         }
         config.layout.visual.addShadow = scenario.shadows
 

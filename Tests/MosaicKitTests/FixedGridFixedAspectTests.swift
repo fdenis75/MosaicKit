@@ -149,6 +149,98 @@ struct FixedGridFixedAspectTests {
         }
     }
 
+    // MARK: - Crop (G-5)
+
+    @Test("Crop keeps the slot size, notes what survives, and refuses too little picture")
+    func cropPlan() throws {
+        let (layout, _, notes) = try #require(planned(plan(3, 4, fit: .crop)))
+        guard case .cropped(let retained)? = notes.first(where: { if case .cropped = $0 { return true } else { return false } }) else {
+            Issue.record("Expected a cropped note, got \(notes)"); return
+        }
+        #expect(retained > 0.5 && retained < 1)
+        // Slots are 1277 x 957 here; the rect is the whole slot (no bars).
+        let size = try #require(layout.thumbnailSizes.first)
+        #expect(size == CGSize(width: 1277, height: 957), "got \(size)")
+        #expect(layout.thumbnailSizes.allSatisfy { $0 == size })
+        // Within the tolerance: stretched, not cropped.
+        let (_, _, near) = try #require(planned(plan(3, 4, fit: .crop, source: 4.0 / 3)))
+        #expect(near.contains { if case .stretched = $0 { return true } else { return false } })
+        // Too little of the picture survives.
+        guard case .fillTooLow? = issue(plan(5, 5, fit: .crop, aspect: .vertical)) else {
+            Issue.record("Expected fillTooLow"); return
+        }
+        #expect(planned(plan(5, 5, fit: .crop, aspect: .vertical, minimumFill: 0.3)) != nil)
+    }
+
+    private func solid(_ width: Int, _ height: Int) throws -> CGImage {
+        let context = try #require(CGContext(data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: 0,
+                                             space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
+        context.setFillColor(CGColor(red: 1, green: 0, blue: 0, alpha: 1))
+        context.fill(CGRect(x: 0, y: 0, width: width, height: height))
+        return try #require(context.makeImage())
+    }
+
+    @Test("The center crop has the requested aspect, is centered, and leaves a matching image alone")
+    func centerCrop() throws {
+        let wide = try solid(1600, 900)
+        let toFour = ThumbnailProcessor.croppedCenter(wide, toAspect: 4.0 / 3)
+        #expect(toFour.width == 1200 && toFour.height == 900)
+        let toSquare = ThumbnailProcessor.croppedCenter(wide, toAspect: 1)
+        #expect(toSquare.width == 900 && toSquare.height == 900)
+        let tall = ThumbnailProcessor.croppedCenter(wide, toAspect: 16.0 / 5)
+        #expect(tall.width == 1600 && tall.height == 500)
+        #expect(ThumbnailProcessor.croppedCenter(wide, toAspect: 1600.0 / 900).width == 1600)
+        #expect(ThumbnailProcessor.croppedCenter(wide, toAspect: .nan).width == 1600)
+        #expect(ThumbnailProcessor.croppedCenter(wide, toAspect: 0).width == 1600)
+    }
+
+    @Test("Only a fixed grid in crop mode with a real mismatch asks for a crop")
+    func frameCropSelection() async throws {
+        let url = try #require(Bundle.module.url(forResource: "test_video", withExtension: "mp4"))
+        let video = try await VideoInput(from: url)
+        let ratio = CGFloat(video.width ?? 16) / CGFloat(video.height ?? 9)
+        guard case .layout(let layout, _, _) = LayoutProcessor().planFixedGrid(
+            GridSpecification(rows: 3, columns: 4, fit: .crop), sourceAspectRatio: ratio,
+            mosaicAspectRatio: .widescreen, mosaicWidth: 1600
+        ) else { Issue.record("infeasible"); return }
+        func crop(_ fit: GridFitMode) -> ThumbnailProcessor.FrameCrop? {
+            let config = MosaicConfiguration(width: 1600, layout: .fixedGrid(rows: 3, columns: 4, fit: fit))
+            return MetalMosaicGenerator.frameCrop(for: video, layout: layout, config: config)
+        }
+        // The 3 x 4 cells are 4:3; the video is 16:9.
+        let cropped = try #require(crop(.crop))
+        #expect(abs(cropped.aspect - 4.0 / 3) < 0.02 && abs(cropped.sourceAspect - 16.0 / 9) < 0.01, "got \(cropped)")
+        #expect(crop(.letterbox) == nil && crop(.stretch) == nil && crop(.adaptCanvas) == nil)
+    }
+
+    @Test("A cropped mosaic with header and strip has exactly the configured aspect")
+    func cropEndToEnd() async throws {
+        let url = try #require(Bundle.module.url(forResource: "test_video", withExtension: "mp4"))
+        let video = try await VideoInput(from: url)
+        var config = MosaicConfiguration(
+            width: 1600, density: .xxl, format: .jpeg,
+            layout: .fixedGrid(rows: 3, columns: 4, fit: .crop, aspectRatio: .widescreen),
+            includeMetadata: true
+        )
+        config.overlay.colorDNA = ColorDNAConfig(show: true, height: 16, position: .bottom, style: .barcode)
+        let image = try await MetalMosaicGenerator().generateMosaicImage(for: video, config: config)
+        #expect(image.width == 1600 && image.height == 900, "Got \(image.width) x \(image.height)")
+    }
+
+    @Test("A portrait clip is cropped to portrait-ish cells in a vertical canvas")
+    func cropRotatedPortrait() async throws {
+        let url = try #require(Bundle.module.url(forResource: "rotated_portrait", withExtension: "mp4"))
+        let video = try await VideoInput(from: url)
+        var config = MosaicConfiguration(
+            width: 900, density: .xxl, format: .jpeg,
+            layout: .fixedGrid(rows: 3, columns: 2, fit: .crop, aspectRatio: .vertical),
+            includeMetadata: false
+        )
+        config.overlay.colorDNA = ColorDNAConfig(show: false)
+        let image = try await MetalMosaicGenerator().generateMosaicImage(for: video, config: config)
+        #expect(image.width == 900 && image.height == 1600, "Got \(image.width) x \(image.height)")
+    }
+
     // MARK: - End to end
 
     @Test("A letterboxed mosaic with header and ColorDNA strip has exactly the configured aspect")

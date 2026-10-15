@@ -149,7 +149,7 @@ Every PR updates its row here (status) and the matching §4.2 / §6.1 entries in
 | G-2 | fixed grid: `.adaptCanvas` layout ⚡ | done; A/B/A gate in §8.1 | #69 |
 | G-3 | fixed grid: sampling, header cap, overlays ⚡ | done; A/B/A gate in §8.1; the header-height helper moved to G-4 | |
 | G-4 | fixed grid: letterbox and stretch | done (CI only; the header-height helper `metadataHeaderHeight` landed here) | |
-| G-5 | fixed grid: crop ⚡ | planned | |
+| G-5 | fixed grid: crop ⚡ | done; A/B/A gate in §8.1 | |
 | G-6 | fixed grid: docs and examples | planned | |
 | G-7 | fixed grid: saliency-aware crop (optional) | planned | |
 
@@ -304,6 +304,39 @@ Grid scenarios (opt-in, `MOSAICKIT_BENCHMARK_GRID=1`, one run of B, no baseline 
 | mosaic-grid-6x10 | auto | 3.08 | 136.3 | 282.0 | 1.6 |
 | mosaic-grid-20x20 | 1 | 16.27 | 25.8 | 53.5 | 9.9 |
 | mosaic-grid-20x20 | auto | 10.22 | 41.1 | 85.2 | 9.9 |
+
+**G-5 A/B/A** (2026-10-15, same machine, `release` build, same 3 files; A = `origin/main@637bf9d`, B = the G-5
+branch `92d4cc8`; each leg in its own worktree, 3 runs per scenario, medians in seconds):
+
+| Scenario | Conc. | A1 | B | A2 | B vs mean(A) |
+|---|---|---|---|---|---|
+| mosaic-5120-M | 1 | 2.79 | 2.79 | 2.73 | +1.1 % |
+| mosaic-5120-M | auto | 1.17 | 1.22 | 1.15 | +5.2 % (one high B run: 1.34, 1.22, 1.20) |
+| mosaic-10000-XS | 1 | 7.31 | 7.42 | 7.20 | +2.3 % |
+| mosaic-10000-XS | auto | 5.16 | 5.60 | 5.03 | +9.9 % (B runs 7.47, 5.42, 5.60: one outlier) |
+| anim-gif-small | 1 | 3.89 | 3.89 | 4.06 | -2.1 % |
+| anim-gif-small | auto | 2.65 | 2.64 | 2.60 | +0.6 % |
+| anim-webp-small | 1 | 8.85 | 8.92 | 8.99 | 0.0 % |
+| anim-webp-small | auto | 7.82 | 7.75 | 7.76 | -0.5 % |
+
+All concurrency-1 rows, which carry the gate, are within ±2.3 %. Two auto-concurrency rows are above
+5 % because of one slow B run each (the later grid run on B drifted the same way at auto concurrency,
+so scheduling noise is the likely cause); a small real effect is not excluded. G-5 adds work to the
+per-frame path only when a crop is requested (`crop` is `nil` for every other layout), so non-grid
+scenarios run the old code. Peak RSS is flat (whole-process max 3.41 / 3.09 / 3.25 GB).
+
+Grid scenarios (opt-in, one run of B, medians in seconds, 6×10 at width 5120 in a 16:9 canvas, cells about 1.07:1):
+
+| Scenario | Conc. 1 | Auto | Output MB |
+|---|---|---|---|
+| mosaic-grid-6x10 (adaptCanvas) | 2.61 | 1.20 | 1.6 |
+| mosaic-grid-6x10-letterbox | 2.72 | 1.23 | 1.7 |
+| mosaic-grid-6x10-crop | 2.94 | 1.23 | 2.2 |
+| mosaic-grid-20x20 (adaptCanvas, width 10000) | 5.91 | 2.88 | 9.9 |
+
+Crop costs about 8 % over letterbox (13 % over adaptCanvas) at concurrency 1, from the larger decode box
+and the per-frame crop, and nothing measurable at auto concurrency. Crop output is larger because the
+covering frames have no bars.
 
 ## 9. Decision log (autonomous work)
 

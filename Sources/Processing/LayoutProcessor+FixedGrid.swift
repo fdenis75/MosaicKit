@@ -52,11 +52,6 @@ extension LayoutProcessor {
         guard sourceAspectRatio.isFinite, sourceAspectRatio >= 0.01, sourceAspectRatio <= 100 else {
             return .infeasible(.unknownSourceAspect, suggestions: [])
         }
-        guard grid.fit != .crop else {
-            // Plan G-5. Callers are stopped earlier by `MosaicConfiguration.validate()`; this
-            // keeps a direct call honest too.
-            return .infeasible(.fitModeUnavailable(grid.fit), suggestions: [])
-        }
         if grid.fit != .adaptCanvas {
             return planFixedAspect(
                 grid, sourceAspect: Double(sourceAspectRatio), mosaicAspect: Double(mosaicAspectRatio.ratio),
@@ -84,7 +79,7 @@ extension LayoutProcessor {
         return width
     }
 
-    /// `.letterbox` and `.stretch`: the canvas keeps the mosaic aspect (overlays included), the
+    /// `.letterbox`, `.stretch` and `.crop`: the canvas keeps the mosaic aspect (overlays included), the
     /// cells fill what is left, and frames are fitted into them (spec section 3.3).
     private func planFixedAspect(
         _ grid: GridSpecification,
@@ -153,6 +148,9 @@ extension LayoutProcessor {
             return .infeasible(.aspectMismatch(cellAspect: fit.slotAspect, sourceAspect: s, error: fit.error), suggestions: suggestions())
         } else if fit.fill < grid.minimumFill {
             return .infeasible(.fillTooLow(fill: fit.fill, minimum: grid.minimumFill), suggestions: suggestions())
+        } else if grid.fit == .crop {
+            // The slot keeps its size; the frames are cut to its aspect (`fit.fill` of each survives).
+            notes.append(.cropped(retained: fit.fill))
         } else {
             if fit.slotAspect > s {
                 frameWidth = Int((Double(slot.frameHeight) * s).rounded())      // pillarbox

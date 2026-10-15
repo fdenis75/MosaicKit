@@ -154,6 +154,7 @@ public final class ThumbnailProcessor: Sendable {
         from file: URL, layout: MosaicLayout, asset: AVAsset, accurate: Bool,
         labelConfig: FrameLabelConfig,
         sampling: FrameSamplingPolicy = .weighted,
+        crop: FrameCrop? = nil,
         collectColor: (@Sendable (Int, CGImage) async -> Void)? = nil
     ) -> AsyncThrowingStream<(Int, CGImage), Error> {
         signposter.emitEvent("processedFramesStream")
@@ -162,7 +163,7 @@ public final class ThumbnailProcessor: Sendable {
         let (stream, continuation) = AsyncThrowingStream<(Int, CGImage), Error>.makeStream()
         let processor = self
         let sizes = layout.thumbnailSizes
-        let generator = configureGenerator(for: asset, accurate: accurate, preview: false, layout: layout)
+        let generator = configureGenerator(for: asset, accurate: accurate, preview: false, layout: layout, crop: crop)
         let cancellation = ImageGeneratorCancellation(generator)
         nonisolated(unsafe) let assetRef = asset
         nonisolated(unsafe) let generatorRef = generator
@@ -181,13 +182,15 @@ public final class ThumbnailProcessor: Sendable {
                         let frameIndex = index
                         index += 1
                         group.addTask {
+                            // Crop once, so the ColorDNA strip samples what the cell shows.
+                            let image = crop.map { Self.croppedCenter(image, toAspect: $0.aspect) } ?? image
                             await collectColor?(frameIndex, image)
-                            let image = processor.addTimestampToImage(
+                            let labeled = processor.addTimestampToImage(
                                 image: image, timestamp: processor.formatTimestamp(seconds: actualTime.seconds),
                                 frameIndex: frameIndex, size: sizes[frameIndex], labelConfig: labelConfig
                             )
                             try Task.checkCancellation()
-                            return (frameIndex, image)
+                            return (frameIndex, labeled)
                         }
                         pending += 1
                         if pending >= 8, let result = try await group.next() {
@@ -536,7 +539,8 @@ public final class ThumbnailProcessor: Sendable {
         for asset: AVAsset,
         accurate: Bool,
         preview: Bool,
-        layout: MosaicLayout
+        layout: MosaicLayout,
+        crop: FrameCrop? = nil
     ) -> AVAssetImageGenerator {
         signposter.emitEvent("configureGenerator")
         let intervalState = signposter.beginInterval("configureGenerator")
@@ -555,15 +559,46 @@ public final class ThumbnailProcessor: Sendable {
         }
         
         if !preview {
-            generator.maximumSize = CGSize(
-                width: (layout.thumbnailSizes.map(\.width).max() ?? layout.thumbnailSize.width) * decodeQualityScale,
-                height: (layout.thumbnailSizes.map(\.height).max() ?? layout.thumbnailSize.height) * decodeQualityScale
-            )
+            var width = layout.thumbnailSizes.map(\.width).max() ?? layout.thumbnailSize.width
+            var height = layout.thumbnailSizes.map(\.height).max() ?? layout.thumbnailSize.height
+            if let crop {
+                // The generator fits the frame *inside* this box, so for a crop the box must be big
+                // enough for the frame to cover the cell on both axes (spec section 3.6).
+                let cell = width / max(height, 1)
+                width *= max(1, crop.sourceAspect / cell)
+                height *= max(1, cell / crop.sourceAspect)
+            }
+            generator.maximumSize = CGSize(width: width * decodeQualityScale, height: height * decodeQualityScale)
         }
         
         return generator
     }
     
+    /// A fixed grid in `.crop` mode: every decoded frame is cut to `aspect` (the drawn frame's width
+    /// over its height), keeping the center. `sourceAspect` is the video's display aspect ratio.
+    struct FrameCrop: Sendable, Equatable {
+        let aspect: CGFloat
+        let sourceAspect: CGFloat
+    }
+
+    /// The centered window of `image` that has the given aspect ratio, or `image` itself when the
+    /// aspect already matches. `CGImage.cropping(to:)` shares the pixels, so this copies nothing.
+    static func croppedCenter(_ image: CGImage, toAspect aspect: CGFloat) -> CGImage {
+        let width = CGFloat(image.width)
+        let height = CGFloat(image.height)
+        guard aspect.isFinite, aspect > 0, width > 0, height > 0 else { return image }
+        var window = CGRect(x: 0, y: 0, width: width, height: height)
+        if width / height > aspect {
+            window.size.width = (height * aspect).rounded()
+            window.origin.x = ((width - window.width) / 2).rounded(.down)
+        } else {
+            window.size.height = (width / aspect).rounded()
+            window.origin.y = ((height - window.height) / 2).rounded(.down)
+        }
+        guard window.width >= 1, window.height >= 1, window != CGRect(x: 0, y: 0, width: width, height: height) else { return image }
+        return image.cropping(to: window) ?? image
+    }
+
     /// How frames are spread over the video.
     enum FrameSamplingPolicy: Sendable, Equatable {
         /// 20 % of the frames over the first third, 60 % over the middle third, 20 % over the last
