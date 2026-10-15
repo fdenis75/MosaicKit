@@ -21,6 +21,7 @@ A high-performance Swift package for generating video mosaics with Metal-acceler
 
 ## Unreleased
 
+- **`MetadataField.colorPalette` now renders** (I-10) — a header with `.colorPalette(swatchCount:)` used to ignore the field. It now draws that many color swatches (at most 32): the average color of frames spread evenly over the video. The extra sampling (a few small frames) runs only when the header has the field, so existing configurations are unaffected. Header height and layout don't change, so mosaics that already listed `.colorPalette` gain the swatches in the header's right corner.
 - **`discoverVideosReportingFailures(in:recursive:metadataConcurrency:)`** (I-17) — new discovery function that keeps going past files it can't inspect (an `.mkv` AVFoundation can't read, a corrupt file, an undecodable codec on iOS). It returns a `VideoDiscoveryReport` with `videos` (inspected, in filename order) and `failures` (`VideoDiscoveryFailure` with the file `url` and the `error`). `discoverVideos(in:recursive:metadataConcurrency:)` is unchanged: it still throws on the first failing file.
 
 ## New in 1.9.1

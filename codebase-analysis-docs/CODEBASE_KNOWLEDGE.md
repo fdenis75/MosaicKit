@@ -453,7 +453,7 @@ register:
 2. **Mosaic output-dimension limit.** `MetalMosaicGenerator` rejects `config.width > 16_384`
    inside generation (not in `validate()`) and videos shorter than 5 s, both as
    `MosaicError.invalidVideo`.
-   [[F:Sources/Processing/MetalMosaicGenerator.swift#321-324#a3f405fe]]
+   [[F:Sources/Processing/MetalMosaicGenerator.swift#321-324#c3c4fac9]]
 3. **Preview skip-if-exists never matches in default naming mode.** With `fullPathInName ==
    false` and no `filenameTemplate`, `PreviewConfiguration.generateFilename` embeds a
    run-time timestamp (`yyyy-MM-dd_HH-mm-ss`). As a result, `overwrite == false` never finds an
@@ -631,9 +631,9 @@ Full sequence including the coordinator: `codebase-analysis-docs/assets/mosaic-s
 #### Stage-by-stage table
 
 The stage body is `MetalMosaicGenerator.generate`
-[[F:Sources/Processing/MetalMosaicGenerator.swift#98-236#a3f405fe]]. Since S-2, stages 2–5 run in
+[[F:Sources/Processing/MetalMosaicGenerator.swift#98-236#c3c4fac9]]. Since S-2, stages 2–5 run in
 `planMosaic`, stages 6–12 in `composeMosaic` and stage 14 in `exportAnimation`
-[[F:Sources/Processing/MetalMosaicGenerator.swift#299-448#a3f405fe]]. `generateMosaicImage` calls
+[[F:Sources/Processing/MetalMosaicGenerator.swift#299-476#c3c4fac9]]. `generateMosaicImage` calls
 the same `planMosaic` + `composeMosaic`, so both entry points compose the same image.
 
 | # | Stage | Code | Runs on | Key facts |
@@ -645,13 +645,13 @@ the same `planMosaic` + `composeMosaic`, so both entry points compose the same i
 | 4 | Layout | `LayoutProcessor.calculateLayout` [[F:Sources/Processing/LayoutProcessor.swift#93-150#b6049426]] | generator actor (under `NSRecursiveLock`) | Cache key: `aspectRatio-originalAR-count-width-density-layoutType`. `.auto` is never cached. `.dynamic` is mapped to `.custom` first (F-7). Invalid input returns an **empty** layout, which later throws "Empty mosaic layout". `.iphone` forces width 1200, 1 column, max height 8000. |
 | 5 | Aspect normalization | `planMosaic`: `adjustedConfig.updateAspectRatio(AspectRatio.findNearest(to: layout.mosaicSize))` | generator actor | The config passed down may carry a **different** `layout.aspectRatio` than the caller set. Path/filename generation still uses the caller's original `config`. |
 | 6 | Header | `ThumbnailProcessor.createMetadataHeader` | generator actor (synchronous CPU) | Only when `includeMetadata`. Height is added on top of the layout height. |
-| 7 | Frame extraction | `ThumbnailProcessor.processedFramesStream` [[F:Sources/Processing/ThumbnailProcessor.swift#140-192#844677b3]] | producer `Task` on the global executor | One `AVAssetImageGenerator` with the batched `images(for:)` API. `maximumSize` = largest cell × `decodeQualityScale` (1). Tolerance ±1 s, or 0 when `useAccurateTimestamps`. Sampling: first 20 % of frames in the first 33 % of the 5–95 % window, 60 % in the middle, 20 % in the last third [[F:Sources/Processing/ThumbnailProcessor.swift#505-538#844677b3]]. Any `.failure` throws: mosaics are strict (**no placeholder frames**). |
+| 7 | Frame extraction | `ThumbnailProcessor.processedFramesStream` [[F:Sources/Processing/ThumbnailProcessor.swift#140-192#f749ca4c]] | producer `Task` on the global executor | One `AVAssetImageGenerator` with the batched `images(for:)` API. `maximumSize` = largest cell × `decodeQualityScale` (1). Tolerance ±1 s, or 0 when `useAccurateTimestamps`. Sampling: first 20 % of frames in the first 33 % of the 5–95 % window, 60 % in the middle, 20 % in the last third [[F:Sources/Processing/ThumbnailProcessor.swift#505-538#f749ca4c]]. Any `.failure` throws: mosaics are strict (**no placeholder frames**). |
 | 8 | Labeling + color sampling | same | child tasks, **≤ 8 in flight** | Each frame is labeled (`addTimestampToImage`). If Color DNA is on, `OverlayProcessor.averageColor` goes into `FrameColorCollector`. Results are yielded **out of order**; the index travels with each frame. |
 | 9 | Background | `processImagesToMTLTexture` [[F:Sources/Processing/MetalImageProcessor.swift#580-700#04cfcb88]] | caller of `generateMosaicStream` (nonisolated) | Takes the first ≤ 5 frames. Up to 3 of them go to `DominantColors` (`.fair`, `.euclidean`, excluding black, white, and gray). The 3 lightest colors form a diagonal gradient, blurred with a CIGaussianBlur of radius 12. Falls back to gray 0.1 (or 0.5 inside the helper). When `useMovieColorsForBg == false`, uses a solid `backgroundColor`. |
 | 10 | Compositing | `generateMosaicStream` [[F:Sources/Processing/MetalImageProcessor.swift#864-998#04cfcb88]], `processBatch` @L1000, `renderFrame` @L1077 | nonisolated async | One setup command buffer (fill + header), awaited. Frames are then rendered in **20-frame command buffers**, committed without waiting. Each frame: `createTexture(from: CGImage)`, `scaleTexture` if the size differs, `compositeTexture`, optional `addBorder`. The shadow path draws a CPU `CGContext` shadow and composites that. Duplicate or out-of-range indices throw. **All** positions must be filled, or it throws "Missing mosaic frames". |
 | 11 | GPU sync + readback | `synchronizeGPU` @L1058, `createCGImage(from:)` | nonisolated | An empty barrier command buffer is committed last and awaited. GPU errors from completion handlers are collected in `CommandBufferErrorState` and rethrown as `MetalProcessorError.commandBufferExecutionFailed`. |
 | 12 | Have the macOS stall retry wait until the app is active again, as iOS waits for foreground, and document background exporting for apps. Done: mechanism reproduced (background scheduling, background QoS cap; #46), CI attributed to the runner VM (known issue there, #47) | I-26 | A stalled export fails after 120 s and retries while still throttled | S |
-| 13 | Encode + commit | `saveMosaic` [[F:Sources/Processing/MetalMosaicGenerator.swift#530-639#a3f405fe]] | generator actor (synchronous CPU) | Output path = `generateOutputDirectory` + `generateFilename`. Encodes with `CGImageDestination` (HEIF embeds a thumbnail, `HasAlpha = false`), or the injected WebP encoder, into the staging file. Then `OutputTransaction.commit()`. |
+| 13 | Encode + commit | `saveMosaic` [[F:Sources/Processing/MetalMosaicGenerator.swift#558-667#c3c4fac9]] | generator actor (synchronous CPU) | Output path = `generateOutputDirectory` + `generateFilename`. Encodes with `CGImageDestination` (HEIF embeds a thumbnail, `HasAlpha = false`), or the injected WebP encoder, into the staging file. Then `OutputTransaction.commit()`. |
 | 14 | Animation | `exportAnimation` (`extractFramesForGif` + `AnimatedGifGenerator.save`), shared by the `.gifOnly`, `.withMosaic` and skip-if-exists backfill sites | generator actor → global | This is a **second, full decode pass** with a separate generator: `.large` caps at 1280×720, `.small` at 960×540. Missing frames are skipped and then checked by count, so any missing frame throws. `frameDelay = 1 / gifFps`. |
 
 **Progress reported to handlers** (`MosaicGenerationProgress.progress`):
@@ -1264,9 +1264,13 @@ backbone. Read `LayoutProcessor` algorithms, `ThumbnailProcessor` header/label r
   - Missing values: `duration` and `fps` rows disappear when unknown; `codec` shows "Unknown";
     `resolution` shows "0×0".
 - **Edge cases & hidden dependencies:**
-  - ⚠ **`.colorPalette(swatchCount:)` never renders.** `createMetadataHeader` draws swatches
-    only if `swatchColors` is non-empty, and `MetalMosaicGenerator` never passes any. The field
-    is accepted, round-trips through Codable, and is silently ignored.
+  - `.colorPalette(swatchCount:)` renders since F-8d (I-10). `MetalMosaicGenerator.makeMetadataHeader`
+    asks `ThumbnailProcessor.paletteSwatchColors(url:duration:count:)` for the colors before it
+    draws the header: the average color of `swatchCount` frames (capped at 32) spread evenly over
+    the middle 90 % of the video, read at 64×64 with a loose time tolerance. The step runs only
+    when the header has the field, so the default pipeline pays nothing (a failed sampling logs
+    a warning and leaves the swatch row out). Before F-8d the field was accepted, round-tripped
+    and silently ignored.
   - ⚠ The **default shadow is CPU-bound per frame**, a hidden performance cost. Disabling
     `addShadow` lets frames take the GPU scale path.
   - Watermark image: loaded with `CGImageSource` *without* security-scoped access. If loading
@@ -1282,7 +1286,7 @@ backbone. Read `LayoutProcessor` algorithms, `ThumbnailProcessor` header/label r
     strip and the watermark instead of dropping them silently.
 - **Tests:** `ThumbnailProcessorTests` (labels: all positions, styles, formats; header width
   and sizing), `OverlayProcessorTests` (average color, DNA shapes, strip-height clamping),
-  `OverlayConfigurationTests` (Codable). No test covers `.colorPalette` actually rendering.
+  `OverlayConfigurationTests` (Codable), `ColorPaletteSwatchTests` (sampling, the header gets swatches from the generator).
 
 ### F6 — Animated export (GIF / HEICS / animated WebP)
 
@@ -1695,7 +1699,7 @@ none.
    the `init` default (HEVC 1920×1080): 0.7 → 1080p **H.264** (the comment says HEVC). The
    MediumQuality branch can never be reached. Unmatched values fall back to Passthrough (F9).
    *(Fixed in F-8b, I-5: ranges; 0.7 stays H.264 1080p, and the comment is corrected.)*
-5. **`MetadataField.colorPalette` never renders** (no swatch colors are passed) (F5).
+5. **`MetadataField.colorPalette` never renders** (no swatch colors are passed) (F5). *(Fixed in F-8d, I-10.)*
 6. **The default `VisualSettings.addShadow = true`** routes every frame through a CPU shadow
    render (F5 performance).
 7. **The rounded-corner and vignette treatment is always applied**, even with labels off (F5).
@@ -1815,7 +1819,7 @@ robustness, performance, or cosmetic.
 | I-7 | F9 | In the same explicit-`nil` SJS branch, writer dimensions come from `scaleDimensions(naturalSize)`, but the composition renders at the capped `renderSize`. | **Fixed (F-8b)**: the SJS writer always gets the size the video composition renders (`videoComposition.renderSize`, falling back to the estimated `renderSize` without a composition); `scaleDimensions` and the unused width/height/format parameters are removed from `videoSettings`. Review finding: the estimated `renderSize` uses landscape bounds, so for a portrait source under the default cap it was about 607×1080 against a 1080×1920 composition, for explicit presets as well; using the composition's size fixes both paths. No automated test covers it (the portrait fixture is smaller than any cap). | Low | `exportWithSJSSession` | Always pass `renderSize` to `VideoOutputSettings` (as the preset branch already does). |
 | I-8 | F4 | **`.dynamic` layout is geometrically broken.** Rows overlap, wide rows are clipped, and the width ignores `config.width`. | **Deprecated (F-7)**: `.dynamic` is `@available(*, deprecated)`, laid out as `.custom` with a one-time warning, dropped from `allCases`; the broken algorithm is deleted. **Test:** `LayoutProcessorTests` "Deprecated dynamic layout is laid out exactly as custom" | Medium | Simulation (5120 px, 16:9): n=107 → canvas width 4737 but widest row 6257 (**clipped**); 40/107 cells taller than their row (**overlap**). n=30 → width 6897 > 5120. n=800 → 15 rows with negative scale, cells as narrow as 5 px. | Normalize each row to `mosaicWidth`, use a single height per row, clamp the scale at ≥ 0, and compute the canvas from the max row width. Or deprecate `.dynamic`. **Decision D4 (deprecate) → plan F-7.** |
 | I-9 | F4 | **`.auto` fails on iPhone.** It mixes points and pixels; the count is 0, the layout is empty, and it throws "Empty mosaic layout". | **Fixed (F-7)**: `calculateAutoLayout(…screenSize:scale:)` and `calculateMaxThumbnails` work in pixels, each axis has at least one cell, and the automatic count is at least 4. **Tests:** `LayoutProcessorTests` (iPhone-sized, tiny and desktop screens) | Low–Medium | `calculateMaxThumbnails`: 390 pt / (160·3) → 0 columns | Use pixels consistently (points × scale), or points consistently. Floor the count at 4. |
-| I-10 | F5 | **`MetadataField.colorPalette` never renders.** | Confirmed (static) | Low | The generator never passes `swatchColors` to `createMetadataHeader` | Compute swatches from the dominant colors (already computed for the background) and pass them in. This requires generating the header **after** the first frames. |
+| I-10 | F5 | **`MetadataField.colorPalette` never renders.** | **Fixed (F-8d)**: `makeMetadataHeader` samples `swatchCount` evenly spaced frames when the header has a `.colorPalette` field and passes their average colors to `createMetadataHeader`. The swatches are frame averages, not clustered dominant colors: reusing the background's dominant colors would have meant building the header after the frames stream. **Tests:** `ColorPaletteSwatchTests` (the generator's header differs from a palette-less one; sabotage-checked). ⚡ A/B/A benchmark: no regression (plan §8.1). | Low | The generator never passes `swatchColors` to `createMetadataHeader` | Compute swatches from the dominant colors (already computed for the background) and pass them in. This requires generating the header **after** the first frames. |
 | I-11 | F12 | **The `{aspectRatio}` template token inserts `:`** into paths. | **Fixed (F-3)**: both token maps (`generateOutputDirectory`/`animatedOutputURL` and the filename template) render `16-9`. **Test:** `MosaicConfigurationTests` "{aspectRatio} renders with a dash…", and the pinned `3840_S_9-16_classic` path | Low–Medium | `layout.aspectRatio.rawValue` ("16:9") was used verbatim; `configurationHash` already replaced `:` with `-` | Used the hash-style `16-9` in templates (D5). This moves outputs for users of the token and the animation names derived from the mosaic name. |
 | I-12 | F8 | **Preview skip-if-exists never matches** with default naming (run timestamp in the filename). | **Fixed (F-3)**: the default name no longer has the run timestamp; `{time}` is an opt-in `filenameTemplate` token. **Tests:** `PreviewConfigurationTests` (deterministic name, `{time}` token) and `PreviewSkipExistingTests` (existing file returned, nothing exported) | Medium | `PreviewConfiguration.generateFilename` | Dropped the run timestamp from the default name (D2). This is a naming change (rule 4): existing default-named previews are regenerated once. |
 | I-13 | F8 | Default `exportMaxResolution` is **1080p**; the README (1.6.2) and code comments say 4K. | **Fixed (S-5)**: one `defaultExportMaxResolutionRaw` constant (property default, macOS 26 init, decoder); the stale "4K" comment is gone and the README 1.6.2 note carries a correction | Low | `PreviewConfiguration.defaultExportMaxResolutionRaw` | Decision D3 (keep 1080p). **Test:** `ConfigurationInitializerTests` checks the 1080p default. |
@@ -2516,7 +2520,7 @@ with the code.
 | 7 | ~~Fail fast on undecodable sources (10-bit H.264 on iOS, …) at inspection time~~ **Done** (F-6) | I-22 | A clear error instead of "Frame extraction failed" | S |
 | 8 | Stream animated-export frames into the encoder instead of `[CGImage]` | I-20 | Memory safety for `.nochange` / long videos | M |
 | 9 | ~~Fix or deprecate `.dynamic`; fix `.auto` units~~ **Done** (F-7) | I-8, I-9 | Broken layout options that are advertised in the README | done |
-| 10 | Housekeeping: ~~`decodeIfPresent` for new keys~~ (done in S-5), ~~remove dead code and swift-log, unify the log subsystem~~ (done in S-1, #38), render or remove `.colorPalette`, and ~~resolve I-13 (4K vs 1080p docs)~~ (done in S-5), ~~deprecate unused public API~~ (done in S-6) | I-10, I-13, I-14, I-23, I-24, I-25 | Lower maintenance cost and fewer surprises | S each |
+| 10 | Housekeeping: ~~`decodeIfPresent` for new keys~~ (done in S-5), ~~remove dead code and swift-log, unify the log subsystem~~ (done in S-1, #38), ~~render or remove `.colorPalette`~~ (done in F-8d), and ~~resolve I-13 (4K vs 1080p docs)~~ (done in S-5), ~~deprecate unused public API~~ (done in S-6) | I-10, I-13, I-14, I-23, I-24, I-25 | Lower maintenance cost and fewer surprises | S each |
 | 11 | Performance exploration (always benchmark against the batched path): CVPixelBuffer → Metal zero-copy path, GPU-side frame treatment, moving encoding off the generator actor, the VideoToolbox constant-quality factor for SJS | §4.3, §4.9 | Throughput is a hard requirement | L |
 | 12 | ~~Root-cause the intermittent native export stall~~ (done: macOS background scheduling, #46). Remaining: have the macOS stall retry wait until the app is active again, as iOS waits for foreground, and document background exporting for apps | I-26 | A stalled export fails after 120 s and retries while still throttled | S |
 
@@ -2567,14 +2571,14 @@ P1 = core feature, P2 = supporting, P3 = docs/infra.
 | # | Pri | Path | Type | Lines | Hash8 | Notes |
 |---|---|---|---|---|---|---|
 | 1 | P0 | `Package.swift` | config | 61 | 721e2854 | Products, targets, deps, platforms |
-| 2 | P0 | `Sources/Processing/MetalMosaicGenerator.swift` | code | 652 | a3f405fe | Mosaic entry actor; pipeline orchestration; shared `planMosaic`/`composeMosaic`/`exportAnimation` @L299; `saveMosaic` @L524 |
+| 2 | P0 | `Sources/Processing/MetalMosaicGenerator.swift` | code | 680 | c3c4fac9 | Mosaic entry actor; pipeline orchestration; shared `planMosaic`/`composeMosaic`/`exportAnimation` @L299; `saveMosaic` @L524 |
 | 3 | P0 | `Sources/Processing/MosaicGeneratorProtocol.swift` | code | 56 | 5685ed03 | Actor protocol |
 | 4 | P0 | `Sources/Processing/MosaicGeneratorCoordinator.swift` | code | 730 | 62277ee6 | Batch actor (per-attempt tracking, `runBatch`), progress/result/status types, factory funcs at the end |
 | 5 | P0 | `Sources/Processing/Preview/PreviewVideoGenerator.swift` | code | 1474 | 7546d65f | Preview actor + `PreviewGenerationLogic` (compose @L604, export paths @L1093/1115/1425) |
 | 6 | P0 | `Sources/Processing/Preview/PreviewGeneratorCoordinator.swift` | code | 492 | 092dc7ff | Preview batch (`runBatch`), concurrency cap 2 @L402, retry @L425 |
 | 7 | P0 | `Sources/Models/MosaicConfiguration.swift` | model | 672 | 478f6c33 | Config + path templating + format enums |
 | 8 | P0 | `Sources/Models/PreviewConfiguration.swift` | model | 817 | ee2900f9 | Config + extract math + path templating |
-| 9 | P1 | `Sources/Processing/ThumbnailProcessor.swift` | code | 1581 | 844677b3 | Frame stream @L140, GIF frames @L76, header @L598/862 |
+| 9 | P1 | `Sources/Processing/ThumbnailProcessor.swift` | code | 1618 | f749ca4c | Frame stream @L140, GIF frames @L76, header @L598/862 |
 | 10 | P1 | `Sources/Processing/MetalImageProcessor.swift` | code | 1336 | 04cfcb88 | Metal pipeline, `generateMosaicStream` @L864, DominantColors @L601 |
 | 11 | P1 | `Sources/Processing/LayoutProcessor.swift` | code | 592 | b6049426 | Layout algorithms, cache @L22/114/148 |
 | 12 | P1 | `Sources/Models/VideoInput.swift` | model | 139 | 6b6bfcbf | Unit of work |
@@ -2585,7 +2589,7 @@ P1 = core feature, P2 = supporting, P3 = docs/infra.
 | 17 | P1 | `Sources/Models/ConfigurationValidation.swift` | model | 102 | 83f12470 | All `validate()` |
 | 18 | P1 | `Sources/Processing/Preview/FFmpegEncoder.swift` | code | 422 | d99fd279 | ffmpeg pipeline (macOS) |
 | 19 | P1 | `Sources/Processing/OverlayProcessor.swift` | code | 303 | 417dd3da | DNA strip, watermark |
-| 20 | P1 | `Sources/Models/OverlayConfiguration.swift` | model | 352 | a5ccbc5b | Overlay configs |
+| 20 | P1 | `Sources/Models/OverlayConfiguration.swift` | model | 360 | 49b96e9c | Overlay configs |
 | 21 | P1 | `Sources/Processing/AnimatedGifGenerator.swift` | code | 141 | bd92de71 | Animated writer |
 | 22 | P1 | `Sources/Processing/WebPSupport.swift` | code | 45 | 8f928b72 | WebP injection |
 | 23 | P1 | `SourcesWebP/MosaicKitWebP.swift` | code | 72 | dc374b7e | WebP encoder impl |
@@ -2631,6 +2635,7 @@ P1 = core feature, P2 = supporting, P3 = docs/infra.
 | 63 | P1 | `Sources/Models/PreviewQualityTier.swift` | model | 33 | a4405fda | Quality to SJS codec tier, shared by the exporter and the description (F-8b, I-6) |
 | 64 | P1 | `Sources/Models/VideoDiscoveryReport.swift` | model | 29 | 44651536 | `VideoDiscoveryReport` / `VideoDiscoveryFailure` (F-8c, I-17) |
 | 65 | P2 | `Tests/MosaicKitTests/VideoDiscoveryReportTests.swift` | test | 75 | 15d7489c | Discovery that reports per-file failures (F-8c) |
+| 66 | P2 | `Tests/MosaicKitTests/ColorPaletteSwatchTests.swift` | test | 95 | d68ce31f | Palette sampling and the header's swatches (F-8d) |
 
 Excluded or low value: `Media.xcassets/**` (binary fixture), `Tests/MosaicKitTests/embeddedAsset/test_video.mp4`
 (87 s 8-bit H.264 video-only fixture), `scripts/**` + `Makefile` (xcodebuild agent scaffold for a
@@ -2655,8 +2660,8 @@ RELATED PRs (merged): #32 this doc (+README unreleased note); #33 iOS CI scheme 
              #34 ffmpeg watchdog (I-16); #35 review path filter; #36 fast animated tests;
              #31 closed (duplicate of #33). Open: #37 CLAUDE.md/AGENTS.md rewrite + this refresh
 
-FILE_MAP_SUMMARY: Appendix A (65 files; P0 = 8, P1 = 18)
-ISSUE REGISTER:   §4.2 I-1 … I-27   (High: I-1, I-2; Medium: I-3 I-4 I-8 I-12 I-16 I-20 I-22 I-24 I-26 I-27; fixed: I-1 I-2 I-3 I-9 I-11 I-12 I-5 I-6 I-7 I-15 I-17 I-18 I-19 I-22 I-16 I-23 I-24 I-27)
+FILE_MAP_SUMMARY: Appendix A (66 files; P0 = 8, P1 = 18)
+ISSUE REGISTER:   §4.2 I-1 … I-27   (High: I-1, I-2; Medium: I-3 I-4 I-8 I-12 I-16 I-20 I-22 I-24 I-26 I-27; fixed: I-1 I-2 I-3 I-9 I-11 I-12 I-5 I-6 I-7 I-10 I-15 I-17 I-18 I-19 I-22 I-16 I-23 I-24 I-27)
 ROADMAP:          §6.1 → IMPLEMENTATION_PLAN.md (decisions §6.4)
 OPEN_QUESTIONS:   §6.2 (Q11 Q14 Q16 Q17; Q13 answered in F-2)
 GLOSSARY:         §5.1
