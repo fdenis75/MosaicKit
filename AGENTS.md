@@ -186,7 +186,7 @@ knowledge base §5.2–§5.3.
   - `dynamic`: deprecated (removed in 2.0); laid out as `custom` (F-7, I-8).
   - `iphone`: mobile-optimized.
   - `fixedGrid`: caller-chosen rows × columns (`LayoutConfiguration.grid`); all four fit modes work (`.adaptCanvas`, `.letterbox`, `.stretch`, `.crop`; G-1…G-5). Live-preview example: `Examples/FixedGridPreviewExample.swift` (G-6). Spec: `codebase-analysis-docs/specs/SPEC_FIXED_GRID_LAYOUT.md`.
-  - `uneven`: tiles in several sizes, a bento grid of source-aspect unit cells (`UnevenTilePacker`, U-1/U-2); tiles capped at 2×2 until U-3. Spec: `codebase-analysis-docs/specs/SPEC_UNEVEN_TILES_LAYOUT.md`.
+  - `uneven`: tiles in several sizes, a bento grid of source-aspect unit cells (`UnevenTilePacker`, U-1…U-3); frames are decoded per tile size (`ThumbnailProcessor.extractionGroups`). Spec: `codebase-analysis-docs/specs/SPEC_UNEVEN_TILES_LAYOUT.md`.
 - **`AspectRatio`:** `16:9`, `4:3`, `1:1`, `21:9`, `9:16`.
 - **Codable rule:** add new keys with `decodeIfPresent` plus a default (in `MosaicConfiguration`,
   a `MissingKeyDefault` constant). A required new key breaks configs saved by older versions;

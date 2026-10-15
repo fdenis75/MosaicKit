@@ -25,7 +25,7 @@ A high-performance Swift package for generating video mosaics with Metal-acceler
 
 ### New API
 
-- **`LayoutType.uneven`: tiles in several sizes** (plan U-1, U-2, #77) — a bento grid where every larger tile is a whole multiple of the smallest (2 × 2, 3 × 3 … unit tiles), so frames are never cropped or distorted and the grid has no holes. The width is exact; the height is as close to `width / aspectRatio` as whole tiles allow. Density sets the frame count as for `.custom` and the largest tile: `XXL`/`XL` 2 ×, `L`/`M` 3 ×, `S`/`XS` 4 ×, `XXS` 5 ×. **For now tiles are at most 2 × 2**, until frames are extracted at each tile's own size (plan U-3). Fewer than 12 frames, or a source aspect outside 0.2…5, use the classic layout; `forIphone` still selects the iPhone layout. Output goes to a new folder (`5120_M_16-9_uneven`); other layouts are unchanged. Source note: `LayoutType` has a new case, so an exhaustive `switch` over it needs an `.uneven` branch (or a `default`); a configuration saved with `"uneven"` does not decode in older MosaicKit versions. Design: `codebase-analysis-docs/specs/SPEC_UNEVEN_TILES_LAYOUT.md`.
+- **`LayoutType.uneven`: tiles in several sizes** (plan U-1 to U-3, #77, #78) — a bento grid where every larger tile is a whole multiple of the smallest (2 × 2, 3 × 3 … unit tiles), so frames are never cropped or distorted and the grid has no holes. The width is exact; the height is as close to `width / aspectRatio` as whole tiles allow. Density sets the frame count as for `.custom` and the largest tile: `XXL`/`XL` 2 ×, `L`/`M` 3 ×, `S`/`XS` 4 ×, `XXS` 5 ×. Each frame is decoded at its own tile size (plan U-3), so small tiles are not shrunk from a large decode. Fewer than 12 frames, or a source aspect outside 0.2…5, use the classic layout; `forIphone` still selects the iPhone layout. Output goes to a new folder (`5120_M_16-9_uneven`); other layouts are unchanged. Source note: `LayoutType` has a new case, so an exhaustive `switch` over it needs an `.uneven` branch (or a `default`); a configuration saved with `"uneven"` does not decode in older MosaicKit versions. Design: `codebase-analysis-docs/specs/SPEC_UNEVEN_TILES_LAYOUT.md`.
 
 ## New in 1.11.0
 
@@ -978,7 +978,7 @@ Frames at several sizes in one sheet: a bento grid of video-shaped unit tiles wh
 config.layout.layoutType = .uneven
 ```
 
-Density chooses the frame count (as for `.custom`) and the largest tile (`XXL`/`XL` 2 ×, `L`/`M` 3 ×, `S`/`XS` 4 ×, `XXS` 5 ×; currently capped at 2 ×). The width is exact and the height follows whole tiles, usually within 1–2 % of `width / aspectRatio` from about 100 frames up. Below 12 frames, or for a source aspect outside 0.2…5, the classic layout is used. Unit tiles never get narrower than 120 px, and the canvas stays within the 16,384 px texture limit, header included; when either limit binds, the frame count drops.
+Density chooses the frame count (as for `.custom`) and the largest tile (`XXL`/`XL` 2 ×, `L`/`M` 3 ×, `S`/`XS` 4 ×, `XXS` 5 ×). The width is exact and the height follows whole tiles, usually within 1–2 % of `width / aspectRatio` from about 100 frames up. Below 12 frames, or for a source aspect outside 0.2…5, the classic layout is used. Unit tiles never get narrower than 120 px, and the canvas stays within the 16,384 px texture limit, header included; when either limit binds, the frame count drops.
 
 ### Dynamic Layout (deprecated)
 

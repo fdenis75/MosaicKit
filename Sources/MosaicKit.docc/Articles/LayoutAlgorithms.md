@@ -332,7 +332,7 @@ cells, so the grid has no holes.
 
 1. Density gives the frame count (as for Custom) and the largest tile side `x`: `XXL`/`XL` 2,
    `L`/`M` 3, `S`/`XS` 4, `XXS` 5. Larger tiles take about 45 % of the area, split equally
-   between sizes 2…`x`. Until frames are decoded at each tile's own size, tiles are at most 2 × 2.
+   between sizes 2…`x`. Each frame is decoded at its own tile size.
 2. The grid's columns and rows are chosen so the canvas aspect is as close as possible to the
    configured aspect ratio for that many tiles; no tile is larger than half the shorter side.
 3. Tiles are placed row by row (lowest, then leftmost free cell). A deterministic schedule
