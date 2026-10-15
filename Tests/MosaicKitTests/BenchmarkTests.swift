@@ -18,6 +18,7 @@ import MosaicKitWebP
 /// | `MOSAICKIT_BENCHMARK_CONCURRENCY` | `1,0` | Coordinator concurrency limits to measure (`0` = automatic) |
 /// | `MOSAICKIT_BENCHMARK_JSON` | — | Optional path; all measurements are also written there as JSON |
 /// | `MOSAICKIT_BENCHMARK_GRID` | — | Set to `1` to add the fixed-grid scenarios (recorded, not part of any gate) |
+/// | `MOSAICKIT_BENCHMARK_UNEVEN` | — | Set to `1` to add the uneven-layout scenarios |
 ///
 /// ```bash
 /// MOSAICKIT_BENCHMARK=/path/to/videos swift test -c release --filter BenchmarkTests
@@ -46,6 +47,8 @@ struct BenchmarkTests {
         var grid: (rows: Int, columns: Int, fit: GridFitMode)? = nil
         /// Whether frames get the per-frame shadow (the CPU-bound default).
         var shadows: Bool = true
+        /// The `uneven` layout instead of `custom`.
+        var uneven: Bool = false
     }
 
     private static let scenarios: [Scenario] = [
@@ -63,6 +66,13 @@ struct BenchmarkTests {
         Scenario(name: "mosaic-grid-6x10-letterbox", width: 5120, density: .m, gifMode: .disabled, animatedFormat: .gif, grid: (6, 10, .letterbox), shadows: true),
         Scenario(name: "mosaic-grid-6x10-crop", width: 5120, density: .m, gifMode: .disabled, animatedFormat: .gif, grid: (6, 10, .crop), shadows: true),
         Scenario(name: "mosaic-grid-20x20", width: 10_000, density: .m, gifMode: .disabled, animatedFormat: .gif, grid: (20, 20, .adaptCanvas), shadows: false),
+    ]
+
+    /// Opt-in (`MOSAICKIT_BENCHMARK_UNEVEN=1`): the uneven layout at the same width and density as
+    /// the first two `custom` scenarios, for its gate (median ≤ 1.15 × custom; spec §11).
+    private static let unevenScenarios: [Scenario] = [
+        Scenario(name: "mosaic-uneven-5120-M", width: 5120, density: .m, gifMode: .disabled, animatedFormat: .gif, uneven: true),
+        Scenario(name: "mosaic-uneven-10000-XS", width: 10_000, density: .xs, gifMode: .disabled, animatedFormat: .gif, uneven: true),
     ]
 
     private struct Measurement: Codable, Sendable {
@@ -90,7 +100,8 @@ struct BenchmarkTests {
 
         var measurements: [Measurement] = []
         let includeGrids = env["MOSAICKIT_BENCHMARK_GRID"] == "1"
-        for scenario in Self.scenarios + (includeGrids ? Self.gridScenarios : []) {
+        let includeUneven = env["MOSAICKIT_BENCHMARK_UNEVEN"] == "1"
+        for scenario in Self.scenarios + (includeGrids ? Self.gridScenarios : []) + (includeUneven ? Self.unevenScenarios : []) {
             for concurrency in concurrencies {
                 var timings: [Double] = []
                 var outputMB = 0.0
@@ -188,6 +199,7 @@ struct BenchmarkTests {
         if let grid = scenario.grid {
             config.layout = .fixedGrid(rows: grid.rows, columns: grid.columns, fit: grid.fit)
         }
+        if scenario.uneven { config.layout.layoutType = .uneven }
         config.layout.visual.addShadow = scenario.shadows
 
         let coordinator = try createDefaultMosaicCoordinator(concurrencyLimit: concurrency)

@@ -648,7 +648,7 @@ the same `planMosaic` + `composeMosaic`, so both entry points compose the same i
 | 4 | Layout | `LayoutProcessor.calculateLayout` [[F:Sources/Processing/LayoutProcessor.swift#101-205#0e830e57]] | generator actor (under `NSRecursiveLock`) | Cache key: `aspectRatio-originalAR-count-width-density-layoutType`. `.auto` is never cached. `.dynamic` is mapped to `.custom` first (F-7). For `.fixedGrid` the key gains `-grid=<R>x<C>-<fit>-<tol>-<fill>-sp=<spacing>-rh=<reservedHeight>`; for `.uneven`, `-rh=<reservedHeight>`. Invalid input returns an **empty** layout, which later throws "Empty mosaic layout" (a grid is planned first by `makeLayout`, so it throws its own typed error instead). `.iphone` forces width 1200, 1 column, max height 8000. |
 | 5 | Aspect normalization | `planMosaic`: `adjustedConfig.updateAspectRatio(AspectRatio.findNearest(to: layout.mosaicSize))` | generator actor | The config passed down may carry a **different** `layout.aspectRatio` than the caller set. Path/filename generation still uses the caller's original `config`. |
 | 6 | Header | `ThumbnailProcessor.createMetadataHeader` | generator actor (synchronous CPU) | Only when `includeMetadata`. Height is added on top of the layout height. |
-| 7 | Frame extraction | `ThumbnailProcessor.processedFramesStream` [[F:Sources/Processing/ThumbnailProcessor.swift#140-212#1b12c1a3]] | producer `Task` on the global executor | One `AVAssetImageGenerator` with the batched `images(for:)` API. `maximumSize` = largest cell × `decodeQualityScale` (1). Tolerance ±1 s, or 0 when `useAccurateTimestamps`. Sampling: first 20 % of frames in the first 33 % of the 5–95 % window, 60 % in the middle, 20 % in the last third [[F:Sources/Processing/ThumbnailProcessor.swift#505-538#1b12c1a3]]. Any `.failure` throws: mosaics are strict (**no placeholder frames**). |
+| 7 | Frame extraction | `ThumbnailProcessor.processedFramesStream` [[F:Sources/Processing/ThumbnailProcessor.swift#153-238#ab4751a8]] | producer `Task` on the global executor | One `AVAssetImageGenerator` with the batched `images(for:)` API. `maximumSize` = largest cell × `decodeQualityScale` (1). Exception (U-3): when the largest cell is more than 2.05× the smallest (`.uneven`), `extractionGroups` splits the indices by tile size and each group gets its own generator sized to its tile; groups decode in parallel (one feeder each, 8-frame labeling window each), each in time order. Tolerance ±1 s, or 0 when `useAccurateTimestamps`. Sampling: first 20 % of frames in the first 33 % of the 5–95 % window, 60 % in the middle, 20 % in the last third [[F:Sources/Processing/ThumbnailProcessor.swift#659-697#ab4751a8]]. Any `.failure` throws: mosaics are strict (**no placeholder frames**). |
 | 8 | Labeling + color sampling | same | child tasks, **≤ 8 in flight** | Each frame is labeled (`addTimestampToImage`). If Color DNA is on, `OverlayProcessor.averageColor` goes into `FrameColorCollector`. Results are yielded **out of order**; the index travels with each frame. |
 | 9 | Background | `processImagesToMTLTexture` [[F:Sources/Processing/MetalImageProcessor.swift#580-700#04cfcb88]] | caller of `generateMosaicStream` (nonisolated) | Takes the first ≤ 5 frames. Up to 3 of them go to `DominantColors` (`.fair`, `.euclidean`, excluding black, white, and gray). The 3 lightest colors form a diagonal gradient, blurred with a CIGaussianBlur of radius 12. Falls back to gray 0.1 (or 0.5 inside the helper). When `useMovieColorsForBg == false`, uses a solid `backgroundColor`. |
 | 10 | Compositing | `generateMosaicStream` [[F:Sources/Processing/MetalImageProcessor.swift#864-998#04cfcb88]], `processBatch` @L1000, `renderFrame` @L1077 | nonisolated async | One setup command buffer (fill + header), awaited. Frames are then rendered in **20-frame command buffers**, committed without waiting. Each frame: `createTexture(from: CGImage)`, `scaleTexture` if the size differs, `compositeTexture`, optional `addBorder`. The shadow path draws a CPU `CGContext` shadow and composites that. Duplicate or out-of-range indices throw. **All** positions must be filled, or it throws "Missing mosaic frames". |
@@ -1227,8 +1227,10 @@ backbone. Read `LayoutProcessor` algorithms, `ThumbnailProcessor` header/label r
   `UnevenTilePacker` (internal, pure, deterministic): a bento lattice of source-aspect unit
   cells with `k × k` tiles, so every tile keeps the source aspect and coverage is exact (spec
   `specs/SPEC_UNEVEN_TILES_LAYOUT.md` §4). Count from density as for `.custom`; largest span
-  from the density factor (`unevenMaxSpan`: XXL/XL 2, L/M 3, S/XS 4, XXS 5), **capped at 2
-  (`unevenSpanCap`) until U-3**. Fewer than 12 frames or a source aspect outside 0.2…5 use
+  from the density factor (`unevenMaxSpan`: XXL/XL 2, L/M 3, S/XS 4, XXS 5). Frames are decoded
+  per tile size (U-3): `ThumbnailProcessor.extractionGroups` splits the indices by span when the
+  largest cell is more than 2.05× the smallest, one `AVAssetImageGenerator` per group with
+  `maximumSize` = that tile, decoding in parallel; every other layout keeps one generator. Fewer than 12 frames or a source aspect outside 0.2…5 use
   `.classic`. Unit tiles ≥ 120 px; height ≤ 16384 − `reservedHeight` (the generator passes
   `fixedGridReservedHeight`, which also covers a fixed header taller than the estimate). The
   cache key gets `-rh=` for `.uneven` only. `thumbnailSize` is the unit tile. `forIphone` still
@@ -2560,7 +2562,7 @@ with the code.
 | 11 | Performance exploration (always benchmark against the batched path): CVPixelBuffer → Metal zero-copy path, GPU-side frame treatment, moving encoding off the generator actor, the VideoToolbox constant-quality factor for SJS | §4.3, §4.9 | Throughput is a hard requirement | L |
 | 12 | ~~Root-cause the intermittent native export stall~~ (done: macOS background scheduling, #46). Remaining: have the macOS stall retry wait until the app is active again, as iOS waits for foreground, and document background exporting for apps | I-26 | A stalled export fails after 120 s and retries while still throttled | S |
 | 13 | **Fixed rows × columns layout** (`LayoutType.fixedGrid`): spec merged (#66); G-1 model, validation and hash, G-2 `.adaptCanvas` layout, G-3 sampling/overlays ⚡ and G-4 `.letterbox`/`.stretch`, G-5 `.crop` ⚡ and G-6 docs and examples done; released in 1.11.0; G-7 (saliency crop) optional | — (feature) | Maintainer request 2026-10-15; [specs/SPEC_FIXED_GRID_LAYOUT.md](specs/SPEC_FIXED_GRID_LAYOUT.md) | M each |
-| 14 | **Uneven tiles layout** (`LayoutType.uneven`): spec merged (#67, all Q-U recommendations agreed); U-1 packer (#77) and U-2 layout type done; U-3 per-size extraction ⚡ next, then 1.12.0. See `IMPLEMENTATION_PLAN.md` §8 | — | Maintainer request | M |
+| 14 | **Uneven tiles layout** (`LayoutType.uneven`): spec merged (#67, all Q-U recommendations agreed); U-1 packer (#77), U-2 layout type (#78) and U-3 per-size extraction ⚡ done; 1.12.0 next. See `IMPLEMENTATION_PLAN.md` §8 | — | Maintainer request | M |
 
 ### 6.2 Open questions (still unresolved)
 
@@ -2616,7 +2618,7 @@ P1 = core feature, P2 = supporting, P3 = docs/infra.
 | 6 | P0 | `Sources/Processing/Preview/PreviewGeneratorCoordinator.swift` | code | 492 | 092dc7ff | Preview batch (`runBatch`), concurrency cap 2 @L402, retry @L425 |
 | 7 | P0 | `Sources/Models/MosaicConfiguration.swift` | model | 698 | a2091850 | Config + path templating + format enums |
 | 8 | P0 | `Sources/Models/PreviewConfiguration.swift` | model | 817 | ee2900f9 | Config + extract math + path templating |
-| 9 | P1 | `Sources/Processing/ThumbnailProcessor.swift` | code | 1629 | aad3be57 | Frame stream @L140, GIF frames @L76, header @L598/862 |
+| 9 | P1 | `Sources/Processing/ThumbnailProcessor.swift` | code | 1784 | ab4751a8 | Frame stream @L140, GIF frames @L76, header @L598/862 |
 | 10 | P1 | `Sources/Processing/MetalImageProcessor.swift` | code | 1336 | 04cfcb88 | Metal pipeline, `generateMosaicStream` @L864, DominantColors @L601 |
 | 11 | P1 | `Sources/Processing/LayoutProcessor.swift` | code | 662 | 0e830e57 | Layout algorithms, cache @L22/135/182 |
 | 12 | P1 | `Sources/Models/VideoInput.swift` | model | 139 | 6b6bfcbf | Unit of work |
@@ -2657,7 +2659,7 @@ P1 = core feature, P2 = supporting, P3 = docs/infra.
 | 47 | P3 | `MosaicKit-DeepDive.md` | doc | 199 | 1e67bef6 | Stale architecture |
 | 48 | P3 | `CLAUDE.md` | doc | 397 | 46c1bd5d | Agent guide (rewritten 2026-09-26; points to this doc; keep mirrored) |
 | 49 | P3 | `AGENTS.md` | doc | 397 | 477b4c7b | Agent guide (rewritten 2026-09-26; points to this doc; keep mirrored) |
-| 50 | P2 | `Tests/MosaicKitTests/BenchmarkTests.swift` | test | 231 | 3ac1e33b | Opt-in throughput benchmark (`MOSAICKIT_BENCHMARK`); gate for ⚡ plan steps |
+| 50 | P2 | `Tests/MosaicKitTests/BenchmarkTests.swift` | test | 263 | bbb82fad | Opt-in throughput benchmark (`MOSAICKIT_BENCHMARK`); gate for ⚡ plan steps |
 | 51 | P2 | `Tests/MosaicKitTests/LegacyConfigurationDecodingTests.swift` | test | 199 | fc113746 | Pinned 1.0.0, 1.3.2, 1.7.0 + minimal config payloads (I-24 guard) |
 | 52 | P2 | `Tests/MosaicKitTests/RotatedSourceTests.swift` | test | 57 | ecc0463c | Rotated portrait fixture; I-1 regression test |
 | 53 | P2 | `Tests/MosaicKitTests/PreviewExportSmokeTests.swift` | test | 109 | 8b5a4333 | Only end-to-end preview export in CI (native) |
@@ -2682,8 +2684,8 @@ P1 = core feature, P2 = supporting, P3 = docs/infra.
 | 72 | P2 | `Tests/MosaicKitTests/FixedGridFixedAspectTests.swift` | test | 278 | 5a8cd65d | Letterbox, stretch and crop geometry, rejections, final aspect (G-4, G-5) |
 | 73 | P1 | `Sources/Processing/UnevenTilePacker.swift` | code | 338 | 8a0b8cef | Uneven-tiles bento packer (internal, pure; U-1) |
 | 74 | P2 | `Tests/MosaicKitTests/UnevenTilePackerTests.swift` | test | 304 | ca2d0309 | Packer coverage, gutters, aspect, counts, goldens, limits (U-1) |
-| 75 | P1 | `Sources/Processing/LayoutProcessor+Uneven.swift` | code | 67 | 1ad25b87 | `calculateUnevenLayout`, fallbacks, density → span table, span cap (U-2) |
-| 76 | P2 | `Tests/MosaicKitTests/UnevenLayoutTests.swift` | test | 160 | c78e5eba | `.uneven` Codable, hash, cap, fallbacks, reserve, end-to-end (U-2) |
+| 75 | P1 | `Sources/Processing/LayoutProcessor+Uneven.swift` | code | 64 | f7adfb39 | `calculateUnevenLayout`, fallbacks, density → span table, span cap (U-2) |
+| 76 | P2 | `Tests/MosaicKitTests/UnevenLayoutTests.swift` | test | 178 | 6765b8bd | `.uneven` Codable, hash, density table, extraction groups, fallbacks, reserve, end-to-end (U-2, U-3) |
 
 Excluded or low value: `Media.xcassets/**` (binary fixture), `Tests/MosaicKitTests/embeddedAsset/test_video.mp4`
 (87 s 8-bit H.264 video-only fixture), `scripts/**` + `Makefile` (xcodebuild agent scaffold for a

@@ -163,43 +163,66 @@ public final class ThumbnailProcessor: Sendable {
         let (stream, continuation) = AsyncThrowingStream<(Int, CGImage), Error>.makeStream()
         let processor = self
         let sizes = layout.thumbnailSizes
-        let generator = configureGenerator(for: asset, accurate: accurate, preview: false, layout: layout, crop: crop)
-        let cancellation = ImageGeneratorCancellation(generator)
+        // One generator per tile size when sizes differ by more than 2× (the uneven layout), so a
+        // small tile is not decoded at the largest tile's size and shrunk by the GPU (U-3). Every
+        // other layout keeps a single generator, as before.
+        let groups = Self.extractionGroups(for: sizes)
+        let generators = groups.map { group in
+            configureGenerator(for: asset, accurate: accurate, preview: false, layout: layout, crop: crop,
+                               cellIndices: groups.count > 1 ? group : nil)
+        }
+        let cancellation = ImageGeneratorCancellation(generators)
         nonisolated(unsafe) let assetRef = asset
-        nonisolated(unsafe) let generatorRef = generator
+        nonisolated(unsafe) let generatorRefs = generators
         let producer = Task {
             do {
                 let duration = try await assetRef.load(.duration).seconds
                 let times = calculateExtractionTimes(duration: duration, count: layout.positions.count, policy: sampling)
-                var index = 0
-                try await withThrowingTaskGroup(of: (Int, CGImage).self) { group in
-                    var pending = 0
-                    for try await result in generatorRef.images(for: times) {
-                        try Task.checkCancellation()
-                        guard case .success(_, let image, let actualTime) = result else {
-                            throw MosaicError.processingFailed("Frame extraction failed")
-                        }
-                        let frameIndex = index
-                        index += 1
-                        group.addTask {
-                            // Crop once, so the ColorDNA strip samples what the cell shows.
-                            let image = crop.map { Self.croppedCenter(image, toAspect: $0.aspect) } ?? image
-                            await collectColor?(frameIndex, image)
-                            let labeled = processor.addTimestampToImage(
-                                image: image, timestamp: processor.formatTimestamp(seconds: actualTime.seconds),
-                                frameIndex: frameIndex, size: sizes[frameIndex], labelConfig: labelConfig
-                            )
+                // Decodes one group's frames with its generator and labels them, at most 8 at a time.
+                @Sendable func feed(_ indices: [Int], _ generator: AVAssetImageGenerator) async throws {
+                    try await withThrowingTaskGroup(of: (Int, CGImage).self) { group in
+                        var pending = 0
+                        var position = 0
+                        for try await result in generator.images(for: indices.map { times[$0] }) {
                             try Task.checkCancellation()
-                            return (frameIndex, labeled)
+                            guard case .success(_, let image, let actualTime) = result else {
+                                throw MosaicError.processingFailed("Frame extraction failed")
+                            }
+                            let frameIndex = indices[position]
+                            position += 1
+                            group.addTask {
+                                // Crop once, so the ColorDNA strip samples what the cell shows.
+                                let image = crop.map { Self.croppedCenter(image, toAspect: $0.aspect) } ?? image
+                                await collectColor?(frameIndex, image)
+                                let labeled = processor.addTimestampToImage(
+                                    image: image, timestamp: processor.formatTimestamp(seconds: actualTime.seconds),
+                                    frameIndex: frameIndex, size: sizes[frameIndex], labelConfig: labelConfig
+                                )
+                                try Task.checkCancellation()
+                                return (frameIndex, labeled)
+                            }
+                            pending += 1
+                            if pending >= 8, let result = try await group.next() {
+                                continuation.yield(result)
+                                pending -= 1
+                            }
                         }
-                        pending += 1
-                        if pending >= 8, let result = try await group.next() {
+                        while let result = try await group.next() {
                             continuation.yield(result)
-                            pending -= 1
                         }
                     }
-                    while let result = try await group.next() {
-                        continuation.yield(result)
+                }
+                if groups.count == 1 {
+                    try await feed(groups[0], generatorRefs[0])
+                } else {
+                    // Several tile sizes decode at the same time, so small and large tiles do not
+                    // wait for each other; each group keeps its own 8-frame labeling window.
+                    try await withThrowingTaskGroup(of: Void.self) { feeders in
+                        for (indices, generator) in zip(groups, generatorRefs) {
+                            nonisolated(unsafe) let generator = generator
+                            feeders.addTask { try await feed(indices, generator) }
+                        }
+                        try await feeders.waitForAll()
                     }
                 }
                 continuation.finish()
@@ -218,7 +241,7 @@ public final class ThumbnailProcessor: Sendable {
         file: URL, layout: MosaicLayout, asset: AVAsset, accurate: Bool
     ) -> AsyncThrowingStream<(index: Int, image: CGImage, timestamp: String), Error> {
         let generator = configureGenerator(for: asset, accurate: accurate, preview: false, layout: layout)
-        let cancellation = ImageGeneratorCancellation(generator)
+        let cancellation = ImageGeneratorCancellation([generator])
         nonisolated(unsafe) let assetRef = asset
         nonisolated(unsafe) let generatorRef = generator
         let (stream, continuation) = AsyncThrowingStream<(index: Int, image: CGImage, timestamp: String), Error>.makeStream()
@@ -540,7 +563,8 @@ public final class ThumbnailProcessor: Sendable {
         accurate: Bool,
         preview: Bool,
         layout: MosaicLayout,
-        crop: FrameCrop? = nil
+        crop: FrameCrop? = nil,
+        cellIndices: [Int]? = nil
     ) -> AVAssetImageGenerator {
         signposter.emitEvent("configureGenerator")
         let intervalState = signposter.beginInterval("configureGenerator")
@@ -559,8 +583,10 @@ public final class ThumbnailProcessor: Sendable {
         }
         
         if !preview {
-            var width = layout.thumbnailSizes.map(\.width).max() ?? layout.thumbnailSize.width
-            var height = layout.thumbnailSizes.map(\.height).max() ?? layout.thumbnailSize.height
+            // The largest cell this generator decodes for: all cells, or only `cellIndices`.
+            let cells = cellIndices.map { $0.map { layout.thumbnailSizes[$0] } } ?? layout.thumbnailSizes
+            var width = cells.map(\.width).max() ?? layout.thumbnailSize.width
+            var height = cells.map(\.height).max() ?? layout.thumbnailSize.height
             if let crop {
                 // The generator fits the frame *inside* this box, so for a crop the box must be big
                 // enough for the frame to cover the cell on both axes (spec section 3.6).
@@ -574,6 +600,25 @@ public final class ThumbnailProcessor: Sendable {
         return generator
     }
     
+    /// Frame indices grouped by tile size, each group in index (time) order. One group holding
+    /// every index unless the largest cell is more than twice as wide as the smallest: then each
+    /// whole multiple of the smallest width (the uneven layout's spans) gets its own group, so
+    /// frames are decoded at their own tile size. The groups are ordered by their first index.
+    static func extractionGroups(for sizes: [CGSize]) -> [[Int]] {
+        let widths = sizes.map(\.width)
+        guard let smallest = widths.min(), let largest = widths.max(), smallest > 0, largest > 2.05 * smallest else {
+            return [Array(sizes.indices)]
+        }
+        var groups: [Int: [Int]] = [:]
+        var order: [Int] = []
+        for (index, width) in widths.enumerated() {
+            let key = Int((width / smallest).rounded())
+            if groups[key] == nil { order.append(key) }
+            groups[key, default: []].append(index)
+        }
+        return order.compactMap { groups[$0] }
+    }
+
     /// A fixed grid in `.crop` mode: every decoded frame is cut to `aspect` (the drawn frame's width
     /// over its height), keeping the center. `sourceAspect` is the video's display aspect ratio.
     struct FrameCrop: Sendable, Equatable {
@@ -1733,7 +1778,7 @@ public final class ThumbnailProcessor: Sendable {
 /// Sendable cancellation handle for AVAssetImageGenerator, whose cancellation
 /// API is explicitly safe to call while an asynchronous image request is pending.
 private final class ImageGeneratorCancellation: @unchecked Sendable {
-    private let generator: AVAssetImageGenerator
-    init(_ generator: AVAssetImageGenerator) { self.generator = generator }
-    func cancel() { generator.cancelAllCGImageGeneration() }
+    private let generators: [AVAssetImageGenerator]
+    init(_ generators: [AVAssetImageGenerator]) { self.generators = generators }
+    func cancel() { generators.forEach { $0.cancelAllCGImageGeneration() } }
 }

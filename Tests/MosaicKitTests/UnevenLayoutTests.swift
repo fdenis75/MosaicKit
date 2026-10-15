@@ -52,14 +52,32 @@ struct UnevenLayoutTests {
         }
     }
 
-    @Test("Until per-size extraction lands, no tile is larger than 2 × 2 unit tiles")
-    func spanCap() {
-        for density in [DensityConfig.m, .s, .xxs] {
+    @Test("The largest tile follows the density table")
+    func largestTile() {
+        for (density, span) in [(DensityConfig.xl, 2), (.m, 3), (.s, 4), (.xxs, 5)] {
             let result = layout(count: 400, density: density)
             let unit = result.thumbnailSize.width
             let widest = result.thumbnailSizes.map(\.width).max() ?? 0
-            #expect(widest > unit * 1.5, "\(density.name): a larger tile exists")
-            #expect(widest < unit * 2.5, "\(density.name): no tile above 2 × 2")
+            #expect(abs(widest / unit - CGFloat(span)) < 0.25, "\(density.name): widest \(widest) for unit \(unit)")
+        }
+    }
+
+    @Test("Frames are extracted per tile size for the uneven layout, in one group for every other layout")
+    func extractionGroups() {
+        let uneven = layout(count: 107, density: .m)
+        let groups = ThumbnailProcessor.extractionGroups(for: uneven.thumbnailSizes)
+        #expect(groups.count == 3)
+        #expect(groups.flatMap { $0 }.sorted() == Array(0..<uneven.thumbCount))
+        for group in groups {
+            #expect(group == group.sorted())
+            let widths = group.map { uneven.thumbnailSizes[$0].width }
+            #expect((widths.max() ?? 0) - (widths.min() ?? 0) <= 2)
+        }
+        let processor = LayoutProcessor()
+        for type in [LayoutType.custom, .classic, .iphone] {
+            let other = processor.calculateLayout(originalAspectRatio: 16.0 / 9, mosaicAspectRatio: .widescreen,
+                                                  thumbnailCount: 107, mosaicWidth: 5120, density: .m, layoutType: type)
+            #expect(ThumbnailProcessor.extractionGroups(for: other.thumbnailSizes) == [Array(other.thumbnailSizes.indices)], "\(type)")
         }
     }
 
@@ -67,7 +85,7 @@ struct UnevenLayoutTests {
     func matchesPacker() {
         let result = layout()
         let plan = UnevenTilePacker.plan(sourceAspect: 16.0 / 9, targetAspect: 16.0 / 9, width: 5120, count: 107,
-                                         maxSpan: LayoutProcessor.unevenSpanCap)
+                                         maxSpan: LayoutProcessor.unevenMaxSpan(for: .m))
         let expected = UnevenTilePacker.layout(for: plan, width: 5120, sourceAspect: 16.0 / 9)
         #expect(result.thumbCount == expected.thumbCount)
         #expect(result.positions.map(\.x) == expected.positions.map(\.x))

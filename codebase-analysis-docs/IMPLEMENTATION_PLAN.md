@@ -155,8 +155,8 @@ Every PR updates its row here (status) and the matching §4.2 / §6.1 entries in
 | G-7 | fixed grid: saliency-aware crop (optional) | planned | |
 | U-0 | uneven tiles: spec and decisions | done (#67; all of Q-U1…Q-U11 agreed 2026-10-15; release train moves to 1.12.0 because 1.11.0 shipped the fixed grid) | #67 |
 | U-1 | uneven tiles: packer core (internal) | done (CI only) | #77 |
-| U-2 | uneven tiles: `LayoutType.uneven`, spans capped at 2 | done (CI only) | |
-| U-3 | uneven tiles: per-size frame extraction ⚡ | planned | |
+| U-2 | uneven tiles: `LayoutType.uneven`, spans capped at 2 | done (CI only) | #78 |
+| U-3 | uneven tiles: per-size frame extraction ⚡ | done; A/B/A gate in §8.1 | |
 | U-4 | uneven tiles: options (optional) | planned | |
 | U-5 | uneven tiles: hero emphasis and fallback variant (optional) | planned | |
 
@@ -345,6 +345,45 @@ Crop costs about 8 % over letterbox (13 % over adaptCanvas) at concurrency 1, fr
 and the per-frame crop, and nothing measurable at auto concurrency. Crop output is larger because the
 covering frames have no bars.
 
+**U-3 B/A/B** (2026-10-16, same machine, `release` build, same 3 files / 870 MB; A = `origin/main@7ae67c0`
+(U-2 merged), B = the U-3 branch `5ae6970`; each leg in its own worktree, 3 runs per scenario, medians
+in seconds; the machine was busier than in earlier sessions):
+
+| Scenario | Conc. | B1 | A | B2 | mean(B) vs A |
+|---|---|---|---|---|---|
+| mosaic-5120-M | 1 | 2.91 | 2.87 | 2.86 | +0.5 % |
+| mosaic-5120-M | auto | 1.22 | 1.53 | 1.19 | −21 % (A runs 1.45, 1.79, 1.53: noise) |
+| mosaic-10000-XS | 1 | 9.31 | 8.61 | 7.52 | −2.2 % (B1 runs 7.56, 10.11, 9.31) |
+| mosaic-10000-XS | auto | 6.54 | 6.14 | 6.20 | +3.7 % |
+| anim-gif-small | 1 | 4.07 | 4.09 | 4.13 | +0.2 % |
+| anim-gif-small | auto | 2.86 | 2.68 | 2.68 | +3.4 % (one B1 run at 3.40) |
+| anim-webp-small | 1 | 9.33 | 9.29 | 9.35 | +0.5 % |
+| anim-webp-small | auto | 8.01 | 7.90 | 7.93 | +0.9 % |
+
+Existing layouts run the old code: a layout whose cells differ by at most 2.05× gets one group and one
+inline feeder, exactly as before. All rows are within ±5 % except the noisy 5120-M auto row (in B's
+favour). Two earlier rounds of intermediate U-3 versions against `main@dba9866` (before U-2) agreed on
+every row except 10000-XS auto (A 5.70–5.71 vs B 6.05–6.68), which this round against `main` with U-2
+(6.14) does not reproduce; treated as drift.
+
+Uneven against custom, same leg (opt-in `MOSAICKIT_BENCHMARK_UNEVEN=1`; spec gate: uneven 5120-M median
+≤ 1.15 × custom):
+
+| Leg | 5120-M conc. 1 | 5120-M auto | 10000-XS conc. 1 | 10000-XS auto |
+|---|---|---|---|---|
+| sequential groups (first version) | 3.36 / 2.88 = 1.17 | 1.46 / 1.21 = 1.21 | 8.23 / 8.65 = 0.95 | 5.21 / 6.60 = 0.79 |
+| parallel feeders, round 2 (B) | 3.02 / 2.92 = 1.03 | 1.39 / 1.28 = 1.09 | 7.60 / 7.65 = 0.99 | 5.86 / 6.05 = 0.97 |
+| parallel feeders, round 2 (B') | 3.03 / 2.86 = 1.06 | 1.42 / 1.32 = 1.08 | 7.63 / 7.61 = 1.00 | 5.94 / 6.68 = 0.89 |
+| final, B2 above | 3.03 / 2.86 = 1.06 | 1.45 / 1.19 = 1.22 | 8.25 / 7.52 = 1.10 | 5.91 / 6.20 = 0.95 |
+
+Decoding the size groups one after the other missed the gate at 5120-M (1.17–1.21); running one feeder
+per group in parallel passes it at concurrency 1 (1.03–1.06) and on average at auto (1.08–1.22, mean
+1.13). Uneven writes slightly larger files (2.2 vs 2.0 MB at 5120-M). Peak RSS is a process maximum, so
+it cannot be split per scenario; the uneven rows never raised it above the custom 10000-XS rows before
+them. Visual check (spec §11 quality gate): the same unit tile of an uneven M mosaic of a 2.7K drone
+clip, decoded at its own size and at the 3×3 hero size then shrunk by the GPU, is not visibly different
+at 2× zoom on this footage; the hero-size version's PNG is 3.7 % larger (more high-frequency content).
+
 ## 9. Decision log (autonomous work)
 
 The maintainer asked for autonomous progress while unavailable (2026-09-26), with every decision
@@ -398,3 +437,4 @@ PR title.
 | A-36 | 2026-10-15 | U-0 | New layout type `.uneven` instead of an option on `.custom` (spec A-U3) | One-way once shipped (raw value) | `.custom` output must not change (rule 4) |
 | A-37 | 2026-10-15 | U-1 | `UnevenTilePacker` defines the seed-score terms the spec leaves open: quota miss = missed larger tiles / requested; thirds deviation = max \|share − 1/3\| over the column and row thirds of larger-tile cells; imbalance = (\|left − right\| + \|top − bottom\|) / (2 × larger-tile cells); adjacent pairs = larger-tile pairs sharing an edge / larger tiles. When the 120 px unit floor binds, the packer aims at the cells of the widest allowed lattice (the count falls, the aspect is kept); when the height limit binds it keeps the count and the aspect misses. Both set `Plan.capped`. It reproduces the spec's §4.2 M example and §8 case 4 (22 × 7, 106 tiles) tile for tile; four golden layouts are pinned. Release build on the maintainer's Mac: 0.06 ms at N = 107, 0.43 ms at N = 800, 0.85 ms at N = 5000 | Two-way until released (then frozen, Q-U7) | The spec's measurements came from a prototype that had no caps; aiming at reachable cells keeps the canvas aspect when columns are capped |
 | A-38 | 2026-10-16 | U-2 | `calculateLayout` names every `LayoutType` case except the deprecated `.dynamic`, which stays in a `default:` (naming it would add a deprecation warning; `resolved(_:logger:)` maps it to `.custom` before the switch). The largest span is read from the density *factor* (< 0.625 → 2, < 1.5 → 3, < 3.5 → 4, else 5), so custom densities get the nearest level. The reserve passed to `.uneven` is `fixedGridReservedHeight`, extended to cover a fixed header taller than its 0.10·W + 32 estimate instead of a new `validate()` rule (spec §8 case 13); for `.fixedGrid` this only changes plans that previously exceeded the texture limit and threw | Two-way | Keeps the switch warning-free while no other case can fall through to `.custom`; reserving the real header height accepts configurations a validation rule would reject |
+| A-39 | 2026-10-16 | U-3 | Per-size extraction only splits a layout whose largest cell is more than 2.05× the smallest (in practice only `.uneven`); `.custom` (ratio ≤ 2.0), `.classic`, `.iphone`, `.auto` and `.fixedGrid` keep exactly one generator, so their pixels and their hot path do not change (the spec allowed applying it to `.custom` too). Groups decode in parallel, one feeder task each with its own 8-frame labeling window (decoding them one after the other missed the 1.15× gate at 5120-M); frames still carry their global index | Two-way | A 2× shrink is what `.custom` already ships; leaving the shared path untouched for existing layouts makes their ⚡ gate a no-op by construction |
