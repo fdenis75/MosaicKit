@@ -142,7 +142,7 @@ Every PR updates its row here (status) and the matching §4.2 / §6.1 entries in
 | F-5 | planned | |
 | F-6 | done (I-22) | #56 |
 | F-7 | done (I-8, I-9) | #55 |
-| F-8 | in progress, split into small PRs: **F-8a done** (I-18, I-19; #59), **F-8b done** (I-5/6/7; #60). Remaining: F-8c I-17 (discovery), F-8d I-10 (⚡ swatches) | #59, #60 |
+| F-8 | in progress, split into small PRs: **F-8a done** (I-18, I-19; #59), **F-8b done** (I-5/6/7; #60), **F-8c done** (I-17; #63). Remaining: F-8d I-10 (⚡ swatches) | #59, #60, #63 |
 
 ### 8.1 Benchmark baseline
 

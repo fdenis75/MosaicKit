@@ -129,6 +129,14 @@ rather not construct `VideoInput` values by hand:
 let videos = await scanVideos(in: URL(fileURLWithPath: "/path/to/folder"), recursive: true)
 ```
 
+`discoverVideos(in:recursive:)` inspects every file and throws on the first one it can't read. To keep going and get the failures as data, use `discoverVideosReportingFailures(in:recursive:)`:
+
+```swift
+let report = try await discoverVideosReportingFailures(in: folder, recursive: true)
+// report.videos: [VideoInput]; report.failures: [(url, error)], both in filename order
+for failure in report.failures { print("Skipped \(failure.url.lastPathComponent): \(failure.error)") }
+```
+
 For persisted queues, keep a lightweight ``VideoSource`` and inspect it when a worker starts:
 
 ```swift

@@ -21,7 +21,7 @@ A high-performance Swift package for generating video mosaics with Metal-acceler
 
 ## Unreleased
 
-- Nothing yet. Add a line here for every change; output-naming and location changes (📁) also get a **Behavior changes** note.
+- **`discoverVideosReportingFailures(in:recursive:metadataConcurrency:)`** (I-17) — new discovery function that keeps going past files it can't inspect (an `.mkv` AVFoundation can't read, a corrupt file, an undecodable codec on iOS). It returns a `VideoDiscoveryReport` with `videos` (inspected, in filename order) and `failures` (`VideoDiscoveryFailure` with the file `url` and the `error`). `discoverVideos(in:recursive:metadataConcurrency:)` is unchanged: it still throws on the first failing file.
 
 ## New in 1.9.1
 
