@@ -207,27 +207,30 @@ public enum OverlayProcessor {
 
     // MARK: - Watermark helpers
 
-    /// The share of the canvas height a watermark may fill at most.
+    /// The share of the canvas height a clamped watermark fills.
     static let maximumWatermarkHeightFraction: CGFloat = 0.8
 
     /// The size an image watermark is drawn at: `scale` of the canvas width, keeping the image's
-    /// aspect ratio, and shrunk when that would be taller than 80 % of the canvas (a strip, such
-    /// as a one-row grid, is much wider than tall).
+    /// aspect ratio. Only when it would not fit with its margin (10 % of its width) is it shrunk to
+    /// 80 % of the canvas height (a strip, such as a one-row grid, is much wider than tall), so
+    /// every canvas where it used to fit renders unchanged.
     static func imageWatermarkSize(imageSize: CGSize, canvas: CGSize, scale: CGFloat) -> CGSize {
         guard imageSize.width > 0, imageSize.height > 0, canvas.width > 0, canvas.height > 0 else { return .zero }
         var width = canvas.width * scale
         var height = width * imageSize.height / imageSize.width
         let limit = canvas.height * maximumWatermarkHeightFraction
-        if height > limit {
+        if height + width * 0.1 > canvas.height {
             width *= limit / height
             height = limit
         }
         return CGSize(width: width, height: height)
     }
 
-    /// The font size of a text watermark: `scale` of the canvas width, at most 80 % of the canvas height.
+    /// The font size of a text watermark: `scale` of the canvas width, reduced to 80 % of the
+    /// canvas height only when it would not fit with its margin (half the font size).
     static func watermarkFontSize(canvas: CGSize, scale: CGFloat) -> CGFloat {
-        min(canvas.width * scale, canvas.height * maximumWatermarkHeightFraction)
+        let size = canvas.width * scale
+        return size * 1.5 > canvas.height ? min(size, canvas.height * maximumWatermarkHeightFraction) : size
     }
 
     private static func applyTextWatermark(

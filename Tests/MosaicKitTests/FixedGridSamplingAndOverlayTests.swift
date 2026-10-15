@@ -127,7 +127,7 @@ struct FixedGridSamplingAndOverlayTests {
 
     // MARK: - Watermark clamp (S7)
 
-    @Test("An image watermark never gets taller than 80 % of the canvas")
+    @Test("An image watermark that would not fit is shrunk to 80 % of the canvas height")
     func imageWatermarkSizing() {
         let square = CGSize(width: 1000, height: 1000)
         // A normal canvas: width × scale, aspect kept, unchanged from before.
@@ -139,6 +139,9 @@ struct FixedGridSamplingAndOverlayTests {
         // A wide logo on the strip keeps its aspect ratio when it is shrunk.
         let wide = OverlayProcessor.imageWatermarkSize(imageSize: CGSize(width: 400, height: 200), canvas: CGSize(width: 5120, height: 286), scale: 0.5)
         #expect(abs(wide.width / wide.height - 2) < 1e-9 && wide.height <= 286 * 0.8 + 1e-9, "got \(wide)")
+        // Existing layouts: a big watermark that still fits with its margin is not touched.
+        let big = OverlayProcessor.imageWatermarkSize(imageSize: square, canvas: CGSize(width: 5120, height: 2880), scale: 0.5)
+        #expect(big == CGSize(width: 2560, height: 2560))
         #expect(OverlayProcessor.imageWatermarkSize(imageSize: .zero, canvas: CGSize(width: 100, height: 100), scale: 0.1) == .zero)
         // Text: the font size follows the same limit.
         #expect(OverlayProcessor.watermarkFontSize(canvas: CGSize(width: 5120, height: 2880), scale: 0.05) == 256)
