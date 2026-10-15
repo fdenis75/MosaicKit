@@ -2471,7 +2471,7 @@ case .layout(let layout, let width, let notes): print(layout.positions.count, wi
 case .infeasible(let issue, let suggestions): print(issue.explanation, suggestions)
 }
 cfg.layout = .fixedGrid(rows: 4, columns: 6, fit: .letterbox)
-_ = try await MetalMosaicGenerator().generate(for: video, config: cfg)   // infeasible → invalidConfiguration
+_ = try await MetalMosaicGenerator().generate(for: video, config: cfg)   // infeasible → invalidConfiguration; video can't fill it → invalidVideo
 ```
 
 ### 5.7 Output artifact naming reference

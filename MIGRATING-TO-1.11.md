@@ -88,9 +88,12 @@ config.layout.grid = GridSpecification(rows: 4, columns: 6, fit: .crop,
   (`maximumCellCount`), frames at least 40 px on their short side (`minimumFrameSide`),
   `aspectTolerance` in 0…0.25, `minimumFill` in 0.1…1, at least 4 cells when `gifMode` is on.
 - **Errors:** everything that does not need the video is checked by `MosaicConfiguration.validate()`;
-  the rest (unknown video dimensions, the fit checks) is checked before any frame is decoded. Both
-  throw `MosaicError.invalidConfiguration(String)` with the numbers and a way out, for example
-  "…Use fit .adaptCanvas, or another grid".
+  the rest is checked before any frame is decoded. A grid the caller can change (cells too small,
+  too tall, aspect mismatch, fill too low) throws `MosaicError.invalidConfiguration(String)` with
+  the numbers and a way out, for example "…Use fit .adaptCanvas, or another grid". A video that
+  cannot fill the grid throws `MosaicError.invalidVideo(String)`: unknown dimensions (inspect it
+  with `VideoInput(from:)`), or fewer distinct frames than cells (more than 90 % of
+  `duration × frameRate`). Catch both if you show the message to the user.
 - **Animated exports** use `rows × columns` frames at the source aspect (they are never cropped).
 
 ### 3.2 Plan it without a video (live preview)
