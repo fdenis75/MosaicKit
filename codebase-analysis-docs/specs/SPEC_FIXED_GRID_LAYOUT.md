@@ -158,7 +158,7 @@ extension LayoutProcessor {
         mosaicAspectRatio: AspectRatio,
         mosaicWidth: Int,
         spacing: CGFloat = LayoutConfiguration.default.spacing,
-        reservedHeight: Int = 0              // header + ColorDNA strip, see §3.4
+        reservedHeight: Int = 0              // header + ColorDNA strip, see §3.4 (estimate for adaptCanvas, exact for fixed-aspect modes)
     ) -> FixedGridPlan
 }
 
@@ -209,16 +209,26 @@ computed property `layoutToken`, used by `configurationHash` **and** both `{layo
 | `layoutType` | `layoutToken` | Example hash |
 |---|---|---|
 | every existing type | `rawValue` (unchanged) | `5120_M_16-9_custom` (unchanged) |
-| `.fixedGrid`, `.adaptCanvas` | `fixedGrid-<R>x<C>` | `5120_M_16-9_fixedGrid-6x8` |
-| `.fixedGrid`, other `fit` | `fixedGrid-<R>x<C>-<fit>` | `5120_M_16-9_fixedGrid-6x8-letterbox` |
+| `.fixedGrid`, `.adaptCanvas` | `fixedGrid-<R>x<C>-sp<S>` | `5120_M_16-9_fixedGrid-6x8-sp4` |
+| `.fixedGrid`, other `fit` | `fixedGrid-<R>x<C>-<fit>-tol<T>-sp<S>` | `5120_M_16-9_fixedGrid-6x8-letterbox-tol2-sp4` |
+
+`<S>` is the **effective** spacing, `max(4, spacing)` (values below 4 behave as 4, §3.1), written
+without trailing zeros (`4`, `12`, `7.5`). `<T>` is `aspectTolerance` as a percentage, same
+formatting (`0.02` → `tol2`, `0.035` → `tol3.5`); it is only present for the fixed-aspect
+modes, because `.adaptCanvas` never reads it. The rule: **the token contains every grid
+parameter that can change the pixels of a produced image** (`rows`, `columns`, `fit`,
+`aspectTolerance` where it is read, and `spacing`, which sets the inset and therefore the cell
+geometry). `minimumFill` is deliberately absent: it only decides whether a request is accepted
+and never alters an accepted image. Without this, with `overwrite == false` a config that
+differs only in spacing or tolerance would silently get the earlier file back.
 
 Consequences, all deliberate:
 - **No existing output moves** (rule 4). New layout, new paths, so no 📁 changelog line is
   needed beyond "new layout".
-- `aspectTolerance`, `minimumFill` and `spacing` are not in the hash (same as `spacing` today;
-  `spacing` is not in it either). Changing them with skip-if-exists on returns the older file.
-  This matches current behavior for every other option that is not in the hash, and is
-  documented in the README row.
+- Grid-specific output parameters are all in the token (above), so changing spacing, tolerance
+  or fit never returns a stale file. Options shared with every layout that are not in the hash
+  today (`spacing` for other layouts, `useAccurateTimestamps`, frame label settings, …) keep
+  their current behavior; the README states that skip-if-exists keys on the hash only.
 - `density` stays in the hash even though it no longer sets the frame count (§3.5). Changing
   density regenerates an identical image. Removing it from the hash for grids would break the
   `<width>_<density>_…` shape that tooling may parse. Recommended: keep (open question O7).
@@ -243,8 +253,12 @@ no `defaultLocalization`; adding one changes `Package.swift`). They always state
 numbers, and **one concrete way out**, for example:
 
 > `Invalid mosaic configuration: a 5 × 5 grid in a 9:16 mosaic would squeeze 16:9 frames by 3.16×
-> (cells are 0.56:1, the video is 1.78:1). Use fit .adaptCanvas, or a grid such as 10 × 3
-> (5.7 % off), 13 × 4 (3.1 %) or 19 × 6 (0.6 %).`
+> (cells are 0.56:1, the video is 1.78:1). Use fit .adaptCanvas, or a grid such as 18 × 6
+> (1.9 % off), 21 × 7 (1.8 %) or 24 × 8 (1.8 %).`
+
+(Those three satisfy the default 2 % tolerance at W = 5120 with the default 256 px header; with
+`includeMetadata = false` the nearest are 16 × 5 (1.6 %), 19 × 6 (0.7 %), 22 × 7 (0.1 %). The
+suggestion list is computed per request, not fixed.)
 
 **No new `MosaicError` case.** `MosaicError` is a public non-frozen enum; adding a case is a
 source break for clients with exhaustive `switch` (SwiftPM sources have no library evolution).
@@ -320,8 +334,11 @@ Properties (checked by the property tests in §7):
 ```
 planFixed(R, C, W, A, s, e, mode, tol, minFill, Hmax):
     Wc = W
-    Hc = round(Wc / A)                          // grid area; header and ColorDNA come on top
-    if Hc > Hmax: Wc = floor(Hmax · A); Hc = Hmax          // note .widthReduced
+    O  = headerHeight(Wc) + dnaHeight           // overlay heights, exact (see 3.4)
+    Hf = round(Wc / A)                          // FINAL canvas height, keeps the aspect
+    Hc = Hf − O                                 // grid area = what is left for the cells
+    if Hf > 16384: Wc = floor(16384 · A); recompute O, Hf, Hc   // note .widthReduced
+    if Hc < R · minShort + (R−1)·g: infeasible(.cellsTooSmall)
     cw = floor((Wc − (C−1)·g) / C);  ch = floor((Hc − (R−1)·g) / R)
     σ  = (cw − e) / (ch − e)                    // slot aspect after the render inset
     m  = max(σ/s, s/σ) − 1                      // relative mismatch
@@ -357,7 +374,8 @@ The layout reports `mosaicSize` for the **cell area only**; the header is compos
 strip is appended afterwards on the CPU (`OverlayProcessor.applyColorDNA`). The texture check
 (`validateTextureSize(mosaicSize)`, :895) sees cells + header, **not** the strip.
 
-So the planner receives `reservedHeight`:
+So the planner receives `reservedHeight` (an **upper-bound estimate** for `.adaptCanvas`, whose
+height is derived from the cells and only needs a limit check):
 
 ```
 reservedHeight = headerReserve + (overlay.colorDNA.show ? colorDNA.height : 0)
@@ -370,6 +388,29 @@ up to roughly 9 %), and the density-based minimum is capped for grids as below, 
 exceed `W/20 × 1.0 × 2 = 0.10·W` (XXS density, portrait canvas). The final
 `validateTextureSize` remains the safety net. The ColorDNA height is
 added to the check for **grids** because it is a real extension of the canvas (§4.3 row S6).
+
+**Fixed-aspect modes: the final image keeps the aspect.** The renderer puts the header and the
+strip *on top of* `layout.mosaicSize`, so a grid area of `W/A` would make the final image taller
+than configured (16:9, W = 5120: grid area 5120 × 2880 + 256 px header = 5120 × 3136, aspect 1.63,
+not 1.78). Rule: **the target is the final canvas, and the overlays are subtracted from the grid
+area**:
+
+```
+finalHeight = round(W / A)
+gridHeight  = finalHeight − headerHeight − colorDNAHeight      (headerHeight = 0 if includeMetadata is false;
+                                                                colorDNAHeight = 0 if the strip is off)
+```
+
+Example: 16:9, W = 5120, header 256, strip 24 → `finalHeight` 2880, `gridHeight` 2600, the
+cells are laid out in 5120 × 2600, and the final image is exactly 5120 × 2880. This needs the
+**exact** header height before layout. It does not depend on the cells once the grid header cap
+above applies (the minimum-height rule then only sees `min(cellHeight, W/20)`), so G-3 extracts
+the height computation of `createMetadataHeader` into a pure helper
+`ThumbnailProcessor.metadataHeaderHeight(for:width:…)` (no behavior change) that both the
+planner and the header renderer call. The `layout.aspectRatio` re-snap (`updateAspectRatio`)
+then compares `layout.mosaicSize` (grid area, aspect ≈ 1.97 in the example, still nearest to
+16:9) and only influences header font scaling, so it is left as is. In `.adaptCanvas` the final
+aspect is whatever the grid yields, so no subtraction is needed there.
 
 **Header minimum-height cap (grids only).** `createMetadataHeader` raises the header to
 `thumbnailHeight × (0.3…1.0)`, doubled for portrait canvases (`ThumbnailProcessor.swift:686`).
@@ -492,11 +533,11 @@ exactly those that never match on a fixed canvas.
 | 3 × 3 | 0.56 | **216 %** | squeezed to 32 % of its width |
 | 5 × 5 | 0.56 | **216 %** | same, any square grid |
 | 4 × 6 | 0.375 | **375 %** | |
-| 10 × 3 | 1.875 | 5.7 % | usable with `.stretch` at 10 %, not at 5 % |
+| 10 × 3 | 1.875 | 5.7 % | study only: needs `aspectTolerance` ≥ 0.06; not a default-tolerance suggestion |
 | 16 × 5 | 1.8 | 1.6 % | |
 | 19 × 6 | 1.78 | 0.6 % | |
 
-(Errors include the 4 px gutters; the cell aspect column is the gutter-free `A·R/C`.) Only **14 of 900** grids (1.6 %) are within 5 % for this pair; the smallest are 13 × 4 (3.1 %),
+(Errors include the 4 px gutters; the cell aspect column is the gutter-free `A·R/C`.) Within the default 2 % only 18 grids up to 50 × 50 qualify (16 × 5, 19 × 6, 22 × 7, 25 × 8, …). Only **14 of 900** grids (1.6 %) up to 30 × 30 are within 5 % for this pair; the smallest are 13 × 4 (3.1 %),
 16 × 5 (1.6 %), 19 × 6 (0.6 %). Fixed-aspect mode therefore needs a good error and suggestions
 (§2.4), and the default must not depend on the aspect preset. Other sets (grids within 5 %):
 16:9 in 4:3: 33 grids, smallest 4 × 3; 16:9 in 21:9: 33 grids, smallest 3 × 4; 21:9 in 9:16: 13
@@ -557,8 +598,8 @@ time/sampling, `P` pipeline interplay, `B` batch/other).
 
 | ID | Case | Example | What goes wrong | Recommended behavior |
 |---|---|---|---|---|
-| A1 | Fixed canvas, grid not on the `C/R ≈ A/s` line | 16:9 video, 9:16 mosaic, 5 × 5 | Cells are 0.56:1; frames squeezed by 3.16× (216 % error); §4.2 | Default `.adaptCanvas` avoids it. In `.stretch`: **Reject** `aspectMismatch` + suggestions (10 × 3, 13 × 4, 19 × 6). In `.letterbox`/`.crop`: fill 0.32 < 0.5 → **Reject** `fillTooLow` + the same suggestions |
-| A2 | Moderate mismatch, fixed canvas | 16:9 video, 16:9 mosaic, 3 × 4: cell aspect 1.33 (33 % error) | Visible stretch | Fill is 0.75, so letterbox/crop are allowed (fill ≥ 0.5); `.stretch` rejects with suggestions (3 × 3, 4 × 4, 5 × 5) |
+| A1 | Fixed canvas, grid not on the `C/R ≈ A/s` line | 16:9 video, 9:16 mosaic, 5 × 5 | Cells are 0.56:1; frames squeezed by 3.16× (216 % error); §4.2 | Default `.adaptCanvas` avoids it. In `.stretch`: **Reject** `aspectMismatch` + suggestions (18 × 6, 21 × 7, 24 × 8 with the default header; 16 × 5, 19 × 6, 22 × 7 without). In `.letterbox`/`.crop`: fill 0.32 < 0.5 → **Reject** `fillTooLow` + the same suggestions |
+| A2 | Moderate mismatch, fixed canvas | 16:9 video, 16:9 mosaic, 3 × 4: cell aspect 1.33 (33 % error) | Visible stretch | Fill is 0.75, so letterbox/crop are allowed (fill ≥ 0.5); `.stretch` rejects with suggestions (3 × 3, 4 × 4, 2 × 2 without a header) |
 | A3 | Mismatch within tolerance | 4:3 video, 16:9 mosaic, 3 × 4: cell 1.333 vs 1.333, error 0.0 % | Letterbox would add 0-px bars | Within `aspectTolerance` (2 %): **stretch**, no bars, no crop; `.stretched` note |
 | A4 | Source aspect unknown or wrong | `VideoInput(url:)` swallowed inspection errors, so `width`/`height` are `nil`; `planMosaic` substitutes `1.0` (`MetalMosaicGenerator.swift:325`) | A 16:9 clip gets square cells: 78 % stretch, silently, for every layout today | For grids **Reject** `unknownSourceAspect` ("inspect the video first: `VideoInput(from:)`") rather than guess. (Alternative: load the first track's display size in `planMosaic`; O14) |
 | A5 | Rotated phone video | 9:16 clip (stored 640 × 360, 90° transform) | Pre-F-1 sources were reported 16:9: cells 216 % off. Fixed in F-1 (`RotatedSourceTests`) | Rely on F-1; add a grid test on `rotated_portrait.mp4` (portrait cells). Document that `s` must be the **display** aspect |
@@ -753,19 +794,20 @@ animated suite). Use `@Test(arguments:)`.
 
 | # | Property / case | How |
 |---|---|---|
-| 1 | **Count**: `thumbCount == positions.count == thumbnailSizes.count == R·C` | sweep `R, C ∈ {1,2,3,4,5,7,10,16,30,50}`, 5 source aspects, widths {1000, 2000, 5120, 10000}, spacing {4, 6, 12, 20} |
+| 1 | **Count (feasible grids only)**: `thumbCount == positions.count == thumbnailSizes.count == R·C` | sweep `R, C ∈ {1,2,3,4,5,7,10,16,30,50}`, 5 source aspects, widths {1000, 2000, 5120, 10000}, spacing {4, 6, 12, 20}, **filtered by a reference predicate** (`R·C ≤ 1000` and frame short side ≥ 40) so e.g. 50 × 50 and 50 columns at width 1000 are excluded here |
+| 1b | **Excluded combinations are infeasible with the intended issue** | the complement of the sweep in 1 must return `.infeasible`: `R·C > 1000` → `.tooManyCells`; frame short side < 40 → `.cellsTooSmall`; `R` or `C` outside 1…50 → `.invalidCount`. Asserts the issue case and its numbers, and that no layout is produced (e.g. 50 × 50 → `tooManyCells(2500, 1000)`; 1 × 50 at W = 1000 → `cellsTooSmall`, cells 16 px wide) |
 | 2 | **No overlap** | cells are regular: check neighbors in row and column directions, plus a full pairwise check for a sampled subset (n ≤ 200) |
 | 3 | **Inside the canvas**: `x + w ≤ canvas.w`, `y + h ≤ canvas.h`, `x, y ≥ 0` | same sweep |
 | 4 | **Exact gutters**: horizontal and vertical neighbor distance equals 4 | same sweep |
 | 5 | **Bounded aspect error** (`.adaptCanvas`): inset frame `(w − e)/(h − e)` within `0.5/(h−e) + 1e-9` of `s` (≤ 1.25 % once `minShort` holds) | sweep; proves the `e` compensation |
-| 6 | **Width is a maximum**: `canvas.w ≤ W`, `W − canvas.w < C` unless shrunk; `canvas.h ≤ 16384 − reserved` | sweep incl. G4, G10 |
+| 6 | **Width is a maximum**: `canvas.w ≤ W`, `W − canvas.w < C` unless shrunk; `canvas.h ≤ 16384 − reserved`; in fixed-aspect modes `canvas.h + header + strip == round(canvas.w / A)` (final aspect kept) | feasible sweep incl. G4, G10 |
 | 7 | **Determinism**: two calls, and a third on a fresh `LayoutProcessor`, return equal values; **golden positions** for 6 configs pinned as literals | |
 | 8 | **Row-major order**: `positions[i]` has non-decreasing `y`, and within a row increasing `x`; index `i` ↔ `(i/C, i%C)` | |
-| 9 | **Cache**: two grids differing only in `R`, `C`, `fit` or spacing do not share an entry; existing keys unchanged (golden string) | |
-| 10 | **Fixed-aspect modes**: letterbox frames keep `s` within 1 px; fill = predicted; crop `retained` = predicted; stretch within `tol` or rejected; suggestions all satisfy `m ≤ tol` and appear in order | table-driven from §4.2 (16:9 in 9:16, 5 × 5 → `.fillTooLow` and 10 × 3 / 13 × 4 / 19 × 6 suggested) |
+| 9 | **Cache**: two grids differing only in `R`, `C`, `fit`, tolerance, fill or spacing do not share an entry; existing keys unchanged (golden string) | |
+| 10 | **Fixed-aspect modes**: letterbox frames keep `s` within 1 px; fill = predicted; crop `retained` = predicted; stretch within `tol` or rejected; suggestions all satisfy `m ≤ tol` and appear in order | table-driven from §4.2 (16:9 in 9:16, 5 × 5 → `.fillTooLow`; with the header off the suggestions are exactly the grids within 2 % nearest to 25 cells: 16 × 5, 19 × 6, 22 × 7; the test recomputes each one and asserts `m ≤ tol`) |
 | 11 | **Validation table**: each G/T/S row gives the stated error text fragment | |
 | 12 | **Codable**: round trip; old pinned payloads (`mosaic-config-1.0.0/1.3.2/1.7.0/legacy-minimal.json`) decode and **re-encode without a `grid` key**; a payload without `fit`/`aspectTolerance`/`minimumFill` decodes with defaults | never edit the pinned fixtures |
-| 13 | **Hash/paths**: the three golden forms (§2.3); existing layouts' hashes byte-identical; `{layout}` token; animation file name | extends `MosaicConfigurationTests` |
+| 13 | **Hash/paths**: the golden forms (§2.3); changing only `spacing` (4 → 12), only `aspectTolerance` (in a fixed-aspect mode) or only `fit` changes the hash and path, while changing only `aspectTolerance` or `minimumFill` under `.adaptCanvas` / only `minimumFill` does not; existing layouts' hashes byte-identical; `{layout}` token; animation file name; skip-if-exists with `overwrite == false` does not return a file made with different spacing | extends `MosaicConfigurationTests` |
 | 14 | **`calculateThumbnailCount`** returns `R·C` for a 3 s duration | covers the early-return trap |
 
 ### 7.2 Integration tests (embedded media, kept small)
@@ -807,28 +849,42 @@ become the basis for the cell cap (O3) and the animated-grid cap (O12).
 
 ### 8.1 Open questions for the maintainer
 
-Each has a recommendation; none blocks writing G-1.
+Each has a recommendation. **Decisions (maintainer, PR #66 review, 2026-10-15):** silence on a
+question means the recommendation is accepted; all are accepted except O5, which is pending
+clarification (his comment there was "see q3").
 
-| # | Question | Recommendation |
-|---|---|---|
-| O1 | Default fit mode | **`.adaptCanvas`**: only 3 % of grids work on a fixed canvas (§4.2) |
-| O2 | Raw value / case name | `fixedGrid` (descriptive, cannot be confused with `classic`, which is also a grid) |
-| O3 | Limits | 50 per axis, 1000 cells, 40 px frame short side. Re-tune after the first benchmark runs |
-| O4 | Sampling for grids | **Uniform, cell-centered over 5…95 %** as a parameter of the shared function; other layouts keep 20/60/20 |
-| O5 | Width semantics | "Width is a maximum"; canvas trimmed to the grid (loses < C px) and shrunk to fit 16,384 |
-| O6 | `forIphone` vs grid | Grid wins; `forIphone` keeps header styling |
-| O7 | Density with grids | Ignored for the count, kept in the hash; documented. (Alternative: reject non-default density: too hostile, every config has one) |
-| O8 | Requested aspect in the hash for `.adaptCanvas` | Keep (simplicity, stable shape). Cost: switching only the aspect preset regenerates an identical image |
-| O9 | Ship `.stretch` in the first release? | No: ship `.adaptCanvas` first (G-2), then `.letterbox` + `.stretch` (G-4), then `.crop` (G-5) |
-| O10 | Crop target | Center crop first; saliency later and opt-in |
-| O11 | Header cap constant | `W/20` for grids only. Fixing the rule for all layouts is a separate, output-changing issue (📁) |
-| O12 | Animated grids | Minimum 4 cells; recommend ≤ 200 cells until I-20 (streaming) lands; soft limit in docs, hard limit later if needed |
-| O13 | Release | Additive public API ⇒ **minor**: 1.11.0 after 1.10.0 (F-4/F-5 stay postponed; G-1…G-3 would be the headline) |
-| O14 | Unknown source dimensions | Reject for grids now; load the first video track's display size in `planMosaic` as a later fix for all layouts (A4) |
-| O15 | Typed errors | Reuse `invalidConfiguration`/`invalidVideo`; a `MosaicError.gridInfeasible(FixedGridIssue)` case can come with 2.0 |
-| O16 | Fast-mode duplicates (T4) | Log only; do not silently switch to accurate timestamps (slower) |
-| O17 | Column-major / other orders | Not in v1; `GridSpecification` can gain `order` later with `decodeIfPresent` |
-| O18 | Auto-hide labels on tiny tiles | Out of scope; advisory log only |
+| # | Question | Recommendation | Decision |
+|---|---|---|---|
+| O1 | Default fit mode | **`.adaptCanvas`**: only 3 % of grids work on a fixed canvas (§4.2) | agreed 2026-10-15 |
+| O2 | Raw value / case name | `fixedGrid` (descriptive, cannot be confused with `classic`, which is also a grid) | agreed 2026-10-15 |
+| O3 | Limits | 50 per axis, 1000 cells, 40 px frame short side. Re-tune after the first benchmark runs | agreed 2026-10-15 |
+| O4 | Sampling for grids | **Uniform, cell-centered over 5…95 %** as a parameter of the shared function; other layouts keep 20/60/20 | agreed 2026-10-15 |
+| O5 | Width semantics | "Width is a maximum"; canvas trimmed to the grid (loses < C px) and shrunk to fit 16,384 | **pending maintainer clarification** |
+| O6 | `forIphone` vs grid | Grid wins; `forIphone` keeps header styling | agreed 2026-10-15 |
+| O7 | Density with grids | Ignored for the count, kept in the hash; documented. (Alternative: reject non-default density: too hostile, every config has one) | agreed 2026-10-15 |
+| O8 | Requested aspect in the hash for `.adaptCanvas` | Keep (simplicity, stable shape). Cost: switching only the aspect preset regenerates an identical image | agreed 2026-10-15 |
+| O9 | Ship `.stretch` in the first release? | No: ship `.adaptCanvas` first (G-2), then `.letterbox` + `.stretch` (G-4), then `.crop` (G-5) | agreed 2026-10-15 |
+| O10 | Crop target | Center crop first; saliency later and opt-in | agreed 2026-10-15 |
+| O11 | Header cap constant | `W/20` for grids only. Fixing the rule for all layouts is a separate, output-changing issue (📁) | agreed 2026-10-15 |
+| O12 | Animated grids | Minimum 4 cells; recommend ≤ 200 cells until I-20 (streaming) lands; soft limit in docs, hard limit later if needed | agreed 2026-10-15 |
+| O13 | Release | Additive public API ⇒ **minor**: 1.11.0 after 1.10.0 (F-4/F-5 stay postponed; G-1…G-3 would be the headline) | agreed 2026-10-15 |
+| O14 | Unknown source dimensions | Reject for grids now; load the first video track's display size in `planMosaic` as a later fix for all layouts (A4) | agreed 2026-10-15 |
+| O15 | Typed errors | Reuse `invalidConfiguration`/`invalidVideo`; a `MosaicError.gridInfeasible(FixedGridIssue)` case can come with 2.0 | agreed 2026-10-15 |
+| O16 | Fast-mode duplicates (T4) | Log only; do not silently switch to accurate timestamps (slower) | agreed 2026-10-15 |
+| O17 | Column-major / other orders | Not in v1; `GridSpecification` can gain `order` later with `decodeIfPresent` | agreed 2026-10-15 |
+| O18 | Auto-hide labels on tiny tiles | Out of scope; advisory log only | agreed 2026-10-15 |
+
+Decision log (style of `IMPLEMENTATION_PLAN.md` §9; all two-way until code ships):
+
+| # | Date | Context | Decision | Type | Rationale |
+|---|---|---|---|---|---|
+| A-G1 | 2026-10-15 | O1, O2, O9 | `.adaptCanvas` is the default; case name `fixedGrid`; fixed-aspect modes ship after it (G-4, G-5) | Two-way (spec only) | 97 % of grids deform on a fixed canvas (§4.2) |
+| A-G2 | 2026-10-15 | O3, O12 | Limits 50 per axis, 1000 cells, 40 px frame short side; animated grids need ≥ 4 cells and are advised ≤ 200 | Two-way | Re-tune after the first benchmark runs |
+| A-G3 | 2026-10-15 | O4 | Grids use uniform, cell-centered sampling over 5…95 %; other layouts keep 20/60/20 | Two-way | Left-to-right reading needs even time steps |
+| A-G4 | 2026-10-15 | O6, O7, O8 | The grid wins over `forIphone`; density is ignored for the count but stays in the hash; the requested aspect stays in the hash | Two-way | Stable hash shape; explicit request is more specific |
+| A-G5 | 2026-10-15 | O10, O11, O17, O18 | Center crop first, saliency later; header cap `W/20` for grids only; no other frame orders; no label auto-hiding | Two-way | Keeps v1 small |
+| A-G6 | 2026-10-15 | O13–O16 | Minor release (1.11.0) after 1.10.0; reject unknown source dimensions; reuse existing typed errors; log fast-mode duplicates | Two-way | Additive API; no new `MosaicError` case before 2.0 |
+| A-G7 | 2026-10-15 | O5 | **Pending maintainer clarification** ("width is a maximum" vs another reading of his "see q3"); the spec text is unchanged | n/a | Awaiting answer |
 
 ### 8.2 Phased implementation plan
 
@@ -839,16 +895,16 @@ is new, so no existing output moves.
 | ID | PR | Contents | Gate | Size |
 |---|---|---|---|---|
 | G-0 | **Decisions** | Maintainer answers O1–O18 (or accepts the recommendations); this spec is merged | none | docs |
-| G-1 | **Model, validation, hash** | `GridFitMode`, `GridSpecification`, `LayoutType.fixedGrid`, `LayoutConfiguration.grid` (+ `fixedGrid(rows:columns:)`), `validate()` rules, `layoutToken` in `configurationHash` and both `{layout}` maps. No rendering yet: `planMosaic` throws a clear "not available in this build" `invalidConfiguration` for `.fixedGrid` until G-2. Tests: Codable, legacy fixtures re-encode unchanged, hash goldens, validation table. KB F13/F12/§5.2/§5.3/§5.5/§5.7 | CI | ~250 lines |
-| G-2 | **`.adaptCanvas` layout** ⚡ | `LayoutProcessor.planFixedGrid` (adapt mode), `calculateLayout` case + cache-key suffix, `calculateThumbnailCount` branch, `effectiveLayoutType` + `makeLayout` helpers (P1, P2), pre-decode planning errors, `reservedHeight`, `FixedGridPlan`/`Issue`/`Note`. Property tests 1–9, 12, 14; integration tests with `test_video.mp4` and `rotated_portrait.mp4`. KB F3/F4/§2.3/§3.14/§4.5 | CI + ⚡ (existing scenarios unchanged) | ~400 lines |
-| G-3 | **Sampling, header cap, overlays** ⚡ | `uniform` sampling policy (mosaic and animation), grid header cap `W/20`, ColorDNA in the height limit, watermark clamp, T3 distinct-frame check, animation ≥ 4 cells, T4 log. Tests 11 (T/H rows), strip watermark. KB F5/F6/§4.1 rule 9 | CI + ⚡; benchmark `mosaic-grid-6x10` recorded | ~250 lines |
-| G-4 | **Fixed-aspect modes without cropping** | `.letterbox` and `.stretch`, `aspectTolerance`, `minimumFill`, suggestion search, error text with suggestions, `FixedGridPlan` notes. Property test 10 | CI | ~300 lines |
+| G-1 | **Model, validation, hash** | `GridFitMode`, `GridSpecification`, `LayoutType.fixedGrid`, `LayoutConfiguration.grid` (+ `fixedGrid(rows:columns:)`), `validate()` rules, `layoutToken` in `configurationHash` and both `{layout}` maps. **The new case is handled explicitly everywhere, with no fall-through:** `LayoutProcessor.calculateLayout` gets its own `case .fixedGrid` (returns the empty layout, never the `default` branch that would lay it out as `.custom`), and `MosaicConfiguration.validate()` throws `invalidConfiguration("fixedGrid layout is not available in this build yet")` after the other checks, so every entry point (`generate`, `generateMosaicImage`, coordinators) fails before any decode. G-2 deletes that throw. Tests: Codable, legacy fixtures re-encode unchanged, hash goldens (incl. spacing/tolerance/fit), validation table, and "`.fixedGrid` never produces a `.custom` layout". KB F13/F12/§5.2/§5.3/§5.5/§5.7 | CI | ~250 lines |
+| G-2 | **`.adaptCanvas` layout** ⚡ | `LayoutProcessor.planFixedGrid` (adapt mode), `calculateLayout` case + cache-key suffix, `calculateThumbnailCount` branch, `effectiveLayoutType` + `makeLayout` helpers (P1, P2), pre-decode planning errors, `reservedHeight`, `FixedGridPlan`/`Issue`/`Note`, removal of the G-1 "not available" throw. Property tests 1, 1b, 2–9, 12, 14; integration tests with `test_video.mp4` and `rotated_portrait.mp4`. KB F3/F4/§2.3/§3.14/§4.5 | CI + ⚡ (existing scenarios unchanged) | ~400 lines |
+| G-3 | **Sampling, header cap, overlays** ⚡ | `uniform` sampling policy (mosaic and animation), grid header cap `W/20` and the pure `metadataHeaderHeight` helper (needed by G-4), ColorDNA in the height limit, watermark clamp, T3 distinct-frame check, animation ≥ 4 cells, T4 log. Tests 11 (T/H rows), strip watermark. KB F5/F6/§4.1 rule 9 | CI + ⚡; benchmark `mosaic-grid-6x10` recorded | ~250 lines |
+| G-4 | **Fixed-aspect modes without cropping** | `.letterbox` and `.stretch`, `aspectTolerance`, `minimumFill`, final-canvas aspect rule (§3.4: overlay heights subtracted from the grid area), suggestion search, error text with suggestions, `FixedGridPlan` notes. Property tests 6 (fixed-aspect clause) and 10 | CI | ~300 lines |
 | G-5 | **`.crop` mode** ⚡ | Larger decode box and `CGImage.cropping` in `processedFramesStream`; tests with the rotated fixture; benchmark crop scenario | CI + ⚡ | ~150 lines |
 | G-6 | **Docs and examples** | README layout table + "Unreleased", DocC `LayoutAlgorithms.md`/`QuickStart.md`, `Examples/` SwiftUI `Canvas` preview using `planFixedGrid`, CLAUDE.md/AGENTS.md mirror, KB §1.6/§1.8/§5.6/§6.1, `model-schema.mmd`. (Smaller doc edits already land with G-1…G-5 per the plan rule.) | CI | docs |
 | G-7 | *(optional)* **Saliency-aware crop** ⚡ | Vision attention saliency shifts the crop window; opt-in `GridFitMode.cropSmart` or a flag; per-frame cost measured first | CI + ⚡ + measurement | ~200 lines |
 | X-1 | *(separate issues, not part of G)* | Spacing inset deformation in other layouts (S3); header minimum scaling (H1); unknown dimensions (A4) | per issue | |
 
-**Dependencies.** G-1 → G-2 → G-3; G-4 needs G-2; G-5 needs G-4; G-6 closes the series. G-2 and
+**Dependencies.** G-1 → G-2 → G-3; G-4 needs G-3 (header-height helper); G-5 needs G-4; G-6 closes the series. G-2 and
 G-3 are the minimum useful release (`.adaptCanvas`, correct sampling, safe overlays).
 
 **Risk summary.** Highest: P2/P1 wiring in `MetalMosaicGenerator` (three places derive the
