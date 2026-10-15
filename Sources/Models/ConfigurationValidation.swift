@@ -60,6 +60,63 @@ extension MosaicConfiguration {
         if (format == .webp && gifMode != .gifOnly) || (gifMode != .disabled && animatedFormat == .webp) {
             guard MosaicKitWebPSupport.encoder != nil else { throw MosaicKitWebPError.encoderNotRegistered }
         }
+        try validateFixedGrid()
+    }
+
+    /// Checks a ``LayoutType/fixedGrid`` configuration. Only the configuration is known here; the
+    /// checks that need the source video (its aspect ratio, frame count) run when the layout is
+    /// planned.
+    private func validateFixedGrid() throws {
+        guard layout.layoutType == .fixedGrid else { return }
+        guard let grid = layout.grid else {
+            throw MosaicError.invalidConfiguration("The fixedGrid layout needs LayoutConfiguration.grid (rows and columns)")
+        }
+        let axisRange = 1...GridSpecification.maximumAxisCount
+        guard axisRange.contains(grid.rows), axisRange.contains(grid.columns) else {
+            throw MosaicError.invalidConfiguration(
+                "A grid needs between 1 and \(GridSpecification.maximumAxisCount) rows and columns (got \(grid.rows) × \(grid.columns))"
+            )
+        }
+        let cells = grid.rows * grid.columns
+        guard cells <= GridSpecification.maximumCellCount else {
+            throw MosaicError.invalidConfiguration(
+                "A grid may have at most \(GridSpecification.maximumCellCount) cells (\(grid.rows) × \(grid.columns) is \(cells))"
+            )
+        }
+        guard grid.aspectTolerance.isFinite, (0...0.25).contains(grid.aspectTolerance) else {
+            throw MosaicError.invalidConfiguration("The grid aspect tolerance must be finite and between 0 and 0.25")
+        }
+        guard grid.minimumFill.isFinite, (0.1...1).contains(grid.minimumFill) else {
+            throw MosaicError.invalidConfiguration("The grid minimum fill must be finite and between 0.1 and 1")
+        }
+        if gifMode != .disabled, cells < 4 {
+            throw MosaicError.invalidConfiguration(
+                "Animated exports need at least 4 cells (a \(grid.rows) × \(grid.columns) grid has \(cells))"
+            )
+        }
+        // A frame is the cell minus the extra inset the renderer applies for spacing above 4 px.
+        let gutter = 4
+        // `spacing` is finite and nonnegative (checked above) but can be astronomically large; clamp it
+        // before the Int conversion, which would trap. Such a value is rejected by the frame-size rule below.
+        let inset = Int(min(max(layout.spacing.rounded() - Double(gutter), 0), 1_000_000))
+        let frameWidth = (width - (grid.columns - 1) * gutter) / grid.columns - inset
+        guard frameWidth >= GridSpecification.minimumFrameSide else {
+            let usable = max(1, (width + gutter) / (GridSpecification.minimumFrameSide + gutter + inset))
+            throw MosaicError.invalidConfiguration(
+                "\(grid.columns) columns at width \(width) leave frames \(max(frameWidth, 0)) px wide; the minimum is \(GridSpecification.minimumFrameSide) px. Use at most \(usable) columns or a larger width"
+            )
+        }
+        if grid.fit != .adaptCanvas {
+            let canvasHeight = Int((Double(width) / Double(layout.aspectRatio.ratio)).rounded())
+            let frameHeight = (canvasHeight - (grid.rows - 1) * gutter) / grid.rows - inset
+            guard frameHeight >= GridSpecification.minimumFrameSide else {
+                throw MosaicError.invalidConfiguration(
+                    "\(grid.rows) rows in a \(layout.aspectRatio.rawValue) canvas of width \(width) leave frames \(max(frameHeight, 0)) px tall; the minimum is \(GridSpecification.minimumFrameSide) px. Use fewer rows, a larger width, or fit .adaptCanvas"
+                )
+            }
+        }
+        // Plan G-2 implements the layout engine and deletes this.
+        throw MosaicError.invalidConfiguration("The fixedGrid layout is not available in this build yet")
     }
 }
 

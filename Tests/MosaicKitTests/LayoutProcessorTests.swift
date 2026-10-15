@@ -197,7 +197,7 @@ struct LayoutProcessorTests {
         let decoded = try JSONDecoder().decode(LayoutType.self, from: Data(#""dynamic""#.utf8))
         #expect(decoded.rawValue == "dynamic")
         #expect(!LayoutType.allCases.contains(decoded))
-        #expect(LayoutType.allCases.count == 4)
+        #expect(LayoutType.allCases == [.auto, .custom, .classic, .iphone, .fixedGrid])
     }
 
     // MARK: - calculateLayout: auto (I-9)

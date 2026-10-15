@@ -21,6 +21,7 @@ A high-performance Swift package for generating video mosaics with Metal-acceler
 
 ## Unreleased
 
+- **`LayoutType.fixedGrid` and `GridSpecification` (work in progress, plan G-1)** — the model for a layout where you choose the number of rows and columns (`LayoutConfiguration.fixedGrid(rows:columns:)`, `LayoutConfiguration.grid`, fit modes `adaptCanvas`, `letterbox`, `crop`, `stretch`). The layout engine is not written yet, so a configuration that uses it fails `validate()` with "The fixedGrid layout is not available in this build yet"; the design is in `codebase-analysis-docs/specs/SPEC_FIXED_GRID_LAYOUT.md`. Source note: `LayoutType` has a new case, so an exhaustive `switch` over it needs a `.fixedGrid` branch (or a `default`).
 - Nothing yet. Add a line here for every change; output-naming and location changes (📁) also get a **Behavior changes** note.
 
 ## New in 1.10.0

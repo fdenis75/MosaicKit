@@ -165,6 +165,7 @@ private struct ComboConfig: Sendable {
         case .custom:  return "cst"
         case .dynamic: return "dyn"
         case .iphone:  return "iph"
+        case .fixedGrid: return "grd"
         }
     }
 
