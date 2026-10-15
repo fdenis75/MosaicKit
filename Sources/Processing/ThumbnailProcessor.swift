@@ -182,13 +182,15 @@ public final class ThumbnailProcessor: Sendable {
                         let frameIndex = index
                         index += 1
                         group.addTask {
+                            // Crop once, so the ColorDNA strip samples what the cell shows.
+                            let image = crop.map { Self.croppedCenter(image, toAspect: $0.aspect) } ?? image
                             await collectColor?(frameIndex, image)
-                            let image = processor.addTimestampToImage(
-                                image: crop.map { Self.croppedCenter(image, toAspect: $0.aspect) } ?? image, timestamp: processor.formatTimestamp(seconds: actualTime.seconds),
+                            let labeled = processor.addTimestampToImage(
+                                image: image, timestamp: processor.formatTimestamp(seconds: actualTime.seconds),
                                 frameIndex: frameIndex, size: sizes[frameIndex], labelConfig: labelConfig
                             )
                             try Task.checkCancellation()
-                            return (frameIndex, image)
+                            return (frameIndex, labeled)
                         }
                         pending += 1
                         if pending >= 8, let result = try await group.next() {
