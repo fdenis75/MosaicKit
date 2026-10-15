@@ -144,6 +144,14 @@ Every PR updates its row here (status) and the matching §4.2 / §6.1 entries in
 | F-6 | done (I-22) | #56 |
 | F-7 | done (I-8, I-9) | #55 |
 | F-8 | in progress, split into small PRs: **F-8a done** (I-18, I-19; #59), **F-8b done** (I-5/6/7; #60), **F-8c done** (I-17; #63), **F-8d done** (I-10, ⚡ gate passed, §8.1; #64). F-8 is complete | #59, #60, #63, #64 |
+| G-0 | fixed grid: spec and decisions | done (#66; all of O1-O18 agreed 2026-10-15) | #66 |
+| G-1 | fixed grid: model, validation, hash | done; `.fixedGrid` throws "not available" until G-2 | #68 |
+| G-2 | fixed grid: `.adaptCanvas` layout ⚡ | planned | |
+| G-3 | fixed grid: sampling, header cap, overlays ⚡ | planned | |
+| G-4 | fixed grid: letterbox and stretch | planned | |
+| G-5 | fixed grid: crop ⚡ | planned | |
+| G-6 | fixed grid: docs and examples | planned | |
+| G-7 | fixed grid: saliency-aware crop (optional) | planned | |
 
 ### 8.1 Benchmark baseline
 

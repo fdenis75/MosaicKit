@@ -330,7 +330,34 @@ public struct MosaicConfiguration: Codable, Sendable {
     /// Example: "5120_XL_16-9_custom"
     public var configurationHash: String {
         let aspectRatioString = layout.aspectRatio.rawValue.replacingOccurrences(of: ":", with: "-")
-        return "\(width)_\(density.name)_\(aspectRatioString)_\(layout.layoutType.rawValue)"
+        return "\(width)_\(density.name)_\(aspectRatioString)_\(layoutToken)"
+    }
+
+    /// The layout part of ``configurationHash`` and the `{layout}` template token.
+    ///
+    /// Every existing layout type is its raw value, unchanged. A `.fixedGrid` token carries every
+    /// grid parameter that can change the pixels of an image (rows, columns, fit mode, spacing,
+    /// and the tolerance where the fit mode reads it), so changing one never returns an earlier
+    /// file when `overwrite` is off:
+    /// `fixedGrid-6x8-sp4` for `.adaptCanvas`, `fixedGrid-6x8-letterbox-tol2-sp4` otherwise.
+    /// `minimumFill` is left out on purpose: it only decides whether a request is accepted.
+    internal var layoutToken: String {
+        guard layout.layoutType == .fixedGrid, let grid = layout.grid else { return layout.layoutType.rawValue }
+        // The renderer never uses a gutter below 4 px; fractional values are planned as whole pixels.
+        let spacing = Self.tokenNumber(max(4, layout.spacing.rounded()))
+        var token = "fixedGrid-\(grid.rows)x\(grid.columns)"
+        if grid.fit != .adaptCanvas {
+            token += "-\(grid.fit.rawValue)-tol\(Self.tokenNumber(grid.aspectTolerance * 100))"
+        }
+        return token + "-sp\(spacing)"
+    }
+
+    /// A number for a hash or file name: no trailing zeros, no locale (`4`, `12`, `3.5`).
+    private static func tokenNumber(_ value: Double) -> String {
+        String(format: "%g", value)
+    }
+    private static func tokenNumber(_ value: CGFloat) -> String {
+        tokenNumber(Double(value))
     }
 
     /// Returns the URL where the animated image would be saved for a given video.
@@ -420,7 +447,7 @@ public struct MosaicConfiguration: Codable, Sendable {
             "width": String(width),
             "density": density.name,
             "aspectRatio": layout.aspectRatio.rawValue.replacingOccurrences(of: ":", with: "-"),
-            "layout": layout.layoutType.rawValue,
+            "layout": layoutToken,
             "date": today,
             "time": now
         ]
@@ -533,7 +560,7 @@ public struct MosaicConfiguration: Codable, Sendable {
             "width": String(width),
             "density": density.name,
             "aspectRatio": layout.aspectRatio.rawValue.replacingOccurrences(of: ":", with: "-"),
-            "layout": layout.layoutType.rawValue,
+            "layout": layoutToken,
             "hash": configurationHash,
             "postID": videoInput.postID.map { Self.sanitizeForFilePath($0) },
             "date": today

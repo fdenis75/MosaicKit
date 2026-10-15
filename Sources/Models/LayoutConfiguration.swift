@@ -15,6 +15,10 @@ public struct LayoutConfiguration: Codable, Sendable {
     /// The visual settings for the layout.
     public var visual: VisualSettings
 
+    /// The rows and columns of a ``LayoutType/fixedGrid`` layout. Required when `layoutType` is
+    /// `.fixedGrid`, ignored otherwise.
+    public var grid: GridSpecification?
+
     /// Creates a new layout configuration with the specified settings.
     ///
     /// - Parameters:
@@ -22,16 +26,36 @@ public struct LayoutConfiguration: Codable, Sendable {
     ///   - spacing: The spacing in pixels between thumbnails.
     ///   - layoutType: The layout algorithm to apply.
     ///   - visual: Visual enhancements like borders and shadows.
+    ///   - grid: The rows and columns for a ``LayoutType/fixedGrid`` layout.
     public init(
         aspectRatio: AspectRatio = .widescreen,
         spacing: CGFloat = 4,
         layoutType: LayoutType = .custom,
-        visual: VisualSettings = .default
+        visual: VisualSettings = .default,
+        grid: GridSpecification? = nil
     ) {
         self.aspectRatio = aspectRatio
         self.spacing = spacing
         self.layoutType = layoutType
         self.visual = visual
+        self.grid = grid
+    }
+
+    /// A ``LayoutType/fixedGrid`` layout with `rows` × `columns` cells, for example
+    /// `LayoutConfiguration.fixedGrid(rows: 4, columns: 6)`.
+    public static func fixedGrid(
+        rows: Int,
+        columns: Int,
+        fit: GridFitMode = .adaptCanvas,
+        aspectRatio: AspectRatio = .widescreen,
+        spacing: CGFloat = 4
+    ) -> LayoutConfiguration {
+        LayoutConfiguration(
+            aspectRatio: aspectRatio,
+            spacing: spacing,
+            layoutType: .fixedGrid,
+            grid: GridSpecification(rows: rows, columns: columns, fit: fit)
+        )
     }
 
    
@@ -55,9 +79,15 @@ public enum LayoutType: String, Codable, Sendable {
     case classic
     /// A layout optimized for portrait iPhone screens.
     case iphone
+    /// A grid with a caller-chosen number of rows and columns. Requires
+    /// ``LayoutConfiguration/grid``.
+    ///
+    /// Work in progress: until the layout engine lands, a configuration that uses it fails
+    /// validation with ``MosaicError/invalidConfiguration(_:)``.
+    case fixedGrid
     
     /// An array of all available layout types. The deprecated ``dynamic`` is not listed.
-    public static let allCases: [LayoutType] = [.auto, .custom, .classic, .iphone]
+    public static let allCases: [LayoutType] = [.auto, .custom, .classic, .iphone, .fixedGrid]
 }
 
 /// An enumeration representing the predefined aspect ratios for a mosaic layout.

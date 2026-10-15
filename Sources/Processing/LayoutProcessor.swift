@@ -133,6 +133,11 @@ public final class LayoutProcessor {
                 thumbnailCount: thumbnailCount,
                 mosaicWidth: mosaicWidth
             )
+        case .fixedGrid:
+            // Not implemented yet (plan G-2): `MosaicConfiguration.validate()` rejects it before any
+            // caller gets here. Explicit, so it can never fall through to `.custom`.
+            return MosaicLayout(rows: 0, cols: 0, thumbnailSize: .zero, positions: [], thumbCount: 0,
+                                thumbnailSizes: [], mosaicSize: .zero)
         default:
             // `.custom`, and the deprecated `.dynamic`, which `resolved(_:logger:)` maps to `.custom`.
             layout = calculateCustomLayout(
