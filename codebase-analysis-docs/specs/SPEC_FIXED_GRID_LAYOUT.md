@@ -850,8 +850,8 @@ become the basis for the cell cap (O3) and the animated-grid cap (O12).
 ### 8.1 Open questions for the maintainer
 
 Each has a recommendation. **Decisions (maintainer, PR #66 review, 2026-10-15):** silence on a
-question means the recommendation is accepted; all are accepted except O5, which is pending
-clarification (his comment there was "see q3").
+question means the recommendation is accepted. O5 was first pending (his comment was "see q3");
+he clarified that it was a cross-reference to O3, so **all of O1…O18 are agreed**.
 
 | # | Question | Recommendation | Decision |
 |---|---|---|---|
@@ -859,7 +859,7 @@ clarification (his comment there was "see q3").
 | O2 | Raw value / case name | `fixedGrid` (descriptive, cannot be confused with `classic`, which is also a grid) | agreed 2026-10-15 |
 | O3 | Limits | 50 per axis, 1000 cells, 40 px frame short side. Re-tune after the first benchmark runs | agreed 2026-10-15 |
 | O4 | Sampling for grids | **Uniform, cell-centered over 5…95 %** as a parameter of the shared function; other layouts keep 20/60/20 | agreed 2026-10-15 |
-| O5 | Width semantics | "Width is a maximum"; canvas trimmed to the grid (loses < C px) and shrunk to fit 16,384 | **pending maintainer clarification** |
+| O5 | Width semantics | "Width is a maximum"; canvas trimmed to the grid (loses < C px) and shrunk to fit 16,384. The O3 limits (50 per axis, 1000 cells, 40 px frame short side) apply to the shrunk canvas too | agreed 2026-10-15 |
 | O6 | `forIphone` vs grid | Grid wins; `forIphone` keeps header styling | agreed 2026-10-15 |
 | O7 | Density with grids | Ignored for the count, kept in the hash; documented. (Alternative: reject non-default density: too hostile, every config has one) | agreed 2026-10-15 |
 | O8 | Requested aspect in the hash for `.adaptCanvas` | Keep (simplicity, stable shape). Cost: switching only the aspect preset regenerates an identical image | agreed 2026-10-15 |
@@ -884,7 +884,7 @@ Decision log (style of `IMPLEMENTATION_PLAN.md` §9; all two-way until code ship
 | A-G4 | 2026-10-15 | O6, O7, O8 | The grid wins over `forIphone`; density is ignored for the count but stays in the hash; the requested aspect stays in the hash | Two-way | Stable hash shape; explicit request is more specific |
 | A-G5 | 2026-10-15 | O10, O11, O17, O18 | Center crop first, saliency later; header cap `W/20` for grids only; no other frame orders; no label auto-hiding | Two-way | Keeps v1 small |
 | A-G6 | 2026-10-15 | O13–O16 | Minor release (1.11.0) after 1.10.0; reject unknown source dimensions; reuse existing typed errors; log fast-mode duplicates | Two-way | Additive API; no new `MosaicError` case before 2.0 |
-| A-G7 | 2026-10-15 | O5 | **Pending maintainer clarification** ("width is a maximum" vs another reading of his "see q3"); the spec text is unchanged | n/a | Awaiting answer |
+| A-G7 | 2026-10-15 | O5 | "Width is a maximum": canvas trimmed to the grid and shrunk to fit 16,384; the O3 limits apply to the shrunk canvas ("see q3" was a cross-reference) | Two-way | Never distorts; keeps the user's rows × columns |
 
 ### 8.2 Phased implementation plan
 
