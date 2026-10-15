@@ -343,21 +343,20 @@ public struct MosaicConfiguration: Codable, Sendable {
     /// `minimumFill` is left out on purpose: it only decides whether a request is accepted.
     internal var layoutToken: String {
         guard layout.layoutType == .fixedGrid, let grid = layout.grid else { return layout.layoutType.rawValue }
-        // The renderer never uses a gutter below 4 px; fractional values are planned as whole pixels.
-        let spacing = Self.tokenNumber(max(4, layout.spacing.rounded()))
+        // The renderer never uses a gutter below 4 px, but it insets every cell by the exact
+        // spacing, so the token keeps the exact value: `6.6` and `7.4` give different pixels.
         var token = "fixedGrid-\(grid.rows)x\(grid.columns)"
         if grid.fit != .adaptCanvas {
-            token += "-\(grid.fit.rawValue)-tol\(Self.tokenNumber(grid.aspectTolerance * 100))"
+            token += "-\(grid.fit.rawValue)-tol\(Self.tokenNumber(grid.aspectTolerance))"
         }
-        return token + "-sp\(spacing)"
+        return token + "-sp\(Self.tokenNumber(max(4, Double(layout.spacing))))"
     }
 
-    /// A number for a hash or file name: no trailing zeros, no locale (`4`, `12`, `3.5`).
+    /// A number for a hash or file name: exact, locale-independent, no trailing zero
+    /// (`4`, `12`, `7.4`, `0.035`).
     private static func tokenNumber(_ value: Double) -> String {
-        String(format: "%g", value)
-    }
-    private static func tokenNumber(_ value: CGFloat) -> String {
-        tokenNumber(Double(value))
+        if value == value.rounded(), abs(value) < 1e15 { return String(Int64(value)) }
+        return String(describing: value)
     }
 
     /// Returns the URL where the animated image would be saved for a given video.

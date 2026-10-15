@@ -96,7 +96,9 @@ extension MosaicConfiguration {
         }
         // A frame is the cell minus the extra inset the renderer applies for spacing above 4 px.
         let gutter = 4
-        let inset = max(0, Int(layout.spacing.rounded()) - gutter)
+        // `spacing` is finite and nonnegative (checked above) but can be astronomically large; clamp it
+        // before the Int conversion, which would trap. Such a value is rejected by the frame-size rule below.
+        let inset = Int(min(max(layout.spacing.rounded() - Double(gutter), 0), 1_000_000))
         let frameWidth = (width - (grid.columns - 1) * gutter) / grid.columns - inset
         guard frameWidth >= GridSpecification.minimumFrameSide else {
             let usable = max(1, (width + gutter) / (GridSpecification.minimumFrameSide + gutter + inset))

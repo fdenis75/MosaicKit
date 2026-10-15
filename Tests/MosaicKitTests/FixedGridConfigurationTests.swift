@@ -85,12 +85,15 @@ struct FixedGridConfigurationTests {
     func goldenHashes() {
         #expect(config().configurationHash == "5120_M_16-9_fixedGrid-6x8-sp4")
         let letterbox = GridSpecification(rows: 6, columns: 8, fit: .letterbox)
-        #expect(config(grid: letterbox).configurationHash == "5120_M_16-9_fixedGrid-6x8-letterbox-tol2-sp4")
+        #expect(config(grid: letterbox).configurationHash == "5120_M_16-9_fixedGrid-6x8-letterbox-tol0.02-sp4")
         let crop = GridSpecification(rows: 2, columns: 3, fit: .crop, aspectTolerance: 0.035)
-        #expect(config(grid: crop, aspectRatio: .vertical, spacing: 12).configurationHash == "5120_M_9-16_fixedGrid-2x3-crop-tol3.5-sp12")
-        // Spacing below the 4 px gutter behaves as 4; fractions are planned as whole pixels.
+        #expect(config(grid: crop, aspectRatio: .vertical, spacing: 12).configurationHash == "5120_M_9-16_fixedGrid-2x3-crop-tol0.035-sp12")
+        // Spacing below the 4 px gutter behaves as 4; fractions are kept exactly, because the
+        // renderer insets every cell by the exact value.
         #expect(config(spacing: 0).configurationHash.hasSuffix("-sp4"))
-        #expect(config(spacing: 7.5).configurationHash.hasSuffix("-sp8"))
+        #expect(config(spacing: 7.5).configurationHash.hasSuffix("-sp7.5"))
+        #expect(config(spacing: 6.6).configurationHash != config(spacing: 7.4).configurationHash)
+        #expect(config(spacing: 6.6).configurationHash.hasSuffix("-sp6.6") && config(spacing: 7.4).configurationHash.hasSuffix("-sp7.4"))
     }
 
     @Test("Every output-affecting grid parameter is in the hash; the ones that are not read are not")
@@ -165,6 +168,16 @@ struct FixedGridConfigurationTests {
         #expect(validationMessage(animated)?.contains("at least 4 cells (a 1 × 3 grid has 3)") == true)
         animated.layout.grid = GridSpecification(rows: 2, columns: 2)
         #expect(validationMessage(animated)?.contains("not available") == true, "4 cells pass the animation rule")
+    }
+
+    @Test("An astronomically large spacing is rejected, not a crash")
+    func hugeSpacingDoesNotTrap() {
+        for spacing in [CGFloat(1e12), CGFloat(Double(Int.max)), CGFloat.greatestFiniteMagnitude] {
+            let message = validationMessage(config(spacing: spacing))
+            #expect(message?.contains("leave frames") == true, "spacing \(spacing): \(message ?? "no error")")
+        }
+        // The hash of such a configuration is still computable.
+        #expect(config(spacing: .greatestFiniteMagnitude).configurationHash.contains("fixedGrid-6x8-sp"))
     }
 
     @Test("Too many columns for the width name the limit")

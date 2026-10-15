@@ -210,11 +210,13 @@ computed property `layoutToken`, used by `configurationHash` **and** both `{layo
 |---|---|---|
 | every existing type | `rawValue` (unchanged) | `5120_M_16-9_custom` (unchanged) |
 | `.fixedGrid`, `.adaptCanvas` | `fixedGrid-<R>x<C>-sp<S>` | `5120_M_16-9_fixedGrid-6x8-sp4` |
-| `.fixedGrid`, other `fit` | `fixedGrid-<R>x<C>-<fit>-tol<T>-sp<S>` | `5120_M_16-9_fixedGrid-6x8-letterbox-tol2-sp4` |
+| `.fixedGrid`, other `fit` | `fixedGrid-<R>x<C>-<fit>-tol<T>-sp<S>` | `5120_M_16-9_fixedGrid-6x8-letterbox-tol0.02-sp4` |
 
-`<S>` is the **effective** spacing, `max(4, spacing)` (values below 4 behave as 4, §3.1), written
-without trailing zeros (`4`, `12`, `7.5`). `<T>` is `aspectTolerance` as a percentage, same
-formatting (`0.02` → `tol2`, `0.035` → `tol3.5`); it is only present for the fixed-aspect
+`<S>` is the **effective** spacing, `max(4, spacing)` (values below 4 behave as 4, §3.1), kept
+**exactly** (not rounded, because the renderer insets each cell by the exact value, so `6.6` and
+`7.4` must not share a token) and written without trailing zeros (`4`, `12`, `7.4`). `<T>` is
+`aspectTolerance` as given, same formatting (`0.02` → `tol0.02`, `0.035` → `tol0.035`; an
+earlier draft used percentages, which cannot be formatted exactly); it is only present for the fixed-aspect
 modes, because `.adaptCanvas` never reads it. The rule: **the token contains every grid
 parameter that can change the pixels of a produced image** (`rows`, `columns`, `fit`,
 `aspectTolerance` where it is read, and `spacing`, which sets the inset and therefore the cell
