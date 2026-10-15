@@ -4,7 +4,7 @@ import CoreGraphics
 extension LayoutProcessor {
 
     /// The gutter between cells. It is the same fixed baseline the renderer subtracts from every
-    /// cell; extra `spacing` above it is applied as an inset (see ``planFixedGrid(_:sourceAspectRatio:mosaicAspectRatio:mosaicWidth:spacing:reservedHeight:)``).
+    /// cell; extra `spacing` above it is applied as an inset (see ``planFixedGrid(_:sourceAspectRatio:mosaicAspectRatio:mosaicWidth:spacing:reservedHeight:overlayHeight:)``).
     static let fixedGridGutter = 4
 
     /// The largest texture side the Metal pipeline accepts.
@@ -14,10 +14,12 @@ extension LayoutProcessor {
     /// enough for a live preview. Never throws: a request that cannot be laid out comes back as
     /// ``FixedGridPlan/infeasible(_:suggestions:)`` with the reason.
     ///
-    /// With ``GridFitMode/adaptCanvas`` (the only mode available so far) the canvas height follows
-    /// the grid: every cell gets the source aspect ratio, so no frame is distorted, cropped or
-    /// letterboxed. The requested width is a **maximum**: the canvas is trimmed to whole cells
-    /// (less than `columns` pixels) and shrunk when the grid would exceed the texture height limit.
+    /// With ``GridFitMode/adaptCanvas`` (the default) the canvas height follows the grid: every
+    /// cell gets the source aspect ratio, so no frame is distorted, cropped or letterboxed. The
+    /// requested width is a **maximum**: the canvas is trimmed to whole cells (less than `columns`
+    /// pixels) and shrunk when the grid would exceed the texture height limit. The fixed-aspect
+    /// modes (``GridFitMode/letterbox``, ``GridFitMode/stretch``, ``GridFitMode/crop``) keep the
+    /// mosaic aspect instead, overlays included, and fit each frame into its cell.
     ///
     /// - Parameters:
     ///   - grid: The rows, columns and fit mode.
@@ -29,7 +31,7 @@ extension LayoutProcessor {
     ///   - reservedHeight: Height that the header and the ColorDNA strip will add on top of the
     ///     cells (an upper bound is fine), subtracted from the texture limit. `.adaptCanvas` only.
     ///   - overlayHeight: The **exact** height of the header plus the ColorDNA strip, for the
-    ///     fixed-aspect modes (`.letterbox`, `.stretch`): it is subtracted from the grid area so the
+    ///     fixed-aspect modes (`.letterbox`, `.stretch`, `.crop`): it is subtracted from the grid area so the
     ///     final image keeps the configured aspect. Compute the header for the width
     ///     ``fixedGridCanvasWidth(requestedWidth:mosaicAspectRatio:)``.
     public func planFixedGrid(

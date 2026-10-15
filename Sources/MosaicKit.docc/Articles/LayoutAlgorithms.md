@@ -1,10 +1,10 @@
 # Layout Algorithms Comparison
 
-Understanding the five layout algorithms and choosing the right one for your use case.
+Understanding the layout algorithms and choosing the right one for your use case.
 
 ## Overview
 
-MosaicKit provides five distinct layout algorithms, each optimized for different use cases and visual aesthetics. This guide explains how each algorithm works and when to use it.
+MosaicKit provides five layout algorithms (plus the deprecated `.dynamic`), each optimized for different use cases and visual aesthetics. This guide explains how each algorithm works and when to use it.
 
 ## Layout Algorithm Overview
 
@@ -15,6 +15,7 @@ MosaicKit provides five distinct layout algorithms, each optimized for different
 | **Auto** | Screen-aware | Adapts to display dimensions |
 | **Dynamic** (deprecated) | — | Laid out as Custom; removed in 2.0 |
 | **iPhone** | Mobile viewing | Vertical scrolling, fixed width |
+| **Fixed Grid** | A chosen number of frames | Exactly rows × columns, four fit modes |
 
 ## Custom Layout
 
@@ -295,6 +296,28 @@ For the fixed-aspect modes the header and the ColorDNA strip are subtracted from
 let layout = LayoutConfiguration.fixedGrid(rows: 4, columns: 6, fit: .letterbox, aspectRatio: .widescreen)
 ```
 
+### Live preview in SwiftUI
+
+Draw the plan's cells in a `Canvas`: the rectangles are the ones the generator renders, so the preview matches the output. `Examples/FixedGridPreviewExample.swift` in the repository has a complete editor with steppers and a fit-mode picker.
+
+```swift
+let plan = LayoutProcessor().planFixedGrid(
+    GridSpecification(rows: 4, columns: 6, fit: .crop),
+    sourceAspectRatio: 16.0 / 9.0,
+    mosaicAspectRatio: .widescreen,
+    mosaicWidth: 5120,
+    overlayHeight: headerAndStripHeight
+)
+switch plan {
+case .layout(let layout, let effectiveWidth, let notes):
+    // layout.positions[i] and layout.thumbnailSizes[i] are the frame rectangles in the grid
+    // area (layout.mosaicSize); the header and strip sit above it in the fixed-aspect modes.
+    draw(layout, width: effectiveWidth, notes: notes)
+case .infeasible(let issue, let suggestions):
+    show(issue.explanation, suggestions)   // e.g. "Try 5 × 5"
+}
+```
+
 ## Comparison Matrix
 
 ### Thumbnail Count Distribution
@@ -307,6 +330,7 @@ For a 60-second video with M density (~100 frames):
 | Classic | 0 | 100 | 100 | 7 |
 | Auto | 0 | 75-150 | 75-150 | Varies |
 | iPhone | 0 | 100 | 100 | 100 |
+| Fixed Grid (4 × 6) | 0 | 24 | 24 | 4 |
 
 ### Performance Characteristics
 
@@ -316,6 +340,7 @@ For a 60-second video with M density (~100 frames):
 | Classic | ~5ms | Low | Low |
 | Auto | ~20ms | Medium | Medium |
 | iPhone | ~3ms | Low | Low |
+| Fixed Grid | Constant (no search except a short binary search for the height limit) | Low | Low |
 
 ## Choosing the Right Layout
 
@@ -345,6 +370,11 @@ let config = MosaicConfiguration(
 // For mobile apps
 let config = MosaicConfiguration(
     layout: LayoutConfiguration(layoutType: .iphone)
+)
+
+// For an exact number of frames
+let config = MosaicConfiguration(
+    layout: .fixedGrid(rows: 4, columns: 6)
 )
 ```
 

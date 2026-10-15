@@ -83,10 +83,14 @@ let classicLayout = MosaicConfiguration(
     layout: LayoutConfiguration(layoutType: .classic)
 )
 
-let customLayout = MosaicConfiguration(
-    layout: LayoutConfiguration(layoutType: .custom)
+// Exactly 4 rows × 6 columns. The canvas height follows the grid (fit .adaptCanvas);
+// pass fit: .letterbox, .crop or .stretch to keep the aspect ratio instead.
+let gridLayout = MosaicConfiguration(
+    layout: .fixedGrid(rows: 4, columns: 6)
 )
 ```
+
+See <doc:LayoutAlgorithms> for the fixed grid's fit modes and how to preview a grid before generating it.
 
 ### Adjust Output Size
 

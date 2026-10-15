@@ -339,7 +339,7 @@ public struct MosaicConfiguration: Codable, Sendable {
     /// grid parameter that can change the pixels of an image (rows, columns, fit mode, spacing,
     /// and the tolerance where the fit mode reads it), so changing one never returns an earlier
     /// file when `overwrite` is off:
-    /// `fixedGrid-6x8-sp4` for `.adaptCanvas`, `fixedGrid-6x8-letterbox-tol2-sp4` otherwise.
+    /// `fixedGrid-6x8-sp4` for `.adaptCanvas`, `fixedGrid-6x8-letterbox-tol0.02-sp4` otherwise.
     /// `minimumFill` is left out on purpose: it only decides whether a request is accepted.
     internal var layoutToken: String {
         guard layout.layoutType == .fixedGrid, let grid = layout.grid else { return layout.layoutType.rawValue }

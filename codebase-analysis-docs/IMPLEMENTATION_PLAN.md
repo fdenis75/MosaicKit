@@ -147,10 +147,10 @@ Every PR updates its row here (status) and the matching §4.2 / §6.1 entries in
 | G-0 | fixed grid: spec and decisions | done (#66; all of O1-O18 agreed 2026-10-15) | #66 |
 | G-1 | fixed grid: model, validation, hash | done | #68 |
 | G-2 | fixed grid: `.adaptCanvas` layout ⚡ | done; A/B/A gate in §8.1 | #69 |
-| G-3 | fixed grid: sampling, header cap, overlays ⚡ | done; A/B/A gate in §8.1; the header-height helper moved to G-4 | |
-| G-4 | fixed grid: letterbox and stretch | done (CI only; the header-height helper `metadataHeaderHeight` landed here) | |
-| G-5 | fixed grid: crop ⚡ | done; A/B/A gate in §8.1 | |
-| G-6 | fixed grid: docs and examples | planned | |
+| G-3 | fixed grid: sampling, header cap, overlays ⚡ | done; A/B/A gate in §8.1; the header-height helper moved to G-4 | #70 |
+| G-4 | fixed grid: letterbox and stretch | done (CI only; the header-height helper `metadataHeaderHeight` landed here) | #71 |
+| G-5 | fixed grid: crop ⚡ | done; A/B/A gate in §8.1 | #72 |
+| G-6 | fixed grid: docs and examples | done (CI only; README, DocC, `Examples/FixedGridPreviewExample.swift`, MIGRATING-TO-1.11.md) | |
 | G-7 | fixed grid: saliency-aware crop (optional) | planned | |
 
 ### 8.1 Benchmark baseline

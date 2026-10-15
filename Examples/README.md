@@ -60,6 +60,16 @@ Demonstrates:
 - iPhone-optimized layout
 - Custom layouts with borders and shadows
 
+### Fixed Grid Preview
+
+A SwiftUI view, not a runnable target: add `FixedGridPreviewExample.swift` to an app (or open it in Xcode for the `#Preview`).
+
+Demonstrates:
+- A live preview of a `rows × columns` grid drawn in a `Canvas` from `LayoutProcessor.planFixedGrid`
+- The four fit modes (`.adaptCanvas`, `.letterbox`, `.crop`, `.stretch`) and the planner's notes
+- Showing why a grid does not fit, with the suggested grids
+- Generating the mosaic with the same grid
+
 ## Modifying the Examples
 
 Before running, update the file paths in each example:

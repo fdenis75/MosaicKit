@@ -85,11 +85,19 @@ public final class LayoutProcessor {
     /// Calculate optimal mosaic layout
     /// - Parameters:
     ///   - originalAspectRatio: Aspect ratio of the original video
+    ///   - mosaicAspectRatio: The mosaic's aspect preset
     ///   - thumbnailCount: Number of thumbnails to include
     ///   - mosaicWidth: Desired width of the mosaic
     ///   - density: Density configuration for layout
-    ///   - useCustomLayout: Whether to use custom layout algorithm
-    /// - Returns: Optimal layout for the mosaic
+    ///   - layoutType: The layout algorithm
+    ///   - grid: The rows, columns and fit mode for ``LayoutType/fixedGrid``; ignored otherwise
+    ///   - spacing: `LayoutConfiguration.spacing`, read by ``LayoutType/fixedGrid``
+    ///   - reservedHeight: ``LayoutType/fixedGrid`` with ``GridFitMode/adaptCanvas``: upper bound
+    ///     of the header and ColorDNA strip height
+    ///   - overlayHeight: ``LayoutType/fixedGrid`` in a fixed-aspect mode: exact header and
+    ///     ColorDNA strip height
+    /// - Returns: Optimal layout for the mosaic; an empty layout when a grid cannot be laid out
+    ///   (``planFixedGrid(_:sourceAspectRatio:mosaicAspectRatio:mosaicWidth:spacing:reservedHeight:overlayHeight:)`` says why)
     public func calculateLayout(
         originalAspectRatio: CGFloat,
         mosaicAspectRatio: AspectRatio,
@@ -512,6 +520,9 @@ public final class LayoutProcessor {
     ///   - duration: Video duration in seconds
     ///   - width: Mosaic width
     ///   - density: Density configuration
+    ///   - layoutType: The layout algorithm; ``LayoutType/auto`` counts from the screen size
+    ///   - videoAR: The video's aspect ratio (width / height)
+    ///   - grid: For ``LayoutType/fixedGrid``, the count is exactly `rows × columns`
     /// - Returns: Optimal number of thumbnails
     public func calculateThumbnailCount(
         duration: Double,

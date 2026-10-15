@@ -137,6 +137,7 @@ MosaicKit/
 | `MosaicGeneratorCoordinator` | `Processing/MosaicGeneratorCoordinator.swift` | Concurrent mosaic batches |
 | `GenerationJobController` | `Processing/GenerationJobs.swift` | Explicit job lifecycle (deprecated in S-6; removed in 2.0) |
 | `LayoutProcessor` | `Processing/LayoutProcessor.swift` | Layout calculation + caching |
+| `planFixedGrid`, `fixedGridCanvasWidth` | `Processing/LayoutProcessor+FixedGrid.swift` | Fixed-grid planner (pure, never throws) |
 | `ThumbnailProcessor` | `Processing/ThumbnailProcessor.swift` | Frame extraction |
 | `MetalImageProcessor` | `Processing/MetalImageProcessor.swift` | Metal shader dispatch |
 | `OverlayProcessor` | `Processing/OverlayProcessor.swift` | Header, labels, watermark, ColorDNA |
@@ -154,6 +155,8 @@ MosaicKit/
 | `FFmpegEncodingOptions` | `Models/FFmpegEncodingOptions.swift` | Codec/CRF/preset options for `.ffmpeg` |
 | `DensityConfig` | `Models/DensityConfig.swift` | Frame density levels |
 | `LayoutConfiguration`, `LayoutType`, `AspectRatio` | `Models/LayoutConfiguration.swift` | Layout settings |
+| `GridSpecification`, `GridFitMode` | `Models/GridSpecification.swift` | Fixed-grid rows, columns and fit mode |
+| `FixedGridPlan`, `FixedGridIssue`, `FixedGridNote` | `Models/FixedGridPlan.swift` | Fixed-grid planner result |
 | `VideoInput`, `VideoSource` | `Models/VideoInput.swift`, `Models/VideoSource.swift` | Input identity & inspection |
 
 ---
@@ -181,7 +184,7 @@ knowledge base §5.2–§5.3.
   - `auto`: screen-aware, measured in pixels (fixed in F-7, I-9).
   - `dynamic`: deprecated (removed in 2.0); laid out as `custom` (F-7, I-8).
   - `iphone`: mobile-optimized.
-  - `fixedGrid`: caller-chosen rows × columns (`LayoutConfiguration.grid`); all four fit modes work (`.adaptCanvas`, `.letterbox`, `.stretch`, `.crop`; G-1…G-5). Spec: `codebase-analysis-docs/specs/SPEC_FIXED_GRID_LAYOUT.md`.
+  - `fixedGrid`: caller-chosen rows × columns (`LayoutConfiguration.grid`); all four fit modes work (`.adaptCanvas`, `.letterbox`, `.stretch`, `.crop`; G-1…G-5). Live-preview example: `Examples/FixedGridPreviewExample.swift` (G-6). Spec: `codebase-analysis-docs/specs/SPEC_FIXED_GRID_LAYOUT.md`.
 - **`AspectRatio`:** `16:9`, `4:3`, `1:1`, `21:9`, `9:16`.
 - **Codable rule:** add new keys with `decodeIfPresent` plus a default (in `MosaicConfiguration`,
   a `MissingKeyDefault` constant). A required new key breaks configs saved by older versions;
