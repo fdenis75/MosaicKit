@@ -99,7 +99,8 @@ public final class LayoutProcessor {
         layoutType: LayoutType,
         grid: GridSpecification? = nil,
         spacing: CGFloat = LayoutConfiguration.default.spacing,
-        reservedHeight: Int = 0
+        reservedHeight: Int = 0,
+        overlayHeight: Int = 0
     ) -> MosaicLayout {
         stateLock.lock()
         defer { stateLock.unlock() }
@@ -118,7 +119,7 @@ public final class LayoutProcessor {
             // The grid result depends on all of these, none of which the key above has. Existing
             // layouts keep their keys byte for byte.
             if let grid {
-                cacheKey += "-grid=\(grid.rows)x\(grid.columns)-\(grid.fit.rawValue)-\(grid.aspectTolerance)-\(grid.minimumFill)-sp=\(spacing)-rh=\(reservedHeight)"
+                cacheKey += "-grid=\(grid.rows)x\(grid.columns)-\(grid.fit.rawValue)-\(grid.aspectTolerance)-\(grid.minimumFill)-sp=\(spacing)-rh=\(reservedHeight)-oh=\(overlayHeight)"
             } else {
                 cacheKey += "-grid=none"
             }
@@ -151,7 +152,8 @@ public final class LayoutProcessor {
             // generator plans with `planFixedGrid` first and reports the reason.
             guard let grid, case .layout(let planned, _, _) = planFixedGrid(
                 grid, sourceAspectRatio: originalAspectRatio, mosaicAspectRatio: mosaicAspectRatio,
-                mosaicWidth: mosaicWidth, spacing: spacing, reservedHeight: reservedHeight
+                mosaicWidth: mosaicWidth, spacing: spacing, reservedHeight: reservedHeight,
+                overlayHeight: overlayHeight
             ) else {
                 return MosaicLayout(rows: 0, cols: 0, thumbnailSize: .zero, positions: [], thumbCount: 0,
                                     thumbnailSizes: [], mosaicSize: .zero)

@@ -360,6 +360,20 @@ public actor MetalMosaicGenerator: MosaicGeneratorProtocol {
         return header + strip
     }
 
+    /// The exact height the header and the ColorDNA strip add for the fixed-aspect grid modes, so the
+    /// planner can subtract it and the final image keeps the configured aspect. The header is sized
+    /// from `W/20` (see `makeMetadataHeader`), so it does not depend on the cells.
+    func fixedGridOverlayHeight(for video: VideoInput, config: MosaicConfiguration, forIphone: Bool) -> Int {
+        let width = LayoutProcessor.fixedGridCanvasWidth(requestedWidth: config.width, mosaicAspectRatio: config.layout.aspectRatio)
+        let header = config.includeMetadata
+            ? thumbnailProcessor.metadataHeaderHeight(
+                for: video, width: width, thumbnailHeight: CGFloat(width) / 20,
+                forIphone: forIphone, headerConfig: config.overlay.header)
+            : 0
+        let strip = config.overlay.colorDNA.show ? Int(ColorDNAConfig.clampedHeight(config.overlay.colorDNA.height)) : 0
+        return header + strip
+    }
+
     /// The frame count and the layout for one video: shared by `planMosaic` and the backfill path
     /// of `generate`, so both always compute the same layout (P2).
     ///
@@ -377,6 +391,8 @@ public actor MetalMosaicGenerator: MosaicGeneratorProtocol {
         var aspectRatio = (video.width ?? 1.0) / (video.height ?? 1.0)
         let spacing = config.layout.spacing
         let reservedHeight = layoutType == .fixedGrid ? Self.fixedGridReservedHeight(for: config) : 0
+        let fixedAspect = layoutType == .fixedGrid && (config.layout.grid?.fit ?? .adaptCanvas) != .adaptCanvas
+        let overlayHeight = fixedAspect ? fixedGridOverlayHeight(for: video, config: config, forIphone: forIphone) : 0
 
         if layoutType == .fixedGrid {
             guard let grid else { throw MosaicError.invalidConfiguration("The fixedGrid layout needs LayoutConfiguration.grid (rows and columns)") }
@@ -387,7 +403,8 @@ public actor MetalMosaicGenerator: MosaicGeneratorProtocol {
             if forIphone { logger.info("A fixedGrid layout takes precedence over forIphone for \(video.title, privacy: .public)") }
             if case .infeasible(let issue, _) = layoutProcessor.planFixedGrid(
                 grid, sourceAspectRatio: aspectRatio, mosaicAspectRatio: config.layout.aspectRatio,
-                mosaicWidth: config.width, spacing: spacing, reservedHeight: reservedHeight
+                mosaicWidth: config.width, spacing: spacing, reservedHeight: reservedHeight,
+                overlayHeight: overlayHeight
             ) {
                 throw MosaicError.invalidConfiguration(issue.explanation)
             }
@@ -428,7 +445,8 @@ public actor MetalMosaicGenerator: MosaicGeneratorProtocol {
             layoutType: layoutType,
             grid: grid,
             spacing: spacing,
-            reservedHeight: reservedHeight
+            reservedHeight: reservedHeight,
+            overlayHeight: overlayHeight
         )
         return (frameCount, layout)
     }
@@ -462,9 +480,14 @@ public actor MetalMosaicGenerator: MosaicGeneratorProtocol {
         // with small cells. A grid can have huge cells (a 1 × 1 grid at 5120 px has 2,880 px
         // ones), so for grids the cell height is capped at W/20, about the cell size `.custom`
         // makes at that width.
-        let cellHeight = config.layout.layoutType == .fixedGrid
-            ? min(layout.thumbnailSize.height, layout.mosaicSize.width / 20)
-            : layout.thumbnailSize.height
+        // The fixed-aspect modes size it from exactly W/20, so the planner can know the header
+        // height before the cells exist (`fixedGridOverlayHeight`).
+        let fixedAspect = config.layout.layoutType == .fixedGrid && (config.layout.grid?.fit ?? .adaptCanvas) != .adaptCanvas
+        let cellHeight = fixedAspect
+            ? layout.mosaicSize.width / 20
+            : config.layout.layoutType == .fixedGrid
+                ? min(layout.thumbnailSize.height, layout.mosaicSize.width / 20)
+                : layout.thumbnailSize.height
         return thumbnailProcessor.createMetadataHeader(
             for: video,
             width: Int(layout.mosaicSize.width),
