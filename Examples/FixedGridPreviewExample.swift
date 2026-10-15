@@ -120,8 +120,9 @@ func generateFixedGridMosaic(videoURL: URL, outputDirectory: URL) async throws -
     var config = MosaicConfiguration(width: 5120, format: .heif)
     config.layout = .fixedGrid(rows: 4, columns: 6, fit: .letterbox, aspectRatio: .widescreen)
     config.outputdirectory = outputDirectory
-    // An infeasible grid throws `MosaicError.invalidConfiguration` with the planner's explanation
-    // before any frame is decoded.
+    // Before any frame is decoded, an infeasible grid throws `MosaicError.invalidConfiguration`
+    // with the planner's explanation, and a video that cannot fill it (unknown dimensions, fewer
+    // distinct frames than cells) throws `MosaicError.invalidVideo`.
     return try await MetalMosaicGenerator().generate(for: video, config: config)
 }
 
