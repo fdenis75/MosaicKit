@@ -115,8 +115,10 @@ extension MosaicConfiguration {
                 )
             }
         }
-        // Plan G-2 implements the layout engine and deletes this.
-        throw MosaicError.invalidConfiguration("The fixedGrid layout is not available in this build yet")
+        // Only .adaptCanvas is implemented so far (plan G-4 adds letterbox and stretch, G-5 crop).
+        if grid.fit != .adaptCanvas {
+            throw MosaicError.invalidConfiguration("The grid fit mode .\(grid.fit.rawValue) is not available in this build yet; use .adaptCanvas")
+        }
     }
 }
 

@@ -96,7 +96,10 @@ public final class LayoutProcessor {
         thumbnailCount: Int,
         mosaicWidth: Int,
         density: DensityConfig,
-        layoutType: LayoutType
+        layoutType: LayoutType,
+        grid: GridSpecification? = nil,
+        spacing: CGFloat = LayoutConfiguration.default.spacing,
+        reservedHeight: Int = 0
     ) -> MosaicLayout {
         stateLock.lock()
         defer { stateLock.unlock() }
@@ -110,7 +113,16 @@ public final class LayoutProcessor {
         logger.debug("🎯 Starting layout calculation - AR: \(originalAspectRatio), Count: \(thumbnailCount), Width: \(mosaicWidth), target AR: \(self.mosaicAspectRatio)")
         logger.debug("⚙️ Layout mode: \(layoutType.rawValue), Density: \(density.name)")
 
-        let cacheKey = "\(mosaicAspectRatio.rawValue)-\(originalAspectRatio)-\(thumbnailCount)-\(mosaicWidth)-\(density.name)-\(layoutType.rawValue)"
+        var cacheKey = "\(mosaicAspectRatio.rawValue)-\(originalAspectRatio)-\(thumbnailCount)-\(mosaicWidth)-\(density.name)-\(layoutType.rawValue)"
+        if layoutType == .fixedGrid {
+            // The grid result depends on all of these, none of which the key above has. Existing
+            // layouts keep their keys byte for byte.
+            if let grid {
+                cacheKey += "-grid=\(grid.rows)x\(grid.columns)-\(grid.fit.rawValue)-\(grid.aspectTolerance)-\(grid.minimumFill)-sp=\(spacing)-rh=\(reservedHeight)"
+            } else {
+                cacheKey += "-grid=none"
+            }
+        }
         if layoutType != .auto, let cached = layoutCache[cacheKey] { return cached }
 
         let layout: MosaicLayout
@@ -134,10 +146,17 @@ public final class LayoutProcessor {
                 mosaicWidth: mosaicWidth
             )
         case .fixedGrid:
-            // Not implemented yet (plan G-2): `MosaicConfiguration.validate()` rejects it before any
-            // caller gets here. Explicit, so it can never fall through to `.custom`.
-            return MosaicLayout(rows: 0, cols: 0, thumbnailSize: .zero, positions: [], thumbCount: 0,
-                                thumbnailSizes: [], mosaicSize: .zero)
+            // Explicit, so it can never fall through to `.custom`. Without a grid, or when the
+            // grid cannot be laid out, this is the empty layout like other invalid input; the
+            // generator plans with `planFixedGrid` first and reports the reason.
+            guard let grid, case .layout(let planned, _, _) = planFixedGrid(
+                grid, sourceAspectRatio: originalAspectRatio, mosaicAspectRatio: mosaicAspectRatio,
+                mosaicWidth: mosaicWidth, spacing: spacing, reservedHeight: reservedHeight
+            ) else {
+                return MosaicLayout(rows: 0, cols: 0, thumbnailSize: .zero, positions: [], thumbCount: 0,
+                                    thumbnailSizes: [], mosaicSize: .zero)
+            }
+            layout = planned
         default:
             // `.custom`, and the deprecated `.dynamic`, which `resolved(_:logger:)` maps to `.custom`.
             layout = calculateCustomLayout(
@@ -497,11 +516,15 @@ public final class LayoutProcessor {
         width: Int,
         density: DensityConfig,
         layoutType: LayoutType = .custom,
-        videoAR: Double
+        videoAR: Double,
+        grid: GridSpecification? = nil
     ) -> Int {
         logger.debug("🔢 Calculating thumbnail count - Duration: \(duration)s, Width: \(width)")
         
         guard duration.isFinite, duration > 0, width > 0, width <= 16_384, videoAR.isFinite, videoAR >= 0.01, videoAR <= 100 else { return 0 }
+        // A grid asks for exactly rows × columns frames, whatever the density. Checked before the
+        // short-video rule below, which would answer 4.
+        if layoutType == .fixedGrid { return grid.map { $0.rows * $0.columns } ?? 0 }
         if duration < 5 { return 4 }
         
         if layoutType == .auto {
