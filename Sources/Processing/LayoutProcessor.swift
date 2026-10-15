@@ -11,8 +11,8 @@ import UIKit
 /// Handles mosaic layout calculations and optimization
 // @available(macOS 26, iOS 26, *)
 public final class LayoutProcessor {
-    private let logger = Logger(subsystem: "com.mosaicKit", category: "layout-processing")
-    private let signposter = OSSignposter(subsystem: "com.mosaicKit", category: "layout-processor")
+    let logger = Logger(subsystem: "com.mosaicKit", category: "layout-processing")
+    let signposter = OSSignposter(subsystem: "com.mosaicKit", category: "layout-processor")
     private let stateLock = NSRecursiveLock()
     private var storedAspectRatio: CGFloat
     public var mosaicAspectRatio: CGFloat {
@@ -92,8 +92,8 @@ public final class LayoutProcessor {
     ///   - layoutType: The layout algorithm
     ///   - grid: The rows, columns and fit mode for ``LayoutType/fixedGrid``; ignored otherwise
     ///   - spacing: `LayoutConfiguration.spacing`, read by ``LayoutType/fixedGrid``
-    ///   - reservedHeight: ``LayoutType/fixedGrid`` with ``GridFitMode/adaptCanvas``: upper bound
-    ///     of the header and ColorDNA strip height
+    ///   - reservedHeight: ``LayoutType/fixedGrid`` with ``GridFitMode/adaptCanvas``, and
+    ///     ``LayoutType/uneven``: upper bound of the header and ColorDNA strip height
     ///   - overlayHeight: ``LayoutType/fixedGrid`` in a fixed-aspect mode: exact header and
     ///     ColorDNA strip height
     /// - Returns: Optimal layout for the mosaic; an empty layout when a grid cannot be laid out
@@ -132,6 +132,10 @@ public final class LayoutProcessor {
                 cacheKey += "-grid=none"
             }
         }
+        if layoutType == .uneven {
+            // The height limit depends on the reserve; existing layouts keep their keys.
+            cacheKey += "-rh=\(reservedHeight)"
+        }
         if layoutType != .auto, let cached = layoutCache[cacheKey] { return cached }
 
         let layout: MosaicLayout
@@ -167,8 +171,27 @@ public final class LayoutProcessor {
                                     thumbnailSizes: [], mosaicSize: .zero)
             }
             layout = planned
+        case .uneven:
+            layout = calculateUnevenLayout(
+                originalAspectRatio: originalAspectRatio,
+                mosaicAspectRatio: mosaicAspectRatio,
+                thumbnailCount: thumbnailCount,
+                mosaicWidth: mosaicWidth,
+                density: density,
+                reservedHeight: reservedHeight
+            )
+        case .custom:
+            layout = calculateCustomLayout(
+                originalAspectRatio: originalAspectRatio,
+                thumbnailCount: thumbnailCount,
+                mosaicWidth: mosaicWidth,
+                mosaicAspectRatio: mosaicAspectRatio,
+                density: density.name
+            )
         default:
-            // `.custom`, and the deprecated `.dynamic`, which `resolved(_:logger:)` maps to `.custom`.
+            // Only the deprecated `.dynamic` reaches this (`resolved(_:logger:)` already maps it to
+            // `.custom`); it is not named so this file stays free of its deprecation warning.
+            // Every other case is listed above, so a new one is never laid out as `.custom` by accident.
             layout = calculateCustomLayout(
                 originalAspectRatio: originalAspectRatio,
                 thumbnailCount: thumbnailCount,
@@ -422,7 +445,7 @@ public final class LayoutProcessor {
     }
     return bestLayout!
 }
-    private func calculateClassicLayout(
+    func calculateClassicLayout(
         originalAspectRatio: CGFloat,
         thumbnailCount: Int,
         mosaicWidth: Int

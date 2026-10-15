@@ -309,7 +309,7 @@ Each feature has a stable ID (F1…F13) that later phases reuse.
 | **F1** | **Video discovery** | Turn a folder of videos into a work list without the app writing its own file-walking code. | `scanVideos(in:recursive:)` (lenient, legacy), `discoverVideoSources` (no I/O), `discoverVideos(in:recursive:metadataConcurrency:)` (throwing, bounded concurrency, results in filename order). All in `Sources/VideoInputScanner.swift`. Recognizes 15 extensions (mp4, mov, mkv, webm, ts, mxf, …). |
 | **F2** | **Video input & inspection** | Load the metadata that sizing and labels depend on (duration, dimensions, fps, codec, bitrate, size) once, validate it, and make it serializable for queues. | `VideoSource` (Codable; `inspect()` loads metadata), `VideoInput` (inspected; `init(from:)` throws, while the legacy `init(url:…) async` never throws and falls back to the values you passed in), `VideoInput.validate()`, `VideoMetadataExtractor` actor. |
 | **F3** | **Mosaic generation** | Core product: a single image that summarizes a whole video, for browsing, cataloguing, and sharing. | `MetalMosaicGenerator.generate(for:config:forIphone:) → URL`, `generateMosaicImage(…) → CGImage` (in memory, nothing saved), `generateallcombinations` (3 widths × 7 densities, always HEIF). Rejects videos shorter than **5 s**. |
-| **F4** | **Layout engine** | Choose how many frames and how to arrange them so the sheet is readable at the target size and aspect ratio. | `LayoutProcessor.calculateThumbnailCount` + `calculateLayout`. 6 `LayoutType`s: `custom` (default, three-zone), `classic`, `auto` (screen-aware, not cached), `dynamic` (deprecated), `iphone`, `fixedGrid` (caller-chosen rows × columns with four fit modes; `planFixedGrid` plans one without a video, for live previews). 5 `AspectRatio`s. `DensityConfig` scales frame count from 0.25× to 4×. |
+| **F4** | **Layout engine** | Choose how many frames and how to arrange them so the sheet is readable at the target size and aspect ratio. | `LayoutProcessor.calculateThumbnailCount` + `calculateLayout`. 7 `LayoutType`s: `custom` (default, three-zone), `classic`, `auto` (screen-aware, not cached), `dynamic` (deprecated), `iphone`, `fixedGrid` (caller-chosen rows × columns with four fit modes; `planFixedGrid` plans one without a video, for live previews), `uneven` (tiles in several sizes, U-2). 5 `AspectRatio`s. `DensityConfig` scales frame count from 0.25× to 4×. |
 | **F5** | **Overlays & annotations** | Make the sheet informative and brandable: timestamps show *where* each frame comes from, the header shows *what* the file is, the watermark shows ownership, and Color DNA gives a visual fingerprint. | `OverlayConfiguration` (`FrameLabelConfig`, `HeaderConfig` with `MetadataField`s, `WatermarkConfig`, `ColorDNAConfig`). Rendering is split between `ThumbnailProcessor` (labels, header), `OverlayProcessor` (DNA, watermark), and `MetalImageProcessor` (borders/shadow, dominant-color background). |
 | **F6** | **Animated export** | A lightweight animated teaser (GIF/HEICS/WebP) for places where a big still or a video is not suitable. | `MosaicConfiguration.gifMode` (`.disabled` / `.withMosaic` / `.gifOnly`), `gifSize`, `animatedFormat` (default `.webp`), `gifFps` (default 10). Written by `AnimatedGifGenerator.save`. |
 | **F7** | **Optional WebP support** | Offer web-optimized output without making every client pay the SwiftUI-Preview cost of a binary xcframework. | `MosaicKitWebP` product, `MosaicKitWebPEncoding` protocol, `MosaicKitWebPSupport.encoder` registry. |
@@ -456,7 +456,7 @@ register:
 2. **Mosaic output-dimension limit.** `MetalMosaicGenerator` rejects `config.width > 16_384`
    inside generation (not in `validate()`) and videos shorter than 5 s, both as
    `MosaicError.invalidVideo`.
-   [[F:Sources/Processing/MetalMosaicGenerator.swift#318-321#6bb608f3]]
+   [[F:Sources/Processing/MetalMosaicGenerator.swift#318-321#9ea8c950]]
 3. **Preview skip-if-exists never matches in default naming mode.** With `fullPathInName ==
    false` and no `filenameTemplate`, `PreviewConfiguration.generateFilename` embeds a
    run-time timestamp (`yyyy-MM-dd_HH-mm-ss`). As a result, `overwrite == false` never finds an
@@ -634,9 +634,9 @@ Full sequence including the coordinator: `codebase-analysis-docs/assets/mosaic-s
 #### Stage-by-stage table
 
 The stage body is `MetalMosaicGenerator.generate`
-[[F:Sources/Processing/MetalMosaicGenerator.swift#98-233#6bb608f3]]. Since S-2, stages 2–5 run in
+[[F:Sources/Processing/MetalMosaicGenerator.swift#98-233#9ea8c950]]. Since S-2, stages 2–5 run in
 `planMosaic`, stages 6–12 in `composeMosaic` and stage 14 in `exportAnimation`
-[[F:Sources/Processing/MetalMosaicGenerator.swift#296-549#6bb608f3]]. `generateMosaicImage` calls
+[[F:Sources/Processing/MetalMosaicGenerator.swift#296-552#9ea8c950]]. `generateMosaicImage` calls
 the same `planMosaic` + `composeMosaic`, so both entry points compose the same image.
 
 | # | Stage | Code | Runs on | Key facts |
@@ -644,8 +644,8 @@ the same `planMosaic` + `composeMosaic`, so both entry points compose the same i
 | 0 | Validate | `MosaicConfiguration.validate()` [[F:Sources/Models/ConfigurationValidation.swift#15-64#bd4a99c9]] | caller → actor | Checks geometry, quality, fps, colors, the fixedGrid rules (G-1), and whether WebP is registered. |
 | 1 | Skip-if-exists | inside `generate` | generator actor | Uses one `referenceDate` for both the check and the save, so `{time}` resolves identically. With `.withMosaic`, a missing animation is backfilled. |
 | 2 | Duration / AR | inside `generate` | generator actor | Uses `video.duration` if known, else loads it. Rejects `< 5 s`, `width > 16 384`, and non-finite dimensions. Aspect ratio = `video.width / video.height`, which are display dimensions since F-1 (`preferredTransform` is applied in the extractor). |
-| 3 | Thumbnail count | `LayoutProcessor.calculateThumbnailCount` [[F:Sources/Processing/LayoutProcessor.swift#522-558#30123417]] | generator actor | `count = clamp((width/200 + 10·ln(duration)) × density.factor, 4, 800)`. `.auto` uses the largest screen instead: `⌊screenW/160⌋ × ⌊screenH/(160/videoAR)⌋` (points, so the same in pixels; F-7), clamped to 4…800. `.fixedGrid` returns exactly `rows × columns`, before the short-video rule (G-2). |
-| 4 | Layout | `LayoutProcessor.calculateLayout` [[F:Sources/Processing/LayoutProcessor.swift#101-182#30123417]] | generator actor (under `NSRecursiveLock`) | Cache key: `aspectRatio-originalAR-count-width-density-layoutType`. `.auto` is never cached. `.dynamic` is mapped to `.custom` first (F-7). For `.fixedGrid` the key gains `-grid=<R>x<C>-<fit>-<tol>-<fill>-sp=<spacing>-rh=<reservedHeight>`. Invalid input returns an **empty** layout, which later throws "Empty mosaic layout" (a grid is planned first by `makeLayout`, so it throws its own typed error instead). `.iphone` forces width 1200, 1 column, max height 8000. |
+| 3 | Thumbnail count | `LayoutProcessor.calculateThumbnailCount` [[F:Sources/Processing/LayoutProcessor.swift#545-581#0e830e57]] | generator actor | `count = clamp((width/200 + 10·ln(duration)) × density.factor, 4, 800)`. `.auto` uses the largest screen instead: `⌊screenW/160⌋ × ⌊screenH/(160/videoAR)⌋` (points, so the same in pixels; F-7), clamped to 4…800. `.fixedGrid` returns exactly `rows × columns`, before the short-video rule (G-2). |
+| 4 | Layout | `LayoutProcessor.calculateLayout` [[F:Sources/Processing/LayoutProcessor.swift#101-205#0e830e57]] | generator actor (under `NSRecursiveLock`) | Cache key: `aspectRatio-originalAR-count-width-density-layoutType`. `.auto` is never cached. `.dynamic` is mapped to `.custom` first (F-7). For `.fixedGrid` the key gains `-grid=<R>x<C>-<fit>-<tol>-<fill>-sp=<spacing>-rh=<reservedHeight>`; for `.uneven`, `-rh=<reservedHeight>`. Invalid input returns an **empty** layout, which later throws "Empty mosaic layout" (a grid is planned first by `makeLayout`, so it throws its own typed error instead). `.iphone` forces width 1200, 1 column, max height 8000. |
 | 5 | Aspect normalization | `planMosaic`: `adjustedConfig.updateAspectRatio(AspectRatio.findNearest(to: layout.mosaicSize))` | generator actor | The config passed down may carry a **different** `layout.aspectRatio` than the caller set. Path/filename generation still uses the caller's original `config`. |
 | 6 | Header | `ThumbnailProcessor.createMetadataHeader` | generator actor (synchronous CPU) | Only when `includeMetadata`. Height is added on top of the layout height. |
 | 7 | Frame extraction | `ThumbnailProcessor.processedFramesStream` [[F:Sources/Processing/ThumbnailProcessor.swift#140-212#1b12c1a3]] | producer `Task` on the global executor | One `AVAssetImageGenerator` with the batched `images(for:)` API. `maximumSize` = largest cell × `decodeQualityScale` (1). Tolerance ±1 s, or 0 when `useAccurateTimestamps`. Sampling: first 20 % of frames in the first 33 % of the 5–95 % window, 60 % in the middle, 20 % in the last third [[F:Sources/Processing/ThumbnailProcessor.swift#505-538#1b12c1a3]]. Any `.failure` throws: mosaics are strict (**no placeholder frames**). |
@@ -654,7 +654,7 @@ the same `planMosaic` + `composeMosaic`, so both entry points compose the same i
 | 10 | Compositing | `generateMosaicStream` [[F:Sources/Processing/MetalImageProcessor.swift#864-998#04cfcb88]], `processBatch` @L1000, `renderFrame` @L1077 | nonisolated async | One setup command buffer (fill + header), awaited. Frames are then rendered in **20-frame command buffers**, committed without waiting. Each frame: `createTexture(from: CGImage)`, `scaleTexture` if the size differs, `compositeTexture`, optional `addBorder`. The shadow path draws a CPU `CGContext` shadow and composites that. Duplicate or out-of-range indices throw. **All** positions must be filled, or it throws "Missing mosaic frames". |
 | 11 | GPU sync + readback | `synchronizeGPU` @L1058, `createCGImage(from:)` | nonisolated | An empty barrier command buffer is committed last and awaited. GPU errors from completion handlers are collected in `CommandBufferErrorState` and rethrown as `MetalProcessorError.commandBufferExecutionFailed`. |
 | 12 | Have the macOS stall retry wait until the app is active again, as iOS waits for foreground, and document background exporting for apps. Done: mechanism reproduced (background scheduling, background QoS cap; #46), CI attributed to the runner VM (known issue there, #47) | I-26 | A stalled export fails after 120 s and retries while still throttled | S |
-| 13 | Encode + commit | `saveMosaic` [[F:Sources/Processing/MetalMosaicGenerator.swift#650-761#6bb608f3]] | generator actor (synchronous CPU) | Output path = `generateOutputDirectory` + `generateFilename`. Encodes with `CGImageDestination` (HEIF embeds a thumbnail, `HasAlpha = false`), or the injected WebP encoder, into the staging file. Then `OutputTransaction.commit()`. |
+| 13 | Encode + commit | `saveMosaic` [[F:Sources/Processing/MetalMosaicGenerator.swift#653-764#9ea8c950]] | generator actor (synchronous CPU) | Output path = `generateOutputDirectory` + `generateFilename`. Encodes with `CGImageDestination` (HEIF embeds a thumbnail, `HasAlpha = false`), or the injected WebP encoder, into the staging file. Then `OutputTransaction.commit()`. |
 | 14 | Animation | `exportAnimation` (`extractFramesForGif` + `AnimatedGifGenerator.save`), shared by the `.gifOnly`, `.withMosaic` and skip-if-exists backfill sites | generator actor → global | This is a **second, full decode pass** with a separate generator: `.large` caps at 1280×720, `.small` at 960×540. Missing frames are skipped and then checked by count, so any missing frame throws. `frameDelay = 1 / gifFps`. |
 
 **Progress reported to handlers** (`MosaicGenerationProgress.progress`):
@@ -1223,10 +1223,17 @@ backbone. Read `LayoutProcessor` algorithms, `ThumbnailProcessor` header/label r
   | `.iphone` (or `forIphone: true`) | 1 column, fixed width **1200 px**, max height 8000 px | `min(n, rows that fit in 8000)` | 4 px spacing | Ignores `config.width`. |
   | `.fixedGrid` (plan G-1, G-2, G-4, G-5) | Caller-chosen `rows × columns` (`LayoutConfiguration.grid`). `LayoutProcessor.planFixedGrid` (pure, never throws) returns a `FixedGridPlan`. **`.adaptCanvas` (default)**: whole-pixel slots `cw = ⌊(W − (C−1)·4)/C⌋`, frame `cw − e` wide and `round((cw − e)/s)` tall (`s` = source aspect, `e` = extra spacing inset), slot height `fh + e`; the canvas follows the grid and is `C·cw + (C−1)·4` wide (width is a maximum: trimmed to whole cells and shrunk by a binary search to fit `16384 − reservedHeight`). **`.letterbox` and `.stretch` (G-4)** keep the configured aspect: the canvas is `W × round(W/A)` including the header and the ColorDNA strip, so the cells get `round(W/A) − overlayHeight` (the exact header height from `ThumbnailProcessor.metadataHeaderHeight`, sized from `W/20`, plus the strip), narrowed first if that is over 16384. Slots are `⌊(W − (C−1)·4)/C⌋ × ⌊(H − (R−1)·4)/R⌋`, centered in the canvas. A slot within `aspectTolerance` of the source is stretched (`.stretched` note); otherwise `.stretch` fails with `aspectMismatch` and up to three suggested grids, `.letterbox` pillar/letterboxes (`.letterboxed(fill:)`) unless the fill is under `minimumFill` (`fillTooLow` + suggestions). **`.crop` (G-5)** uses the same slots with no bars: `ThumbnailProcessor.processedFramesStream(crop:)` decodes into a box that covers the frame (`AVAssetImageGenerator.maximumSize` fits *inside* its box, so the box is `fw·max(1, s/σ') × fh·max(1, σ'/s)`) and cuts each frame to the cell aspect with a centered `CGImage.cropping(to:)` (zero-copy) before the label; a cell within `aspectTolerance` is stretched instead (`MetalMosaicGenerator.frameCrop` returns `nil`). `.cropped(retained:)` note; `fillTooLow` + suggestions when too little survives. Animation frames are not cropped (they keep the source aspect) | Exactly `rows × columns` (density is ignored for the count) | 4 px gutter, plus a compensated inset for `spacing` above 4 | Row-major order. Not cached when infeasible; the cache key gains `-grid=…-sp=…-rh=…-oh=…` for grids only. `calculateLayout` with an infeasible grid returns the empty layout; the generator plans first and throws `invalidConfiguration(issue.explanation)` before any decode. Unknown source dimensions are rejected for grids. Design: [specs/SPEC_FIXED_GRID_LAYOUT.md](specs/SPEC_FIXED_GRID_LAYOUT.md). Adding the case is a source break for exhaustive `switch`es over `LayoutType`. |
 
-- **Uneven tiles (planned, U-1 done):** `UnevenTilePacker` (internal, pure, deterministic) plans a
-  bento lattice of source-aspect unit cells with `k × k` tiles, `k ≤ x` (spec
-  `specs/SPEC_UNEVEN_TILES_LAYOUT.md` §4). It is not reachable from `calculateLayout` yet; U-2
-  adds `LayoutType.uneven`.
+- **`.uneven` (plan U-1, U-2):** `calculateUnevenLayout` (`LayoutProcessor+Uneven.swift`) calls
+  `UnevenTilePacker` (internal, pure, deterministic): a bento lattice of source-aspect unit
+  cells with `k × k` tiles, so every tile keeps the source aspect and coverage is exact (spec
+  `specs/SPEC_UNEVEN_TILES_LAYOUT.md` §4). Count from density as for `.custom`; largest span
+  from the density factor (`unevenMaxSpan`: XXL/XL 2, L/M 3, S/XS 4, XXS 5), **capped at 2
+  (`unevenSpanCap`) until U-3**. Fewer than 12 frames or a source aspect outside 0.2…5 use
+  `.classic`. Unit tiles ≥ 120 px; height ≤ 16384 − `reservedHeight` (the generator passes
+  `fixedGridReservedHeight`, which also covers a fixed header taller than the estimate). The
+  cache key gets `-rh=` for `.uneven` only. `thumbnailSize` is the unit tile. `forIphone` still
+  forces `.iphone`. The `calculateLayout` switch names every case; its `default:` only catches
+  the deprecated `.dynamic`.
 - **Rendering spacing:** `LayoutConfiguration.spacing` (default 4) is **not** used by the
   algorithms. It only insets each cell at render time, by `(spacing − 4)/2` (§2.3 stage M10).
 - **Cache:** keyed by AR, video AR, count, width, density name, and type. 64 entries. `.auto`
@@ -2243,7 +2250,7 @@ Factories: `from(quality:format:)` and `forPreview(quality:)` (deprecated, S-6) 
 | Enum | Cases (raw values) |
 |---|---|
 | `DensityConfig` (struct presets) | `xxl`(0.25, ×0.125) `xl`(0.5, ×0.25) `l`(0.75, ×0.5) `m`(1.0, ×1.0) `s`(2.0, ×2.0) `xs`(3.0, ×4.0) `xxs`(4.0, ×8.0). Format: factor, extractsMultiplier |
-| `LayoutType` | `auto` `custom` `classic` `iphone` `fixedGrid` (needs `LayoutConfiguration.grid: GridSpecification?`; every `fit`: `.adaptCanvas`, `.letterbox`, `.stretch`, `.crop`). `dynamic` is deprecated and laid out as `custom`; not in `allCases` |
+| `LayoutType` | `auto` `custom` `classic` `iphone` `fixedGrid` `uneven` (tiles in several sizes; no extra options) (`fixedGrid` needs `LayoutConfiguration.grid: GridSpecification?`; every `fit`: `.adaptCanvas`, `.letterbox`, `.stretch`, `.crop`). `dynamic` is deprecated and laid out as `custom`; not in `allCases` |
 | `AspectRatio` | `16:9` `4:3` `1:1` `21:9` `9:16` |
 | `BorderColor` | `white` `black` `gray` |
 | `OutputFormat` | `jpeg`(jpg) `png` `heif`(heic) `webp` |
@@ -2476,6 +2483,9 @@ case .infeasible(let issue, let suggestions): print(issue.explanation, suggestio
 }
 cfg.layout = .fixedGrid(rows: 4, columns: 6, fit: .letterbox)
 _ = try await MetalMosaicGenerator().generate(for: video, config: cfg)   // infeasible → invalidConfiguration; video can't fill it → invalidVideo
+
+// 9) Tiles in several sizes (bento grid, nothing cropped)
+cfg.layout = LayoutConfiguration(layoutType: .uneven)        // largest tile from density; < 12 frames → classic
 ```
 
 ### 5.7 Output artifact naming reference
@@ -2550,6 +2560,7 @@ with the code.
 | 11 | Performance exploration (always benchmark against the batched path): CVPixelBuffer → Metal zero-copy path, GPU-side frame treatment, moving encoding off the generator actor, the VideoToolbox constant-quality factor for SJS | §4.3, §4.9 | Throughput is a hard requirement | L |
 | 12 | ~~Root-cause the intermittent native export stall~~ (done: macOS background scheduling, #46). Remaining: have the macOS stall retry wait until the app is active again, as iOS waits for foreground, and document background exporting for apps | I-26 | A stalled export fails after 120 s and retries while still throttled | S |
 | 13 | **Fixed rows × columns layout** (`LayoutType.fixedGrid`): spec merged (#66); G-1 model, validation and hash, G-2 `.adaptCanvas` layout, G-3 sampling/overlays ⚡ and G-4 `.letterbox`/`.stretch`, G-5 `.crop` ⚡ and G-6 docs and examples done; released in 1.11.0; G-7 (saliency crop) optional | — (feature) | Maintainer request 2026-10-15; [specs/SPEC_FIXED_GRID_LAYOUT.md](specs/SPEC_FIXED_GRID_LAYOUT.md) | M each |
+| 14 | **Uneven tiles layout** (`LayoutType.uneven`): spec merged (#67, all Q-U recommendations agreed); U-1 packer (#77) and U-2 layout type done; U-3 per-size extraction ⚡ next, then 1.12.0. See `IMPLEMENTATION_PLAN.md` §8 | — | Maintainer request | M |
 
 ### 6.2 Open questions (still unresolved)
 
@@ -2598,7 +2609,7 @@ P1 = core feature, P2 = supporting, P3 = docs/infra.
 | # | Pri | Path | Type | Lines | Hash8 | Notes |
 |---|---|---|---|---|---|---|
 | 1 | P0 | `Package.swift` | config | 61 | 721e2854 | Products, targets, deps, platforms |
-| 2 | P0 | `Sources/Processing/MetalMosaicGenerator.swift` | code | 735 | 4c4ed71a | Mosaic entry actor; pipeline orchestration; shared `planMosaic`/`composeMosaic`/`exportAnimation` @L299; `saveMosaic` @L524 |
+| 2 | P0 | `Sources/Processing/MetalMosaicGenerator.swift` | code | 817 | 9ea8c950 | Mosaic entry actor; pipeline orchestration; shared `planMosaic`/`composeMosaic`/`exportAnimation` @L299; `saveMosaic` @L524 |
 | 3 | P0 | `Sources/Processing/MosaicGeneratorProtocol.swift` | code | 56 | 5685ed03 | Actor protocol |
 | 4 | P0 | `Sources/Processing/MosaicGeneratorCoordinator.swift` | code | 730 | 62277ee6 | Batch actor (per-attempt tracking, `runBatch`), progress/result/status types, factory funcs at the end |
 | 5 | P0 | `Sources/Processing/Preview/PreviewVideoGenerator.swift` | code | 1474 | 7546d65f | Preview actor + `PreviewGenerationLogic` (compose @L604, export paths @L1093/1115/1425) |
@@ -2607,7 +2618,7 @@ P1 = core feature, P2 = supporting, P3 = docs/infra.
 | 8 | P0 | `Sources/Models/PreviewConfiguration.swift` | model | 817 | ee2900f9 | Config + extract math + path templating |
 | 9 | P1 | `Sources/Processing/ThumbnailProcessor.swift` | code | 1629 | aad3be57 | Frame stream @L140, GIF frames @L76, header @L598/862 |
 | 10 | P1 | `Sources/Processing/MetalImageProcessor.swift` | code | 1336 | 04cfcb88 | Metal pipeline, `generateMosaicStream` @L864, DominantColors @L601 |
-| 11 | P1 | `Sources/Processing/LayoutProcessor.swift` | code | 639 | 30123417 | Layout algorithms, cache @L22/135/182 |
+| 11 | P1 | `Sources/Processing/LayoutProcessor.swift` | code | 662 | 0e830e57 | Layout algorithms, cache @L22/135/182 |
 | 12 | P1 | `Sources/Models/VideoInput.swift` | model | 139 | 6b6bfcbf | Unit of work |
 | 13 | P1 | `Sources/Models/VideoSource.swift` | model | 61 | 4e63687f | Lazy source + inspect + validate |
 | 14 | P1 | `Sources/Processing/GenerationJobs.swift` | code | 109 | df980649 | Job controller (deprecated, S-6) |
@@ -2621,7 +2632,7 @@ P1 = core feature, P2 = supporting, P3 = docs/infra.
 | 22 | P1 | `Sources/Processing/WebPSupport.swift` | code | 45 | 8f928b72 | WebP injection |
 | 23 | P1 | `SourcesWebP/MosaicKitWebP.swift` | code | 72 | dc374b7e | WebP encoder impl |
 | 24 | P2 | `Sources/Models/DensityConfig.swift` | model | 84 | 5f791dc8 | Density presets |
-| 25 | P2 | `Sources/Models/LayoutConfiguration.swift` | model | 228 | ac99525c | LayoutType, AspectRatio, visuals |
+| 25 | P2 | `Sources/Models/LayoutConfiguration.swift` | model | 233 | dc697bb8 | LayoutType, AspectRatio, visuals |
 | 26 | P2 | `Sources/Models/MosaicLayout.swift` | model | 172 | bffb3bda | Layout result |
 | 27 | P2 | `Sources/Models/VideoFormat.swift` | model | 430 | 9f808905 | Preview containers & presets |
 | 28 | P2 | `Sources/Models/FFmpegEncodingOptions.swift` | model | 311 | db3a64a2 | ffmpeg options |
@@ -2669,8 +2680,10 @@ P1 = core feature, P2 = supporting, P3 = docs/infra.
 | 70 | P1 | `Sources/Processing/LayoutProcessor+FixedGrid.swift` | code | 262 | 73a235de | `planFixedGrid`, the `.adaptCanvas` planner (G-2) and the fixed-aspect planner (G-4) |
 | 71 | P2 | `Tests/MosaicKitTests/FixedGridLayoutTests.swift` | test | 409 | 6b815822 | fixedGrid planner properties, goldens and integration (G-2) |
 | 72 | P2 | `Tests/MosaicKitTests/FixedGridFixedAspectTests.swift` | test | 278 | 5a8cd65d | Letterbox, stretch and crop geometry, rejections, final aspect (G-4, G-5) |
-| 73 | P1 | `Sources/Processing/UnevenTilePacker.swift` | code | 338 | 8a0b8cef | Uneven-tiles bento packer (internal, pure; U-1; not wired until U-2) |
+| 73 | P1 | `Sources/Processing/UnevenTilePacker.swift` | code | 338 | 8a0b8cef | Uneven-tiles bento packer (internal, pure; U-1) |
 | 74 | P2 | `Tests/MosaicKitTests/UnevenTilePackerTests.swift` | test | 304 | ca2d0309 | Packer coverage, gutters, aspect, counts, goldens, limits (U-1) |
+| 75 | P1 | `Sources/Processing/LayoutProcessor+Uneven.swift` | code | 67 | 1ad25b87 | `calculateUnevenLayout`, fallbacks, density → span table, span cap (U-2) |
+| 76 | P2 | `Tests/MosaicKitTests/UnevenLayoutTests.swift` | test | 160 | c78e5eba | `.uneven` Codable, hash, cap, fallbacks, reserve, end-to-end (U-2) |
 
 Excluded or low value: `Media.xcassets/**` (binary fixture), `Tests/MosaicKitTests/embeddedAsset/test_video.mp4`
 (87 s 8-bit H.264 video-only fixture), `scripts/**` + `Makefile` (xcodebuild agent scaffold for a

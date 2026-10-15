@@ -84,9 +84,14 @@ public enum LayoutType: String, Codable, Sendable {
     /// ``MosaicError/invalidConfiguration(_:)`` before any frame is decoded; plan it first with
     /// ``LayoutProcessor/planFixedGrid(_:sourceAspectRatio:mosaicAspectRatio:mosaicWidth:spacing:reservedHeight:overlayHeight:)``.
     case fixedGrid
-    
+    /// Tiles in several sizes: a bento grid where every larger tile is a whole multiple of the
+    /// smallest (2×2, 3×3 … unit tiles), so no frame is cropped or distorted. The largest size
+    /// grows with density. Fewer than 12 frames, or a source aspect outside 0.2…5, use the
+    /// ``classic`` layout. Ignored when generating `forIphone`.
+    case uneven
+
     /// An array of all available layout types. The deprecated ``dynamic`` is not listed.
-    public static let allCases: [LayoutType] = [.auto, .custom, .classic, .iphone, .fixedGrid]
+    public static let allCases: [LayoutType] = [.auto, .custom, .classic, .iphone, .fixedGrid, .uneven]
 }
 
 /// An enumeration representing the predefined aspect ratios for a mosaic layout.

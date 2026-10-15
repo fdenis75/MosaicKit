@@ -138,6 +138,7 @@ MosaicKit/
 | `GenerationJobController` | `Processing/GenerationJobs.swift` | Explicit job lifecycle (deprecated in S-6; removed in 2.0) |
 | `LayoutProcessor` | `Processing/LayoutProcessor.swift` | Layout calculation + caching |
 | `planFixedGrid`, `fixedGridCanvasWidth` | `Processing/LayoutProcessor+FixedGrid.swift` | Fixed-grid planner (pure, never throws) |
+| `UnevenTilePacker`, `calculateUnevenLayout` | `Processing/UnevenTilePacker.swift`, `Processing/LayoutProcessor+Uneven.swift` | Uneven-tiles packer (internal, pure) and its `LayoutType.uneven` wiring |
 | `ThumbnailProcessor` | `Processing/ThumbnailProcessor.swift` | Frame extraction |
 | `MetalImageProcessor` | `Processing/MetalImageProcessor.swift` | Metal shader dispatch |
 | `OverlayProcessor` | `Processing/OverlayProcessor.swift` | Header, labels, watermark, ColorDNA |
@@ -185,6 +186,7 @@ knowledge base §5.2–§5.3.
   - `dynamic`: deprecated (removed in 2.0); laid out as `custom` (F-7, I-8).
   - `iphone`: mobile-optimized.
   - `fixedGrid`: caller-chosen rows × columns (`LayoutConfiguration.grid`); all four fit modes work (`.adaptCanvas`, `.letterbox`, `.stretch`, `.crop`; G-1…G-5). Live-preview example: `Examples/FixedGridPreviewExample.swift` (G-6). Spec: `codebase-analysis-docs/specs/SPEC_FIXED_GRID_LAYOUT.md`.
+  - `uneven`: tiles in several sizes, a bento grid of source-aspect unit cells (`UnevenTilePacker`, U-1/U-2); tiles capped at 2×2 until U-3. Spec: `codebase-analysis-docs/specs/SPEC_UNEVEN_TILES_LAYOUT.md`.
 - **`AspectRatio`:** `16:9`, `4:3`, `1:1`, `21:9`, `9:16`.
 - **Codable rule:** add new keys with `decodeIfPresent` plus a default (in `MosaicConfiguration`,
   a `MissingKeyDefault` constant). A required new key breaks configs saved by older versions;

@@ -4,7 +4,7 @@ Understanding the layout algorithms and choosing the right one for your use case
 
 ## Overview
 
-MosaicKit provides five layout algorithms (plus the deprecated `.dynamic`), each optimized for different use cases and visual aesthetics. This guide explains how each algorithm works and when to use it.
+MosaicKit provides six layout algorithms (plus the deprecated `.dynamic`), each optimized for different use cases and visual aesthetics. This guide explains how each algorithm works and when to use it.
 
 ## Layout Algorithm Overview
 
@@ -16,6 +16,7 @@ MosaicKit provides five layout algorithms (plus the deprecated `.dynamic`), each
 | **Dynamic** (deprecated) | — | Laid out as Custom; removed in 2.0 |
 | **iPhone** | Mobile viewing | Vertical scrolling, fixed width |
 | **Fixed Grid** | A chosen number of frames | Exactly rows × columns, four fit modes |
+| **Uneven** | Picking out a few frames | Tiles in several sizes, none cropped or distorted |
 
 ## Custom Layout
 
@@ -318,6 +319,43 @@ case .infeasible(let issue, let suggestions):
 }
 ```
 
+## Uneven Tiles Layout
+
+### Description
+
+``LayoutType/uneven`` shows frames at several sizes at once. The canvas is a grid of unit cells
+with the video's aspect ratio; a tile covers a `k × k` block of cells, so a larger tile has the
+video's aspect too and no frame is ever cropped or distorted. 1 × 1 tiles fill the remaining
+cells, so the grid has no holes.
+
+### Algorithm
+
+1. Density gives the frame count (as for Custom) and the largest tile side `x`: `XXL`/`XL` 2,
+   `L`/`M` 3, `S`/`XS` 4, `XXS` 5. Larger tiles take about 45 % of the area, split equally
+   between sizes 2…`x`. Until frames are decoded at each tile's own size, tiles are at most 2 × 2.
+2. The grid's columns and rows are chosen so the canvas aspect is as close as possible to the
+   configured aspect ratio for that many tiles; no tile is larger than half the shorter side.
+3. Tiles are placed row by row (lowest, then leftmost free cell). A deterministic schedule
+   decides when a larger tile is due and spreads larger tiles across the width; the best of
+   eight passes for balance is kept. The same inputs always give the same layout.
+4. Tiles are numbered in reading order, which is also time order.
+
+Gutters are 4 px along the video's long side and `4 / aspect` px along the other, which keeps
+every multi-cell tile exactly on the video's aspect. The width is exact; unit tiles are at least
+120 px wide, and the height stays within the texture limit with the header and ColorDNA strip.
+
+### Fallbacks
+
+- Fewer than 12 frames, or a source aspect outside 0.2…5: the Classic layout.
+- `forIphone: true`: the iPhone layout, as for every layout except Fixed Grid.
+
+### Configuration
+
+```swift
+var config = MosaicConfiguration(width: 5120, density: .m)
+config.layout.layoutType = .uneven
+```
+
 ## Comparison Matrix
 
 ### Thumbnail Count Distribution
@@ -331,6 +369,7 @@ For a 60-second video with M density (~100 frames):
 | Auto | 0 | 75-150 | 75-150 | Varies |
 | iPhone | 0 | 100 | 100 | 100 |
 | Fixed Grid (4 × 6) | 0 | 24 | 24 | 4 |
+| Uneven (M) | ~90 | ~10–15 (2 × 2 and 3 × 3) | ~100 | ~12–13 |
 
 ### Performance Characteristics
 
@@ -341,6 +380,7 @@ For a 60-second video with M density (~100 frames):
 | Auto | ~20ms | Medium | Medium |
 | iPhone | ~3ms | Low | Low |
 | Fixed Grid | Constant (no search except a short binary search for the height limit) | Low | Low |
+| Uneven | < 1.5 ms up to 800 frames | Low | Medium |
 
 ## Choosing the Right Layout
 
