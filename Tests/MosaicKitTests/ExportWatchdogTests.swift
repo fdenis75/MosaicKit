@@ -132,9 +132,9 @@ struct ExportWatchdogTests {
         return tracker
     }
 
-    /// Polls `condition` every 10 ms for up to 5 s.
+    /// Polls `condition` every 10 ms for up to 20 s (a loaded CI runner can take over 10 s).
     private func waitUntil(_ condition: () -> Bool) async throws {
-        let deadline = ContinuousClock.now + .seconds(5)
+        let deadline = ContinuousClock.now + .seconds(20)
         while !condition() {
             guard ContinuousClock.now < deadline else {
                 Issue.record("Timed out waiting for the watchdog")
