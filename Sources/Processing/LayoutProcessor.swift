@@ -524,7 +524,13 @@ public final class LayoutProcessor {
         guard duration.isFinite, duration > 0, width > 0, width <= 16_384, videoAR.isFinite, videoAR >= 0.01, videoAR <= 100 else { return 0 }
         // A grid asks for exactly rows × columns frames, whatever the density. Checked before the
         // short-video rule below, which would answer 4.
-        if layoutType == .fixedGrid { return grid.map { $0.rows * $0.columns } ?? 0 }
+        if layoutType == .fixedGrid {
+            guard let grid,
+                  (1...GridSpecification.maximumAxisCount).contains(grid.rows),
+                  (1...GridSpecification.maximumAxisCount).contains(grid.columns) else { return 0 }
+            let cells = grid.rows * grid.columns
+            return cells <= GridSpecification.maximumCellCount ? cells : 0
+        }
         if duration < 5 { return 4 }
         
         if layoutType == .auto {

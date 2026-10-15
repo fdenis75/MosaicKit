@@ -291,6 +291,10 @@ struct FixedGridLayoutTests {
         #expect(processor.calculateThumbnailCount(duration: 60, width: 5120, density: .m, layoutType: .fixedGrid, videoAR: 16.0 / 9, grid: nil) == 0)
         // Invalid inputs keep returning 0, as for every layout.
         #expect(processor.calculateThumbnailCount(duration: .nan, width: 5120, density: .m, layoutType: .fixedGrid, videoAR: 16.0 / 9, grid: grid) == 0)
+        // Out-of-range grids (public mutable struct) answer 0 instead of a count or an overflow trap.
+        for bad in [GridSpecification(rows: 50, columns: 50), GridSpecification(rows: Int.max, columns: 2), GridSpecification(rows: 0, columns: 3), GridSpecification(rows: -1, columns: -1)] {
+            #expect(processor.calculateThumbnailCount(duration: 60, width: 5120, density: .m, layoutType: .fixedGrid, videoAR: 16.0 / 9, grid: bad) == 0)
+        }
         // Other layouts are unaffected by the new parameter.
         #expect(processor.calculateThumbnailCount(duration: 3, width: 5120, density: .m, layoutType: .custom, videoAR: 16.0 / 9) == 4)
     }
