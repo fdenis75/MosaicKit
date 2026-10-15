@@ -263,6 +263,38 @@ let config = MosaicConfiguration(
 - Vertical scrolling interfaces
 - Touch-based navigation
 
+## Fixed Grid Layout
+
+### Description
+
+`LayoutType.fixedGrid` lays out exactly `rows × columns` cells, in time order, with frames sampled evenly across the video. Density does not change the frame count.
+
+### Fit modes
+
+`GridSpecification.fit` decides how the grid meets the canvas:
+
+- `.adaptCanvas` (default): the canvas follows the grid. Every cell has the video's aspect ratio, so no frame is distorted, cropped or letterboxed. `MosaicConfiguration.width` is a maximum: the canvas is trimmed to whole cells and shrunk if the grid would exceed the 16,384 px texture limit.
+- `.stretch`: the canvas keeps the configured `AspectRatio`, header and ColorDNA strip included, so the final image is `width × round(width / aspect)`. The cells must be within `aspectTolerance` (2 % by default) of the video's aspect, otherwise the request fails with `FixedGridIssue/aspectMismatch` and up to three grids that would work.
+- `.letterbox`: same canvas, but a cell that does not match gets bars instead of a stretched picture. It fails with `FixedGridIssue/fillTooLow` when the picture would fill less than `minimumFill` (50 %) of the cell.
+- `.crop` is not available yet.
+
+### Planning without a video
+
+``LayoutProcessor/planFixedGrid(_:sourceAspectRatio:mosaicAspectRatio:mosaicWidth:spacing:reservedHeight:overlayHeight:)`` is pure and never throws; it returns a ``FixedGridPlan`` (a layout with notes, or a ``FixedGridIssue`` with suggestions), which is enough to draw a live preview.
+
+For the fixed-aspect modes the header and the ColorDNA strip are subtracted from the grid area, so the planner needs their exact height in `overlayHeight`:
+
+- compute the header height with ``ThumbnailProcessor/metadataHeaderHeight(for:width:height:thumbnailHeight:forIphone:headerConfig:)``, passing `thumbnailHeight: width / 20` (the fixed-aspect header is sized from `W/20`), and add the ColorDNA strip height when it is shown;
+- use ``LayoutProcessor/fixedGridCanvasWidth(requestedWidth:mosaicAspectRatio:)`` as the `width` for that header: it is the requested width, reduced when a canvas of that width and aspect would be taller than a texture can be.
+
+`.adaptCanvas` ignores `overlayHeight` and only needs `reservedHeight`, an upper bound that keeps the canvas inside the texture limit.
+
+### Configuration
+
+```swift
+let layout = LayoutConfiguration.fixedGrid(rows: 4, columns: 6, fit: .letterbox, aspectRatio: .widescreen)
+```
+
 ## Comparison Matrix
 
 ### Thumbnail Count Distribution
