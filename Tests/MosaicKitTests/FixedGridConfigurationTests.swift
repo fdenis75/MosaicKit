@@ -167,7 +167,7 @@ struct FixedGridConfigurationTests {
         animated.animatedFormat = .gif
         #expect(validationMessage(animated)?.contains("at least 4 cells (a 1 × 3 grid has 3)") == true)
         animated.layout.grid = GridSpecification(rows: 2, columns: 2)
-        #expect(validationMessage(animated)?.contains("not available") == true, "4 cells pass the animation rule")
+        #expect(validationMessage(animated) == nil, "4 cells pass the animation rule")
     }
 
     @Test("An astronomically large spacing is rejected, not a crash")
@@ -190,7 +190,7 @@ struct FixedGridConfigurationTests {
         let spaced = validationMessage(config(width: 2000, grid: GridSpecification(rows: 2, columns: 30), spacing: 40))
         #expect(spaced?.contains("leave frames") == true)
         // Exactly 40 px passes this rule: (1000 - 4 * 4) / 5 = 196, and the fixed-aspect row rule is separate.
-        #expect(validationMessage(config(width: 1000, grid: GridSpecification(rows: 2, columns: 5)))?.contains("not available") == true)
+        #expect(validationMessage(config(width: 1000, grid: GridSpecification(rows: 2, columns: 5))) == nil)
     }
 
     @Test("Fixed-aspect modes also need tall enough frames; adaptCanvas leaves the height to the planner")
@@ -199,35 +199,35 @@ struct FixedGridConfigurationTests {
         let letterbox = validationMessage(config(width: 2000, grid: GridSpecification(rows: 50, columns: 2, fit: .letterbox)))
         #expect(letterbox?.contains("50 rows in a 16:9 canvas of width 2000 leave frames 18 px tall") == true, "got: \(letterbox ?? "no error")")
         let adapt = validationMessage(config(width: 2000, grid: GridSpecification(rows: 50, columns: 2)))
-        #expect(adapt?.contains("not available") == true, "got: \(adapt ?? "no error")")
+        #expect(adapt == nil, "got: \(adapt ?? "no error")")
     }
 
-    @Test("A valid grid is refused for now, in every entry point, before any decode")
-    func validGridIsNotAvailableYet() async throws {
-        let message = validationMessage(config())
-        #expect(message == "The fixedGrid layout is not available in this build yet")
-
-        let url = try #require(Bundle.module.url(forResource: "test_video", withExtension: "mp4"))
-        let video = try await VideoInput(from: url)
-        let generator = try MetalMosaicGenerator()
-        await #expect(throws: MosaicError.self) { try await generator.generateMosaicImage(for: video, config: config(width: 1200)) }
-        await #expect(throws: MosaicError.self) { try await generator.generate(for: video, config: config(width: 1200)) }
+    @Test("A valid adaptCanvas grid validates; the fit modes that are not built yet say so")
+    func fitModesNotBuiltYet() {
+        #expect(validationMessage(config()) == nil)
+        for fit in [GridFitMode.letterbox, .crop, .stretch] {
+            let message = validationMessage(config(grid: GridSpecification(rows: 6, columns: 8, fit: fit)))
+            #expect(message == "The grid fit mode .\(fit.rawValue) is not available in this build yet; use .adaptCanvas", "\(fit)")
+        }
     }
 
     // MARK: - No silent fall-through
 
-    @Test("fixedGrid never produces a custom layout, and does not poison the layout cache")
+    @Test("fixedGrid without a grid never produces a custom layout, and does not poison the layout cache")
     func neverFallsThroughToCustom() {
         let processor = LayoutProcessor()
-        func layout(_ type: LayoutType) -> MosaicLayout {
+        func layout(_ type: LayoutType, grid: GridSpecification? = nil) -> MosaicLayout {
             processor.calculateLayout(
                 originalAspectRatio: 16.0 / 9.0, mosaicAspectRatio: .widescreen, thumbnailCount: 24,
-                mosaicWidth: 2000, density: .m, layoutType: type
+                mosaicWidth: 2000, density: .m, layoutType: type, grid: grid
             )
         }
-        let grid = layout(.fixedGrid)
-        #expect(grid.positions.isEmpty && grid.thumbCount == 0 && grid.mosaicSize == .zero)
+        let empty = layout(.fixedGrid)
+        #expect(empty.positions.isEmpty && empty.thumbCount == 0 && empty.mosaicSize == .zero)
         #expect(!layout(.custom).positions.isEmpty)
         #expect(layout(.fixedGrid).positions.isEmpty, "Asking for custom in between must not change the answer")
+        // An infeasible grid is the empty layout too, never a custom one.
+        #expect(layout(.fixedGrid, grid: GridSpecification(rows: 0, columns: 3)).positions.isEmpty)
+        #expect(layout(.fixedGrid, grid: GridSpecification(rows: 3, columns: 4)).positions.count == 12)
     }
 }

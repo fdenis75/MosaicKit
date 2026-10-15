@@ -142,12 +142,9 @@ public actor MetalMosaicGenerator: MosaicGeneratorProtocol {
                                 let asset = AVURLAsset(url: video.url)
                                 let duration = try await asset.load(.duration).seconds
                                 guard duration.isFinite, duration > 0 else { throw MosaicError.invalidVideo("Invalid duration") }
-                                let ratio = (video.width ?? 1) / (video.height ?? 1)
-                                let count = layoutProcessor.calculateThumbnailCount(duration: duration, width: config.width,
-                                    density: config.density, layoutType: forIphone ? .iphone : config.layout.layoutType, videoAR: ratio)
-                                let layout = layoutProcessor.calculateLayout(originalAspectRatio: ratio,
-                                    mosaicAspectRatio: config.layout.aspectRatio, thumbnailCount: count, mosaicWidth: config.width,
-                                    density: config.density, layoutType: forIphone ? .iphone : config.layout.layoutType)
+                                // The same layout `planMosaic` computes (P2): one shared helper.
+                                let (_, layout) = try makeLayout(for: video, duration: duration, config: config,
+                                                                 forIphone: forIphone, progressHandler: nil)
                                 // `config.overwrite` is false on this path.
                                 try await exportAnimation(for: video, asset: asset, layout: layout, config: config, to: animationURL)
                             }
@@ -322,8 +319,66 @@ public actor MetalMosaicGenerator: MosaicGeneratorProtocol {
         if duration < 5.0 {
             throw MosaicError.invalidVideo("video too short")
         }
-        let aspectRatio = (video.width ?? 1.0) / (video.height ?? 1.0)
-        let layoutType: LayoutType = forIphone ? .iphone : config.layout.layoutType
+        let (frameCount, layout) = try makeLayout(
+            for: video, duration: duration, config: config, forIphone: forIphone, progressHandler: progressHandler
+        )
+        logger.debug("📐 Generation plan for \(video.title) - width: \(config.width), density: \(config.density.name), requested frames: \(frameCount), layout positions: \(layout.positions.count), mosaic size: \(Int(layout.mosaicSize.width))x\(Int(layout.mosaicSize.height))")
+
+        var adjustedConfig = config
+        adjustedConfig.updateAspectRatio(new: AspectRatio.findNearest(to: layout.mosaicSize))
+        return MosaicPlan(asset: asset, layout: layout, config: adjustedConfig)
+    }
+
+    /// The layout type that is actually calculated.
+    ///
+    /// An explicit rows × columns request wins over `forIphone` (P1): `forIphone` still selects the
+    /// iPhone header styling, but it must not silently replace the user's grid with the iPhone
+    /// layout.
+    static func effectiveLayoutType(config: MosaicConfiguration, forIphone: Bool) -> LayoutType {
+        if config.layout.layoutType == .fixedGrid { return .fixedGrid }
+        return forIphone ? .iphone : config.layout.layoutType
+    }
+
+    /// An upper bound for the height the header and the ColorDNA strip add on top of the cells,
+    /// so a grid never plans a canvas the pipeline would reject (§3.4 of the fixed-grid spec).
+    static func fixedGridReservedHeight(for config: MosaicConfiguration) -> Int {
+        let header = config.includeMetadata ? Int((0.10 * Double(config.width)).rounded(.up)) + 32 : 0
+        let strip = config.overlay.colorDNA.show ? Int(config.overlay.colorDNA.height.rounded(.up)) : 0
+        return header + strip
+    }
+
+    /// The frame count and the layout for one video: shared by `planMosaic` and the backfill path
+    /// of `generate`, so both always compute the same layout (P2).
+    ///
+    /// For a fixed grid the plan is checked first: an infeasible request throws a typed error
+    /// before any progress event and before anything is decoded.
+    private func makeLayout(
+        for video: VideoInput,
+        duration: Double,
+        config: MosaicConfiguration,
+        forIphone: Bool,
+        progressHandler: (@Sendable (MosaicGenerationProgress) -> Void)?
+    ) throws -> (frameCount: Int, layout: MosaicLayout) {
+        let layoutType = Self.effectiveLayoutType(config: config, forIphone: forIphone)
+        let grid = layoutType == .fixedGrid ? config.layout.grid : nil
+        var aspectRatio = (video.width ?? 1.0) / (video.height ?? 1.0)
+        let spacing = config.layout.spacing
+        let reservedHeight = layoutType == .fixedGrid ? Self.fixedGridReservedHeight(for: config) : 0
+
+        if layoutType == .fixedGrid {
+            guard let grid else { throw MosaicError.invalidConfiguration("The fixedGrid layout needs LayoutConfiguration.grid (rows and columns)") }
+            guard let width = video.width, let height = video.height, width > 0, height > 0 else {
+                throw MosaicError.invalidVideo(FixedGridIssue.unknownSourceAspect.explanation)
+            }
+            aspectRatio = width / height
+            if forIphone { logger.info("A fixedGrid layout takes precedence over forIphone for \(video.title, privacy: .public)") }
+            if case .infeasible(let issue, _) = layoutProcessor.planFixedGrid(
+                grid, sourceAspectRatio: aspectRatio, mosaicAspectRatio: config.layout.aspectRatio,
+                mosaicWidth: config.width, spacing: spacing, reservedHeight: reservedHeight
+            ) {
+                throw MosaicError.invalidConfiguration(issue.explanation)
+            }
+        }
 
         progressHandler?(MosaicGenerationProgress(video: video, progress: 0.00, status: .countingThumbnails))
         let frameCount = layoutProcessor.calculateThumbnailCount(
@@ -331,7 +386,8 @@ public actor MetalMosaicGenerator: MosaicGeneratorProtocol {
             width: config.width,
             density: config.density,
             layoutType: layoutType,
-            videoAR: aspectRatio
+            videoAR: aspectRatio,
+            grid: grid
         )
 
         progressHandler?(MosaicGenerationProgress(video: video, progress: 0.00, status: .computingLayout))
@@ -341,13 +397,12 @@ public actor MetalMosaicGenerator: MosaicGeneratorProtocol {
             thumbnailCount: frameCount,
             mosaicWidth: config.width,
             density: config.density,
-            layoutType: layoutType
+            layoutType: layoutType,
+            grid: grid,
+            spacing: spacing,
+            reservedHeight: reservedHeight
         )
-        logger.debug("📐 Generation plan for \(video.title) - width: \(config.width), density: \(config.density.name), requested frames: \(frameCount), layout positions: \(layout.positions.count), mosaic size: \(Int(layout.mosaicSize.width))x\(Int(layout.mosaicSize.height))")
-
-        var adjustedConfig = config
-        adjustedConfig.updateAspectRatio(new: AspectRatio.findNearest(to: layout.mosaicSize))
-        return MosaicPlan(asset: asset, layout: layout, config: adjustedConfig)
+        return (frameCount, layout)
     }
 
     /// The metadata header for `video`, or `nil` when `config.includeMetadata` is off.

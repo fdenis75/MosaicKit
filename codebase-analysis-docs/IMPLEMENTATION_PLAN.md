@@ -145,8 +145,8 @@ Every PR updates its row here (status) and the matching §4.2 / §6.1 entries in
 | F-7 | done (I-8, I-9) | #55 |
 | F-8 | in progress, split into small PRs: **F-8a done** (I-18, I-19; #59), **F-8b done** (I-5/6/7; #60), **F-8c done** (I-17; #63), **F-8d done** (I-10, ⚡ gate passed, §8.1; #64). F-8 is complete | #59, #60, #63, #64 |
 | G-0 | fixed grid: spec and decisions | done (#66; all of O1-O18 agreed 2026-10-15) | #66 |
-| G-1 | fixed grid: model, validation, hash | done; `.fixedGrid` throws "not available" until G-2 | #68 |
-| G-2 | fixed grid: `.adaptCanvas` layout ⚡ | planned | |
+| G-1 | fixed grid: model, validation, hash | done | #68 |
+| G-2 | fixed grid: `.adaptCanvas` layout ⚡ | done; A/B/A gate in §8.1 | #69 |
 | G-3 | fixed grid: sampling, header cap, overlays ⚡ | planned | |
 | G-4 | fixed grid: letterbox and stretch | planned | |
 | G-5 | fixed grid: crop ⚡ | planned | |
@@ -254,6 +254,26 @@ No regression beyond noise. The one borderline row (`mosaic-10000-XS`, auto) had
 5.78 against A runs of 5.13 and 5.55; two more legs gave B2 5.31 (inside the A range 5.13-5.55) and
 A3 5.22, so the first B was an outlier. The benchmark config has no `.colorPalette` field, so the
 palette step does not run in it; the default path only gains one function call.
+
+**G-2 A/B/A** (2026-10-15, same machine, one session, `release` build; the same 3 files / 870 MB in
+`/Users/francois/Dev/testvids` as the F-8d run; A = `main@29b40c9`, B = the G-1 + G-2 branch; each
+side built in its own git worktree). Five back-to-back runs, order A1 B A2 B2 A3. Medians in
+seconds; peak RSS in MB.
+
+| Scenario | Conc. | A1 | B | A2 | B2 | A3 | mean(B) vs mean(A) | Peak RSS A1 / B / A2 / B2 / A3 |
+|---|---|---|---|---|---|---|---|---|
+| mosaic-5120-M | 1 | 2.80 | 2.74 | 2.72 | 2.68 | 2.72 | -1.3 % | 587 / 586 / 587 / 588 / 587 |
+| mosaic-5120-M | auto | 1.23 | 1.12 | 1.11 | 1.15 | 1.13 | -1.9 % | 1060 / 1078 / 1083 / 1078 / 1087 |
+| mosaic-10000-XS | 1 | 7.56 | 7.20 | 7.19 | 7.16 | 7.18 | -1.8 % | 1977 / 2261 / 2155 / 2258 / 2240 |
+| mosaic-10000-XS | auto | 5.52 | 5.18 | 5.41 | 4.97 | 5.00 | -4.4 % | 2983 / 3026 / 2972 / 3498 / 3262 |
+| anim-gif-small | 1 | 3.88 | 4.01 | 4.08 | 4.17 | 4.13 | +1.5 % | (process maximum) |
+| anim-gif-small | auto | 2.63 | 2.59 | 2.62 | 2.63 | 2.66 | -1.0 % | (process maximum) |
+| anim-webp-small | 1 | 9.11 | 8.96 | 9.16 | 9.11 | 9.07 | -0.9 % | (process maximum) |
+| anim-webp-small | auto | 7.63 | 7.54 | 7.67 | 7.67 | 7.59 | -0.3 % | (process maximum) |
+
+No regression beyond noise: every row is within -4.4 % and +1.5 % of the mean of A. The existing
+scenarios do not use a grid, so this measures the cost of the refactor (`makeLayout`,
+`effectiveLayoutType`) on the paths that already shipped. A grid scenario is recorded in G-3.
 
 ## 9. Decision log (autonomous work)
 
