@@ -639,7 +639,7 @@ the same `planMosaic` + `composeMosaic`, so both entry points compose the same i
 
 | # | Stage | Code | Runs on | Key facts |
 |---|---|---|---|---|
-| 0 | Validate | `MosaicConfiguration.validate()` [[F:Sources/Models/ConfigurationValidation.swift#15-64#5e794e5a]] | caller → actor | Checks geometry, quality, fps, colors, the fixedGrid rules (G-1), and whether WebP is registered. |
+| 0 | Validate | `MosaicConfiguration.validate()` [[F:Sources/Models/ConfigurationValidation.swift#15-64#a8b86795]] | caller → actor | Checks geometry, quality, fps, colors, the fixedGrid rules (G-1), and whether WebP is registered. |
 | 1 | Skip-if-exists | inside `generate` | generator actor | Uses one `referenceDate` for both the check and the save, so `{time}` resolves identically. With `.withMosaic`, a missing animation is backfilled. |
 | 2 | Duration / AR | inside `generate` | generator actor | Uses `video.duration` if known, else loads it. Rejects `< 5 s`, `width > 16 384`, and non-finite dimensions. Aspect ratio = `video.width / video.height`, which are display dimensions since F-1 (`preferredTransform` is applied in the extractor). |
 | 3 | Thumbnail count | `LayoutProcessor.calculateThumbnailCount` [[F:Sources/Processing/LayoutProcessor.swift#514-547#17a80805]] | generator actor | `count = clamp((width/200 + 10·ln(duration)) × density.factor, 4, 800)`. `.auto` uses the largest screen instead: `⌊screenW/160⌋ × ⌊screenH/(160/videoAR)⌋` (points, so the same in pixels; F-7), clamped to 4…800. `.fixedGrid` returns exactly `rows × columns`, before the short-video rule (G-2). |
@@ -2594,7 +2594,7 @@ P1 = core feature, P2 = supporting, P3 = docs/infra.
 | 14 | P1 | `Sources/Processing/GenerationJobs.swift` | code | 109 | df980649 | Job controller (deprecated, S-6) |
 | 15 | P1 | `Sources/Processing/OutputTransaction.swift` | code | 62 | e5da241b | Atomic commit |
 | 16 | P1 | `Sources/Processing/MosaicFrameSource.swift` | code | 0 | — | **Removed in S-1 (#38)** (reverted 1.7.0 pull-based frame source) |
-| 17 | P1 | `Sources/Models/ConfigurationValidation.swift` | model | 159 | 5e794e5a | All `validate()` |
+| 17 | P1 | `Sources/Models/ConfigurationValidation.swift` | model | 161 | a8b86795 | All `validate()` |
 | 18 | P1 | `Sources/Processing/Preview/FFmpegEncoder.swift` | code | 422 | d99fd279 | ffmpeg pipeline (macOS) |
 | 19 | P1 | `Sources/Processing/OverlayProcessor.swift` | code | 303 | 417dd3da | DNA strip, watermark |
 | 20 | P1 | `Sources/Models/OverlayConfiguration.swift` | model | 360 | 49b96e9c | Overlay configs |
@@ -2645,10 +2645,10 @@ P1 = core feature, P2 = supporting, P3 = docs/infra.
 | 65 | P2 | `Tests/MosaicKitTests/VideoDiscoveryReportTests.swift` | test | 75 | 15d7489c | Discovery that reports per-file failures (F-8c) |
 | 66 | P2 | `Tests/MosaicKitTests/ColorPaletteSwatchTests.swift` | test | 126 | 123b4f96 | Palette sampling and the header's swatches (F-8d) |
 | 67 | P1 | `Sources/Models/GridSpecification.swift` | model | 75 | 59e8e8a8 | `GridFitMode`, `GridSpecification` (G-1) |
-| 68 | P2 | `Tests/MosaicKitTests/FixedGridConfigurationTests.swift` | test | 220 | 3eaac020 | fixedGrid model, validation, hash (G-1) |
+| 68 | P2 | `Tests/MosaicKitTests/FixedGridConfigurationTests.swift` | test | 233 | d8dce156 | fixedGrid model, validation, hash (G-1) |
 | 69 | P1 | `Sources/Models/FixedGridPlan.swift` | model | 70 | a6a8705d | `FixedGridPlan`, `FixedGridIssue`, `FixedGridNote` (G-2) |
-| 70 | P1 | `Sources/Processing/LayoutProcessor+FixedGrid.swift` | code | 124 | c8720193 | `planFixedGrid` and the `.adaptCanvas` planner (G-2) |
-| 71 | P2 | `Tests/MosaicKitTests/FixedGridLayoutTests.swift` | test | 388 | a19dbb3d | fixedGrid planner properties, goldens and integration (G-2) |
+| 70 | P1 | `Sources/Processing/LayoutProcessor+FixedGrid.swift` | code | 127 | 78c9046a | `planFixedGrid` and the `.adaptCanvas` planner (G-2) |
+| 71 | P2 | `Tests/MosaicKitTests/FixedGridLayoutTests.swift` | test | 405 | decb7b5e | fixedGrid planner properties, goldens and integration (G-2) |
 
 Excluded or low value: `Media.xcassets/**` (binary fixture), `Tests/MosaicKitTests/embeddedAsset/test_video.mp4`
 (87 s 8-bit H.264 video-only fixture), `scripts/**` + `Makefile` (xcodebuild agent scaffold for a

@@ -69,7 +69,10 @@ extension LayoutProcessor {
         let rows = grid.rows
         let columns = grid.columns
         let gutter = Self.fixedGridGutter
-        let inset = max(0, Int(spacing.rounded()) - gutter)
+        // `spacing` comes from a public mutable property or from decoding: keep the Int conversion
+        // in range (NaN and infinity count as the default; a huge value is rejected as 'cells too small').
+        let usableSpacing = spacing.isFinite ? min(max(spacing.rounded(), 0), 1_000_000) : CGFloat(gutter)
+        let inset = max(0, Int(usableSpacing) - gutter)
         let width = min(max(requestedWidth, 1), Self.maximumCanvasSide)
         let maximumHeight = max(1, Self.maximumCanvasSide - max(reservedHeight, 0))
 

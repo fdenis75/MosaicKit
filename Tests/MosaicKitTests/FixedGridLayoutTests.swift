@@ -101,6 +101,23 @@ struct FixedGridLayoutTests {
         #expect(wrong.isEmpty, "\(wrong.prefix(5))")
     }
 
+    @Test("Unusable spacing never traps: huge is 'too small', NaN, infinity and negative count as the default")
+    func unusableSpacing() {
+        func issue(_ spacing: CGFloat) -> FixedGridIssue? {
+            if case .infeasible(let issue, _) = plan(2, 3, width: 2000, spacing: spacing) { return issue }
+            return nil
+        }
+        for huge in [CGFloat(1e12), CGFloat(Double(Int.max)), CGFloat.greatestFiniteMagnitude] {
+            guard case .cellsTooSmall(_, let minimum)? = issue(huge) else { Issue.record("spacing \(huge) should be too large"); continue }
+            #expect(minimum == 40)
+        }
+        guard case .layout(let baseline, _, _) = plan(2, 3, width: 2000) else { Issue.record("baseline"); return }
+        for odd in [CGFloat.nan, .infinity, -.infinity, -5, 0, 4] {
+            guard case .layout(let layout, _, _) = plan(2, 3, width: 2000, spacing: odd) else { Issue.record("spacing \(odd) should plan"); continue }
+            #expect(layout.thumbnailSizes == baseline.thumbnailSizes, "spacing \(odd)")
+        }
+    }
+
     @Test("Every issue explains itself with its numbers")
     func issueExplanations() {
         #expect(FixedGridIssue.tooManyCells(cells: 2500, maximum: 1000).explanation.contains("at most 1000 cells"))
