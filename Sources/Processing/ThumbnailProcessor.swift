@@ -470,6 +470,54 @@ public final class ThumbnailProcessor: Sendable {
         logger.debug("⏱️ Operation completed in \(executionTime) seconds")
     }
     
+    /// The colors for the header's `.colorPalette` swatches: the average color of `count` frames
+    /// spread evenly over the middle 90 % of the video (I-10).
+    ///
+    /// `duration` is the known duration in seconds; `nil` (a `VideoInput` created without one)
+    /// loads it from the file, as the layout planning does. A duration of zero or less gives no swatches.
+    ///
+    /// Only called when the header asks for a palette, so the default pipeline pays nothing. The
+    /// frames are decoded at thumbnail size with a loose time tolerance; a frame that can't be
+    /// read is skipped, and an empty result simply leaves the swatch row out.
+    func paletteSwatchColors(url: URL, duration knownDuration: Double?, count: Int) async throws -> [CGColor] {
+        signposter.emitEvent("paletteSwatchColors")
+        let intervalState = signposter.beginInterval("paletteSwatchColors")
+        defer { signposter.endInterval("paletteSwatchColors", intervalState) }
+        guard count > 0 else { return [] }
+        let swatches = min(count, Self.maximumPaletteSwatches)
+        try Task.checkCancellation()
+        // Takes the URL, not an `AVAsset`: assets are not Sendable, and this runs off the
+        // generator's actor.
+        let asset = AVURLAsset(url: url)
+        let duration: Double
+        if let knownDuration {
+            duration = knownDuration
+        } else {
+            duration = try await asset.load(.duration).seconds
+        }
+        guard duration.isFinite, duration > 0 else { return [] }
+        let generator = AVAssetImageGenerator(asset: asset)
+        generator.appliesPreferredTrackTransform = true
+        generator.requestedTimeToleranceBefore = CMTime(seconds: 1.0, preferredTimescale: 600)
+        generator.requestedTimeToleranceAfter = CMTime(seconds: 1.0, preferredTimescale: 600)
+        generator.maximumSize = CGSize(width: 64, height: 64)
+        let start = duration * 0.05
+        let span = duration * 0.90
+        let times = (0..<swatches).map { index in
+            CMTime(seconds: start + span * (Double(index) + 0.5) / Double(swatches), preferredTimescale: 600)
+        }
+        var colors: [CGColor] = []
+        for try await result in generator.images(for: times) {
+            try Task.checkCancellation()
+            guard case .success(_, let image, _) = result else { continue }
+            colors.append(OverlayProcessor.averageColor(of: image))
+        }
+        return colors
+    }
+
+    /// Upper bound for `MetadataField.colorPalette(swatchCount:)`; more swatches would not fit the header.
+    static let maximumPaletteSwatches = 32
+
     private func configureGenerator(
         for asset: AVAsset,
         accurate: Bool,

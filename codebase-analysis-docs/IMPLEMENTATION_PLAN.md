@@ -142,7 +142,7 @@ Every PR updates its row here (status) and the matching §4.2 / §6.1 entries in
 | F-5 | planned | |
 | F-6 | done (I-22) | #56 |
 | F-7 | done (I-8, I-9) | #55 |
-| F-8 | in progress, split into small PRs: **F-8a done** (I-18, I-19; #59), **F-8b done** (I-5/6/7; #60), **F-8c done** (I-17; #63). Remaining: F-8d I-10 (⚡ swatches) | #59, #60, #63 |
+| F-8 | in progress, split into small PRs: **F-8a done** (I-18, I-19; #59), **F-8b done** (I-5/6/7; #60), **F-8c done** (I-17; #63), **F-8d done** (I-10, ⚡ gate passed, §8.1; #64). F-8 is complete | #59, #60, #63, #64 |
 
 ### 8.1 Benchmark baseline
 
@@ -224,6 +224,27 @@ compare only within this table. Medians in seconds; peak RSS in MB.
 
 No row regresses beyond noise (A1 and A2 differ by up to 4.5 % on the same code). The fix only
 adds one `load(.preferredTransform)` per inspection, and none of these clips is rotated.
+
+**F-8d A/B/A** (2026-10-15, same machine, one session, `release` build; 3 files / 870 MB in
+`/Users/francois/Dev/testvids`, all unrotated DJI clips; the folder was restored that day, so
+this set differs from the earlier tables; A = `main@cf23e73`, B = `claude/f8d-color-palette-swatches-i10`).
+Five back-to-back runs, order A1 B A2 B2 A3. Medians in seconds; peak RSS in MB.
+
+| Scenario | Conc. | A1 | B | A2 | B2 | A3 | mean(B) vs mean(A) | Peak RSS A1 / B / A2 / B2 / A3 |
+|---|---|---|---|---|---|---|---|---|
+| mosaic-5120-M | 1 | 2.83 | 2.84 | 2.80 | 2.83 | 2.77 | +1.2 % | 588 / 585 / 587 / 587 / 588 |
+| mosaic-5120-M | auto | 1.20 | 1.20 | 1.18 | 1.20 | 1.18 | +1.1 % | 1047 / 1023 / 1066 / 1040 / 1073 |
+| mosaic-10000-XS | 1 | 7.44 | 7.44 | 7.63 | 7.37 | 7.50 | -1.6 % | 2251 / 2227 / 2146 / 2259 / 2153 |
+| mosaic-10000-XS | auto | 5.13 | 5.78 | 5.55 | 5.31 | 5.22 | +4.6 % | 3331 / 3099 / 2853 / 3180 / 3235 |
+| anim-gif-small | 1 | 3.86 | 4.04 | 3.90 | 3.81 | 3.94 | +0.6 % | (process maximum) |
+| anim-gif-small | auto | 2.65 | 2.66 | 2.68 | 2.68 | 2.65 | +0.4 % | (process maximum) |
+| anim-webp-small | 1 | 9.05 | 9.19 | 8.92 | 9.05 | 8.96 | +1.6 % | (process maximum) |
+| anim-webp-small | auto | 7.80 | 7.71 | 7.71 | 7.73 | 7.78 | -0.6 % | (process maximum) |
+
+No regression beyond noise. The one borderline row (`mosaic-10000-XS`, auto) had a first B of
+5.78 against A runs of 5.13 and 5.55; two more legs gave B2 5.31 (inside the A range 5.13-5.55) and
+A3 5.22, so the first B was an outlier. The benchmark config has no `.colorPalette` field, so the
+palette step does not run in it; the default path only gains one function call.
 
 ## 9. Decision log (autonomous work)
 

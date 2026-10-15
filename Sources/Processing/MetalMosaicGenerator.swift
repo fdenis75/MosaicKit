@@ -350,6 +350,41 @@ public actor MetalMosaicGenerator: MosaicGeneratorProtocol {
         return MosaicPlan(asset: asset, layout: layout, config: adjustedConfig)
     }
 
+    /// The metadata header for `video`, or `nil` when `config.includeMetadata` is off.
+    ///
+    /// `.colorPalette` swatches need colors before the header is drawn, so a few frames are
+    /// sampled first. That step is skipped, at no cost, unless the header asks for the field (I-10).
+    /// Internal (not private) so tests can check the header without the random mosaic background.
+    func makeMetadataHeader(
+        for video: VideoInput,
+        layout: MosaicLayout,
+        config: MosaicConfiguration,
+        forIphone: Bool
+    ) async throws -> CGImage? {
+        guard config.includeMetadata else { return nil }
+        let headerConfig = config.overlay.header
+        var swatchColors: [CGColor] = []
+        if let swatchCount = headerConfig.paletteSwatchCount {
+            do {
+                swatchColors = try await thumbnailProcessor.paletteSwatchColors(
+                    url: video.url, duration: video.duration, count: swatchCount
+                )
+            } catch is CancellationError {
+                throw CancellationError()
+            } catch {
+                logger.warning("Palette swatches skipped for \(video.title, privacy: .public): \(error.localizedDescription, privacy: .public)")
+            }
+        }
+        return thumbnailProcessor.createMetadataHeader(
+            for: video,
+            width: Int(layout.mosaicSize.width),
+            thumbnailHeight: layout.thumbnailSize.height,
+            forIphone: forIphone,
+            headerConfig: headerConfig,
+            swatchColors: swatchColors
+        ) as CGImage?
+    }
+
     /// Composes the mosaic image: metadata header, streamed frames through Metal (progress
     /// `.creatingMosaic`, 0.7 → 0.999), then the ColorDNA strip and the watermark.
     private func composeMosaic(
@@ -362,16 +397,9 @@ public actor MetalMosaicGenerator: MosaicGeneratorProtocol {
         let config = plan.config
         let overlayConfig = config.overlay
 
-        var metadataHeader: CGImage? = nil
-        if config.includeMetadata {
-            metadataHeader = thumbnailProcessor.createMetadataHeader(
-                for: video,
-                width: Int(layout.mosaicSize.width),
-                thumbnailHeight: layout.thumbnailSize.height,
-                forIphone: forIphone,
-                headerConfig: overlayConfig.header
-            ) as CGImage?
-        }
+        let metadataHeader = try await makeMetadataHeader(
+            for: video, layout: layout, config: config, forIphone: forIphone
+        )
 
         let colorCollector = overlayConfig.colorDNA.show ? FrameColorCollector() : nil
         let processedStream = thumbnailProcessor.processedFramesStream(

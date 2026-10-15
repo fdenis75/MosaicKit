@@ -185,6 +185,14 @@ public struct HeaderConfig: Codable, Sendable {
         self.backgroundColor = backgroundColor
     }
 
+    /// The swatch count of the first `.colorPalette` field, or `nil` when the header has none.
+    internal var paletteSwatchCount: Int? {
+        for field in fields {
+            if case .colorPalette(let swatchCount) = field { return swatchCount }
+        }
+        return nil
+    }
+
     /// Reproduces the original hardcoded header appearance.
     public static let `default` = HeaderConfig()
 }
