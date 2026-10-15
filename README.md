@@ -21,8 +21,27 @@ A high-performance Swift package for generating video mosaics with Metal-acceler
 
 ## Unreleased
 
-- **`MetadataField.colorPalette` now renders** (I-10) — a header with `.colorPalette(swatchCount:)` used to ignore the field. It now draws that many color swatches (at most 32): the average color of frames spread evenly over the video. The extra sampling (a few small frames) runs only when the header has the field, so existing configurations are unaffected. Header height and layout don't change, so mosaics that already listed `.colorPalette` gain the swatches in the header's right corner.
+- Nothing yet. Add a line here for every change; output-naming and location changes (📁) also get a **Behavior changes** note.
+
+## New in 1.10.0
+
+Minor release on top of 1.9.1: nothing in the public API is removed or changed, and no output file name changes. Upgrading from 1.9.x? [MIGRATING-TO-1.10.md](MIGRATING-TO-1.10.md) lists the two things that can affect an app.
+
+### New API
+
 - **`discoverVideosReportingFailures(in:recursive:metadataConcurrency:)`** (I-17) — new discovery function that keeps going past files it can't inspect (an `.mkv` AVFoundation can't read, a corrupt file, an undecodable codec on iOS). It returns a `VideoDiscoveryReport` with `videos` (inspected, in filename order) and `failures` (`VideoDiscoveryFailure` with the file `url` and the `error`). `discoverVideos(in:recursive:metadataConcurrency:)` is unchanged: it still throws on the first failing file.
+
+### Behavior changes
+
+- **`MetadataField.colorPalette` now renders** (I-10) — a header with `.colorPalette(swatchCount:)` used to ignore the field. It now draws that many color swatches (at most 32): the average color of frames spread evenly over the video. The extra sampling (a few small frames) runs only when the header has the field, so existing configurations are unaffected. Header height and layout don't change, so mosaics that already listed `.colorPalette` gain the swatches in the header's right corner.
+
+### Internal
+
+- **Faster CI** (#62) — the iOS Simulator check takes about 4 minutes instead of 9.5. The six end-to-end animated-export tests run in a nightly workflow run (and on demand with `gh workflow run Swift --ref <branch>`) instead of on every push and pull request; the fast synthetic-frame encoder tests always run. Two diagnostic CI steps were removed and the HEIC integration test uses fewer frames.
+
+### Known issue
+
+- **Native preview export can stall under macOS background scheduling** (I-26), unchanged. See the `PreviewExporting` article.
 
 ## New in 1.9.1
 
@@ -216,7 +235,7 @@ Add MosaicKit to your `Package.swift`:
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/fdenis75/MosaicKit.git", from: "1.9.1")
+    .package(url: "https://github.com/fdenis75/MosaicKit.git", from: "1.10.0")
 ]
 ```
 
