@@ -286,7 +286,7 @@ work as the package stands. The files in `Examples/` are reference snippets only
 │   │       ├── AppLifecycleMonitor.swift  Foreground-wait gate (singleton actor)
 │   │       └── PreviewError.swift
 │   ├── Shaders/MetalShaders.metal     5 kernels: scaleTexture, compositeTextures, fillTexture, addBorder, addShadow
-│   ├── VideoInputScanner.swift        scanVideos / discoverVideoSources / discoverVideos
+│   ├── VideoInputScanner.swift        scanVideos / discoverVideoSources / discoverVideos / discoverVideosReportingFailures
 │   └── MosaicKit.docc/                DocC catalog (8 articles)
 ├── SourcesWebP/MosaicKitWebP.swift    → target "MosaicKitWebP" (DefaultMosaicKitWebPEncoder + register())
 ├── Tests/MosaicKitTests/              Swift Testing suites (32 files) + embeddedAsset/ (test_video.mp4, rotated_portrait.mp4, pinned config JSON)
@@ -1087,6 +1087,7 @@ backbone. Read `LayoutProcessor` algorithms, `ThumbnailProcessor` header/label r
   | `scanVideos(in:recursive:)` | no | yes, via the non-throwing `VideoInput(url:)` | Legacy. Swallows enumeration errors (returns `[]`). Stops early on cancellation and returns a partial list. |
   | `discoverVideoSources(in:recursive:)` | yes | no | Returns `[VideoSource]`. Cheap, and suitable for persisted queues. |
   | `discoverVideos(in:recursive:metadataConcurrency:)` | yes | yes, via `VideoSource.inspect()` | At most `metadataConcurrency` inspections run at once (1…64, default 2). **The first failing file fails the whole call.** |
+  | `discoverVideosReportingFailures(in:recursive:metadataConcurrency:)` (F-8c, I-17) | yes (folder, concurrency, cancellation) | yes, same engine | Returns a `VideoDiscoveryReport`: `videos` plus `failures` (`VideoDiscoveryFailure(url, error)`), both in filename order. A file that can't be inspected no longer aborts the scan. |
 
 - **How it works:** `collectVideoURLs` does the following.
   1. Requires the URL to be a directory.
@@ -1096,15 +1097,19 @@ backbone. Read `LayoutProcessor` algorithms, `ThumbnailProcessor` header/label r
      m2ts mts mxf f4v asf.
   4. Sorts with Finder-like `localizedStandardCompare` on the filename, using the full path as
      a tie-break.
-  5. Wraps the root in security-scoped access.
+  5. Wraps the root in security-scoped access. `discoverVideos` and
+     `discoverVideosReportingFailures` hold it for the enumeration *and* the inspections (one
+     private `discoverAndInspect`, then `inspect` with a sliding window of tasks).
 - **Edge cases:**
   - The extension list includes containers AVFoundation often **cannot** decode (mkv, webm,
     avi, wmv, flv, asf). They are discovered but then fail at inspection. With
-    `discoverVideos`, a single unreadable `.mkv` aborts the whole scan. `scanVideos` keeps them
-    as metadata-less `VideoInput`s, which later fail in generation.
+    `discoverVideos`, a single unreadable `.mkv` aborts the whole scan (use
+    `discoverVideosReportingFailures` to collect those files as failures instead, F-8c).
+    `scanVideos` keeps them as metadata-less `VideoInput`s, which later fail in generation.
   - Symlinks are neither followed nor rejected explicitly.
 - **Tests:** `InputValidationRegressionTests` → "Discovery is throwing, filters files and
-  observes cancellation".
+  observes cancellation"; `VideoDiscoveryReportTests` (failures listed in filename order, strict
+  discovery still throws, empty and clean folders, concurrency and cancellation still throw).
 
 ### F2 — Video input & inspection
 
@@ -1700,7 +1705,7 @@ none.
    (F4). *(Fixed in F-7, I-9: pixels throughout, count floored at 4.)*
 10. **`LayoutConfiguration.spacing` is not a layout input.** It only insets cells (F4).
 11. **`discoverVideos` fails the whole scan on one undecodable file**, and the extension list
-    includes formats AVFoundation usually can't read (F1).
+    includes formats AVFoundation usually can't read (F1). *(Addressed in F-8c, I-17: `discoverVideosReportingFailures` reports per-file failures; `discoverVideos` is unchanged.)*
 12. **Fixed in F-3 (I-11): the `{aspectRatio}` template token inserted a colon** (e.g. `16:9`) into directory and
     file names. On macOS, a colon is shown as `/` in Finder and is invalid on SMB and exFAT
     (F12).
@@ -1817,7 +1822,7 @@ robustness, performance, or cosmetic.
 | I-14 | F11 | **A `GenerationJobController` job cancelled before it runs is stuck in `.cancelling`** and cannot be retried. Records never freed; no tests. | Confirmed (static) | Low–Medium | `cancel` sets `.cancelling`; only `value(for:)` moves it to `.cancelled` | In `cancel`, if `task == nil`, go directly to `.cancelled`. Add `remove(_:)`. Add tests. **Decision D1: deprecate `GenerationJobController` (won't fix) → plan S-6.** **Won't fix: deprecated in S-6** with the other job types; removed in 2.0. |
 | I-15 | F10 | **Mosaic coordinator keys state by `video.id`.** Concurrent jobs on the same input clobber each other's cancellation and progress. | **Fixed (S-3)**: tasks, handlers and sources keyed per attempt; `activeTasks` is a read-only view by video ID. **Test:** `BatchRunnerTests` "Cancelling a video cancels every concurrent attempt on it" | Low | `attemptTasks[attemptID]`, `attemptSources`, `progressHandlers[attemptID]` | The generator's own `setProgressHandler(for:)` is still keyed by video; two concurrent attempts on one video can swap per-stage progress handlers there (cancellation is unaffected). |
 | I-16 | F3/F9 | **Slow ffmpeg cancellation under load** (16–20 s instead of ~4 s). This makes `ffmpegCancellationKillsUncooperativeProcess` fail intermittently in CI. | **Fixed (PR #34, merged)** | Medium | CI logs on PR #32/#33; the watchdog is a `Task` that polls every 2 s and escalates with `Task.sleep` | **Fixed in PR #34**: `DispatchSourceTimer` watchdog on a dedicated queue plus termination from `onCancel`. macOS CI is green, including this test. The native/SJS/passthrough watchdogs moved to the same `DispatchSourceTimer` approach in S-4 (`ExportWatchdog`). |
-| I-17 | F1 | `discoverVideos` fails the whole scan on one undecodable file. The extension list includes formats AVFoundation rarely decodes (mkv, webm, avi, wmv, flv, asf). | Confirmed (static) | Low–Medium | `discoverVideos` rethrows the first inspection error | Collect per-file failures (a result type), or skip them with a report. |
+| I-17 | F1 | `discoverVideos` fails the whole scan on one undecodable file. The extension list includes formats AVFoundation rarely decodes (mkv, webm, avi, wmv, flv, asf). | **Fixed (F-8c)**: new `discoverVideosReportingFailures(in:recursive:metadataConcurrency:)` returns a `VideoDiscoveryReport` (`videos`, `failures`); `discoverVideos` keeps its throwing contract so existing callers are unchanged. **Tests:** `VideoDiscoveryReportTests`. | Low–Medium | `discoverVideos` rethrows the first inspection error | Collect per-file failures (a result type), or skip them with a report. |
 | I-18 | F5 | ColorDNA height decoded as 0 (bypassing the init clamp) → strip **silently skipped**. Watermark image load failure → **silently omitted**. | **Fixed (F-8a)**: `ColorDNAConfig` decoding and `applyColorDNA` clamp the height (≥ 8, non-finite → 8); `MetalMosaicGenerator` logs a warning when the strip or watermark is requested but not drawn. **Tests:** `OverlayProcessorTests` (clamping, decoding). Throwing in a strict mode was not added. | Low | `OverlayProcessor` returns `nil`; the generator keeps the un-annotated image | Validate DNA height ≥ 8. Surface overlay failures (log at least, or throw in strict mode). |
 | I-19 | F2 | `VideoInput(url:)` (legacy) swallows inspection errors and returns metadata-less inputs. `generateMosaicsForFiles` uses it. | **Fixed (F-8a, docs)**: the `VideoInput(url:…)` doc comment says it never throws and keeps only the supplied values; README "Custom Video Input" shows `VideoSource(url:title:).inspect()`. The legacy initializer is unchanged (`generateMosaicsForFiles` still uses it). | Low | `VideoInput.init(url:…) async` | Prefer `VideoInput(from:)` or `VideoSource.inspect()` in new code. |
 | I-20 | F6 | Animated export with `.nochange` holds all full-resolution frames in memory (e.g. 4K × up to 800 frames). | Confirmed (static) | Medium (memory) | `extractFramesForGif` returns `[CGImage]` | Stream frames into `CGImageDestination` / the WebP encoder incrementally, or cap `.nochange` by frame count. |
@@ -2132,6 +2137,7 @@ def dynamic(n,W,ar):
 | `scanVideos(in:recursive:) -> [VideoInput]` | free func (non-throwing, legacy) | See F1 |
 | `discoverVideoSources(in:recursive:) throws -> [VideoSource]` | free func | No metadata I/O |
 | `discoverVideos(in:recursive:metadataConcurrency: = 2) throws -> [VideoInput]` | free func | Inspects up to 1…64 files at a time. The first failure aborts the whole scan |
+| `discoverVideosReportingFailures(in:recursive:metadataConcurrency: = 2) throws -> VideoDiscoveryReport` | free func | Same, but failures are collected: `report.videos` and `report.failures` (`url`, `error`) (F-8c) |
 | `MosaicKitWebP.register()` | static func (product `MosaicKitWebP`) | Installs `DefaultMosaicKitWebPEncoder` into `MosaicKitWebPSupport.encoder` |
 
 #### 5.2.2 Lower-level public components (usable directly, less stable)
@@ -2595,7 +2601,7 @@ P1 = core feature, P2 = supporting, P3 = docs/infra.
 | 33 | P2 | `Sources/Processing/ProcessingError.swift` | code | 97 | 9896b38f | MosaicError, LibraryError |
 | 34 | P2 | `Sources/Processing/VideoError.swift` | code | 169 | 49827fa2 | VideoError (incl. `unsupportedCodec`, F-6) |
 | 35 | P2 | `Sources/Processing/VideoMetadataExtractor.swift` | code | 177 | 3f894c78 | Metadata actor |
-| 36 | P2 | `Sources/VideoInputScanner.swift` | code | 106 | 3eee6885 | Discovery |
+| 36 | P2 | `Sources/VideoInputScanner.swift` | code | 158 | cfdb9b15 | Discovery |
 | 37 | P2 | `Sources/Shaders/MetalShaders.metal` | shader | 160 | 69c46806 | 5 kernels |
 | 38 | P2 | `Tests/MosaicKitTests/CombinationTests.swift` | test | 709 | ca867ab4 | Serialized mosaic matrix |
 | 39 | P2 | `Tests/MosaicKitTests/PreviewCombinationTests.swift` | test | 686 | 7bdd7237 | Serialized preview matrix |
@@ -2623,6 +2629,8 @@ P1 = core feature, P2 = supporting, P3 = docs/infra.
 | 61 | P1 | `Sources/Processing/VideoCodecSupport.swift` | code | 61 | f82ab846 | Detects H.264 profiles iOS cannot decode (F-6, I-22) |
 | 62 | P2 | `Tests/MosaicKitTests/VideoCodecSupportTests.swift` | test | 103 | 2ff12cf6 | avcC profile detection, format descriptions, error text (F-6) |
 | 63 | P1 | `Sources/Models/PreviewQualityTier.swift` | model | 33 | a4405fda | Quality to SJS codec tier, shared by the exporter and the description (F-8b, I-6) |
+| 64 | P1 | `Sources/Models/VideoDiscoveryReport.swift` | model | 29 | 44651536 | `VideoDiscoveryReport` / `VideoDiscoveryFailure` (F-8c, I-17) |
+| 65 | P2 | `Tests/MosaicKitTests/VideoDiscoveryReportTests.swift` | test | 75 | 15d7489c | Discovery that reports per-file failures (F-8c) |
 
 Excluded or low value: `Media.xcassets/**` (binary fixture), `Tests/MosaicKitTests/embeddedAsset/test_video.mp4`
 (87 s 8-bit H.264 video-only fixture), `scripts/**` + `Makefile` (xcodebuild agent scaffold for a
@@ -2647,8 +2655,8 @@ RELATED PRs (merged): #32 this doc (+README unreleased note); #33 iOS CI scheme 
              #34 ffmpeg watchdog (I-16); #35 review path filter; #36 fast animated tests;
              #31 closed (duplicate of #33). Open: #37 CLAUDE.md/AGENTS.md rewrite + this refresh
 
-FILE_MAP_SUMMARY: Appendix A (63 files; P0 = 8, P1 = 17)
-ISSUE REGISTER:   §4.2 I-1 … I-27   (High: I-1, I-2; Medium: I-3 I-4 I-8 I-12 I-16 I-20 I-22 I-24 I-26 I-27; fixed: I-1 I-2 I-3 I-9 I-11 I-12 I-5 I-6 I-7 I-15 I-18 I-19 I-22 I-16 I-23 I-24 I-27)
+FILE_MAP_SUMMARY: Appendix A (65 files; P0 = 8, P1 = 18)
+ISSUE REGISTER:   §4.2 I-1 … I-27   (High: I-1, I-2; Medium: I-3 I-4 I-8 I-12 I-16 I-20 I-22 I-24 I-26 I-27; fixed: I-1 I-2 I-3 I-9 I-11 I-12 I-5 I-6 I-7 I-15 I-17 I-18 I-19 I-22 I-16 I-23 I-24 I-27)
 ROADMAP:          §6.1 → IMPLEMENTATION_PLAN.md (decisions §6.4)
 OPEN_QUESTIONS:   §6.2 (Q11 Q14 Q16 Q17; Q13 answered in F-2)
 GLOSSARY:         §5.1

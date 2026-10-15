@@ -26,10 +26,45 @@ public func discoverVideoSources(in folder: URL, recursive: Bool = false) async 
 }
 
 /// Inspects discovered videos with at most `metadataConcurrency` simultaneous loads.
-/// Results retain deterministic filename order. The first error cancels remaining inspections.
+/// Results retain deterministic filename order. The first error cancels remaining inspections;
+/// use ``discoverVideosReportingFailures(in:recursive:metadataConcurrency:)`` to keep going past
+/// files that can't be inspected.
 public func discoverVideos(
     in folder: URL, recursive: Bool = false, metadataConcurrency: Int = 2
 ) async throws -> [VideoInput] {
+    try await discoverAndInspect(
+        in: folder, recursive: recursive, metadataConcurrency: metadataConcurrency, stopOnFirstFailure: true
+    ).outcomes.compactMap { try? $0.get() }
+}
+
+/// Like ``discoverVideos(in:recursive:metadataConcurrency:)``, but one undecodable file does not
+/// abort the scan: files that fail inspection are collected in ``VideoDiscoveryReport/failures``
+/// (with their error) and the rest are returned in ``VideoDiscoveryReport/videos``.
+///
+/// Still throws for a bad `metadataConcurrency`, for a folder that can't be enumerated, and with
+/// `CancellationError` when the task is cancelled.
+public func discoverVideosReportingFailures(
+    in folder: URL, recursive: Bool = false, metadataConcurrency: Int = 2
+) async throws -> VideoDiscoveryReport {
+    let (urls, outcomes) = try await discoverAndInspect(
+        in: folder, recursive: recursive, metadataConcurrency: metadataConcurrency, stopOnFirstFailure: false
+    )
+    var videos: [VideoInput] = []
+    var failures: [VideoDiscoveryFailure] = []
+    for (url, outcome) in zip(urls, outcomes) {
+        switch outcome {
+        case .success(let video): videos.append(video)
+        case .failure(let error): failures.append(VideoDiscoveryFailure(url: url, error: error))
+        }
+    }
+    return VideoDiscoveryReport(videos: videos, failures: failures)
+}
+
+/// Enumerates `folder` and inspects what it finds, holding the folder's security-scoped access
+/// for the whole time (the files are only readable while it is open).
+private func discoverAndInspect(
+    in folder: URL, recursive: Bool, metadataConcurrency: Int, stopOnFirstFailure: Bool
+) async throws -> (urls: [URL], outcomes: [Result<VideoInput, any Error>]) {
     guard (1...64).contains(metadataConcurrency) else {
         throw MosaicError.invalidConfiguration("Metadata concurrency must be between one and 64")
     }
@@ -37,29 +72,46 @@ public func discoverVideos(
     let scoped = folder.startAccessingSecurityScopedResource()
     defer { if scoped { folder.stopAccessingSecurityScopedResource() } }
     let urls = try collectVideoURLs(in: folder, recursive: recursive)
-    return try await withThrowingTaskGroup(of: (Int, VideoInput).self) { group in
+    let outcomes = try await inspect(urls, metadataConcurrency: metadataConcurrency, stopOnFirstFailure: stopOnFirstFailure)
+    return (urls, outcomes)
+}
+
+/// Inspects `urls` with a sliding window of `metadataConcurrency` tasks. The outcomes keep the
+/// order of `urls`. Cancellation always throws; with `stopOnFirstFailure` so does the first failed
+/// inspection, which cancels the remaining ones.
+private func inspect(
+    _ urls: [URL], metadataConcurrency: Int, stopOnFirstFailure: Bool
+) async throws -> [Result<VideoInput, any Error>] {
+    try await withThrowingTaskGroup(of: (Int, Result<VideoInput, any Error>).self) { group in
         var nextIndex = 0
-        var results: [VideoInput?] = Array(repeating: nil, count: urls.count)
+        var outcomes = [Result<VideoInput, any Error>?](repeating: nil, count: urls.count)
         func add(_ index: Int) {
             group.addTask {
                 try Task.checkCancellation()
-                return (index, try await VideoSource(url: urls[index]).inspect())
+                do {
+                    return (index, .success(try await VideoSource(url: urls[index]).inspect()))
+                } catch is CancellationError {
+                    throw CancellationError()
+                } catch {
+                    return (index, .failure(error))
+                }
             }
         }
         while nextIndex < min(metadataConcurrency, urls.count) {
             add(nextIndex)
             nextIndex += 1
         }
-        while let (index, video) = try await group.next() {
+        while let (index, outcome) = try await group.next() {
             try Task.checkCancellation()
-            results[index] = video
+            if stopOnFirstFailure, case .failure(let error) = outcome { throw error }
+            outcomes[index] = outcome
             if nextIndex < urls.count {
                 add(nextIndex)
                 nextIndex += 1
             }
         }
         try Task.checkCancellation()
-        return results.compactMap { $0 }
+        return outcomes.compactMap { $0 }
     }
 }
 
