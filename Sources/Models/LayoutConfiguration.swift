@@ -80,10 +80,9 @@ public enum LayoutType: String, Codable, Sendable {
     /// A layout optimized for portrait iPhone screens.
     case iphone
     /// A grid with a caller-chosen number of rows and columns. Requires
-    /// ``LayoutConfiguration/grid``.
-    ///
-    /// Work in progress: until the layout engine lands, a configuration that uses it fails
-    /// validation with ``MosaicError/invalidConfiguration(_:)``.
+    /// ``LayoutConfiguration/grid``. A grid that cannot be laid out fails with
+    /// ``MosaicError/invalidConfiguration(_:)`` before any frame is decoded; plan it first with
+    /// ``LayoutProcessor/planFixedGrid(_:sourceAspectRatio:mosaicAspectRatio:mosaicWidth:spacing:reservedHeight:overlayHeight:)``.
     case fixedGrid
     
     /// An array of all available layout types. The deprecated ``dynamic`` is not listed.

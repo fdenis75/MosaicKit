@@ -5,6 +5,7 @@ classDiagram
   MosaicConfiguration --> OverlayConfiguration
   MosaicConfiguration --> MosaicColor : backgroundColor
   LayoutConfiguration --> VisualSettings
+  LayoutConfiguration --> GridSpecification : grid (fixedGrid only)
   VisualSettings --> ShadowSettings
   OverlayConfiguration --> FrameLabelConfig
   OverlayConfiguration --> HeaderConfig

@@ -9,7 +9,7 @@ A high-performance Swift package for generating video mosaics with Metal-acceler
 ## Features
 
 - 🚀 **Metal GPU Acceleration** - Hardware-accelerated mosaic generation on macOS, iOS, and macCatalyst
-- 🎨 **Multiple Layout Algorithms** - Classic, custom, auto-screen and iPhone-optimized layouts
+- 🎨 **Multiple Layout Algorithms** - Classic, custom, auto-screen, iPhone-optimized and fixed rows × columns layouts
 - ⚙️ **Configurable Density Levels** - From XXL (minimal) to XXS (maximal) frame extraction
 - 📦 **Multiple Output Formats** - JPEG, PNG, HEIF, and WebP (via the optional `MosaicKitWebP` product) with configurable compression
 - 🔄 **Batch Processing** - Intelligent concurrency management for processing multiple videos
@@ -21,8 +21,8 @@ A high-performance Swift package for generating video mosaics with Metal-acceler
 
 ## Unreleased
 
-- **`LayoutType.fixedGrid`: choose the number of rows and columns** (plan G-1, G-2) — `LayoutConfiguration.fixedGrid(rows: 4, columns: 6)` lays out exactly `rows × columns` cells, in time order. With the default fit mode (`.adaptCanvas`) the canvas height follows the grid, so every cell has the video's aspect ratio and no frame is distorted, cropped or letterboxed; `MosaicConfiguration.width` is a maximum (the canvas is trimmed to whole cells, and shrunk if the grid would exceed the 16,384 px texture limit). Density is ignored for the frame count. `forIphone` does not override a grid. Requests that cannot work (more than 50 rows or columns, more than 1000 cells, frames under 40 px) fail with a clear `invalidConfiguration` before anything is decoded; `LayoutProcessor.planFixedGrid` gives the same answer as data, for a live preview. `fit: .letterbox` and `.stretch` (plan G-4) keep the configured aspect ratio instead (the final image, header and ColorDNA strip included, is exactly `width × width/aspect`): `.stretch` needs cells within `aspectTolerance` (2 %) of the video's aspect, `.letterbox` adds bars and needs the picture to fill at least `minimumFill` (50 %) of each cell; a request that does not work fails with up to three grids that would. `fit: .crop` fills every cell instead: each frame is cut to the cell's aspect, keeping the center (zero-copy), and the request fails like letterbox when less than `minimumFill` of the picture would survive. Design: `codebase-analysis-docs/specs/SPEC_FIXED_GRID_LAYOUT.md`. Source note: `LayoutType` has a new case, so an exhaustive `switch` over it needs a `.fixedGrid` branch (or a `default`).
-- Nothing yet. Add a line here for every change; output-naming and location changes (📁) also get a **Behavior changes** note.
+- **`LayoutType.fixedGrid`: choose the number of rows and columns** (plan G-1 to G-5) — `LayoutConfiguration.fixedGrid(rows: 4, columns: 6)` lays out exactly `rows × columns` cells, in time order. With the default fit mode (`.adaptCanvas`) the canvas height follows the grid, so every cell has the video's aspect ratio and no frame is distorted, cropped or letterboxed; `MosaicConfiguration.width` is a maximum (the canvas is trimmed to whole cells, and shrunk if the grid would exceed the 16,384 px texture limit). Density is ignored for the frame count. `forIphone` does not override a grid. Requests that cannot work (more than 50 rows or columns, more than 1000 cells, frames under 40 px) fail with a clear `invalidConfiguration` before anything is decoded; `LayoutProcessor.planFixedGrid` gives the same answer as data, for a live preview. `fit: .letterbox` and `.stretch` (plan G-4) keep the configured aspect ratio instead (the final image, header and ColorDNA strip included, is exactly `width × width/aspect`): `.stretch` needs cells within `aspectTolerance` (2 %) of the video's aspect, `.letterbox` adds bars and needs the picture to fill at least `minimumFill` (50 %) of each cell; a request that does not work fails with up to three grids that would. `fit: .crop` fills every cell instead: each frame is cut to the cell's aspect, keeping the center (zero-copy), and the request fails like letterbox when less than `minimumFill` of the picture would survive. New public types: `GridSpecification`, `GridFitMode`, `FixedGridPlan`, `FixedGridIssue`, `FixedGridNote`; new `LayoutConfiguration.grid` and `LayoutConfiguration.fixedGrid(rows:columns:fit:aspectRatio:spacing:)`; new helpers `LayoutProcessor.planFixedGrid(_:sourceAspectRatio:mosaicAspectRatio:mosaicWidth:spacing:reservedHeight:overlayHeight:)`, `LayoutProcessor.fixedGridCanvasWidth(requestedWidth:mosaicAspectRatio:)` and `ThumbnailProcessor.metadataHeaderHeight(for:width:height:thumbnailHeight:forIphone:headerConfig:)` (the exact header height a fixed-aspect preview needs). Output folders and file names of the other layouts do not change; a grid's hash names the grid (`5120_M_16-9_fixedGrid-4x6-sp4`). Design: `codebase-analysis-docs/specs/SPEC_FIXED_GRID_LAYOUT.md`. Source note: `LayoutType` has a new case, so an exhaustive `switch` over it needs a `.fixedGrid` branch (or a `default`).
+- **Docs: fixed grid** (plan G-6) — README layout sections, DocC `QuickStart` and `LayoutAlgorithms`, a SwiftUI live-preview example (`Examples/FixedGridPreviewExample.swift`) that draws `planFixedGrid`'s cells in a `Canvas`, and [MIGRATING-TO-1.11.md](MIGRATING-TO-1.11.md).
 
 ## New in 1.10.0
 
@@ -375,6 +375,9 @@ layout.layoutType = .custom       // Three-zone layout with large center thumbna
 layout.layoutType = .auto         // Adapt to screen size
 layout.layoutType = .classic      // Uniform grid
 layout.layoutType = .iphone       // Mobile-optimized vertical scrolling
+
+// Exactly 4 rows × 6 columns (see "Fixed Grid Layout" below)
+layout = .fixedGrid(rows: 4, columns: 6)
 
 // Visual settings
 layout.visual.addBorder = true
@@ -919,6 +922,24 @@ config.layout.layoutType = .auto
 // - DPI/scaling factor
 // - Minimum readable thumbnail size
 ```
+
+### Fixed Grid Layout
+
+Exactly `rows × columns` frames, sampled evenly over the video (density does not change the count):
+
+```swift
+config.layout = .fixedGrid(rows: 4, columns: 6)                      // .adaptCanvas
+config.layout = .fixedGrid(rows: 4, columns: 6, fit: .letterbox, aspectRatio: .widescreen)
+```
+
+| `fit` | Canvas | Frames | Fails when |
+|---|---|---|---|
+| `.adaptCanvas` (default) | Width is a maximum, height follows the grid | Source aspect, never altered | Frames under 40 px, or the grid taller than 16,384 px |
+| `.letterbox` | Exactly `width × width/aspect`, header and ColorDNA strip included | Bars around the picture | The picture fills less than `minimumFill` (50 %) of the cell |
+| `.crop` | Same | Fill the cell, center kept | Less than `minimumFill` of the picture survives |
+| `.stretch` | Same | Stretched | Cell aspect more than `aspectTolerance` (2 %) off the video |
+
+A grid that cannot work throws `MosaicError.invalidConfiguration` before any frame is decoded; the fixed-aspect modes name up to three grids that would work. For a live preview, `LayoutProcessor().planFixedGrid(…)` returns the same answer as data (`FixedGridPlan`) without touching the video: see [Examples/FixedGridPreviewExample.swift](Examples/FixedGridPreviewExample.swift).
 
 ### Dynamic Layout (deprecated)
 

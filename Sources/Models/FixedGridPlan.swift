@@ -1,7 +1,7 @@
 import Foundation
 
 /// The result of planning a ``LayoutType/fixedGrid`` layout: either a layout, or the reason there
-/// is none. Returned by ``LayoutProcessor/planFixedGrid(_:sourceAspectRatio:mosaicAspectRatio:mosaicWidth:spacing:reservedHeight:)``.
+/// is none. Returned by ``LayoutProcessor/planFixedGrid(_:sourceAspectRatio:mosaicAspectRatio:mosaicWidth:spacing:reservedHeight:overlayHeight:)``.
 public enum FixedGridPlan: Sendable {
     /// The grid fits. `effectiveWidth` is the canvas width actually used (at most the requested
     /// width); `notes` list every adjustment that was made.
