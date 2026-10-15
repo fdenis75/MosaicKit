@@ -82,12 +82,12 @@ struct FixedGridLayoutTests {
         #expect(issue(plan(50, 1, aspect: 0.1, width: 5120)) != nil)
         #expect(issue(plan(2, 2, aspect: .nan)) == .unknownSourceAspect)
         #expect(issue(plan(2, 2, aspect: 0)) == .unknownSourceAspect)
-        // Fit modes that are not built yet say so instead of pretending.
+        // Crop is not built yet and says so instead of pretending.
         let letterbox = LayoutProcessor().planFixedGrid(
-            GridSpecification(rows: 2, columns: 2, fit: .letterbox), sourceAspectRatio: 16.0 / 9,
+            GridSpecification(rows: 2, columns: 2, fit: .crop), sourceAspectRatio: 16.0 / 9,
             mosaicAspectRatio: .widescreen, mosaicWidth: 1920
         )
-        #expect(issue(letterbox) == .fitModeUnavailable(.letterbox))
+        #expect(issue(letterbox) == .fitModeUnavailable(.crop))
         // The 50 px sweeps the spec names stay on the right side of the rule.
         var wrong: [String] = []
         for rows in sizes {

@@ -665,44 +665,37 @@ public final class ThumbnailProcessor: Sendable {
         return CGFloat(0.3 + 0.7 * clamped)
     }
 
-    /// Creates a metadata header image to be placed at the top of the mosaic
-    /// - Parameters:
-    ///   - video: The video object containing metadata information
-    ///   - width: The width of the mosaic
-    ///   - height: Optional height override for the metadata header
-    ///   - thumbnailHeight: Height of a thumbnail in the layout, used to enforce a
-    ///     density-based minimum header height so the header stays readable at high densities
-    ///   - backgroundColor: Optional background color (if nil, platform-specific default will be used)
-    /// - Returns: A CGImage containing the metadata header
-    public func createMetadataHeader(
+    /// The sizes the header is drawn with, computed without drawing anything.
+    private struct HeaderMetrics {
+        let padding: CGFloat
+        let baseFontSize: CGFloat
+        let fontSize: CGFloat
+        let rowSpecs: [HeaderRowSpec]
+        let height: Int
+    }
+
+    /// The height of the metadata header `createMetadataHeader` draws for these inputs. Pure: the
+    /// fixed-aspect grid modes call it before layout, to subtract the header from the grid area.
+    public func metadataHeaderHeight(
         for video: VideoInput,
         width: Int,
         height: Int? = nil,
         thumbnailHeight: CGFloat? = nil,
-        backgroundColor: CGColor? = nil,
         forIphone: Bool = false,
-        headerConfig: HeaderConfig = .default,
-        swatchColors: [CGColor] = []
-    ) -> CGImage? {
-        signposter.emitEvent("createMetadataHeaderVideo")
-        let intervalState = signposter.beginInterval("createMetadataHeaderVideo")
-        defer { signposter.endInterval("createMetadataHeaderVideo", intervalState) }
-        logger.debug("🏷️ Creating metadata header - Width: \(width)")
+        headerConfig: HeaderConfig = .default
+    ) -> Int {
+        headerMetrics(for: video, width: width, height: height, thumbnailHeight: thumbnailHeight,
+                      forIphone: forIphone, headerConfig: headerConfig).height
+    }
 
-        // Background colour: config override → caller override → platform default
-        let bgColor: CGColor
-        if let cfgBg = headerConfig.backgroundColor {
-            bgColor = cfgBg.cgColor
-        } else if let callerBg = backgroundColor {
-            bgColor = callerBg
-        } else {
-            #if canImport(AppKit)
-            bgColor = NSColor(white: 0.1, alpha: 0.25).cgColor
-            #elseif canImport(UIKit)
-            bgColor = UIColor(white: 0.1, alpha: 0.25).cgColor
-            #endif
-        }
-
+    private func headerMetrics(
+        for video: VideoInput,
+        width: Int,
+        height: Int?,
+        thumbnailHeight: CGFloat?,
+        forIphone: Bool,
+        headerConfig: HeaderConfig
+    ) -> HeaderMetrics {
         let padding: CGFloat = 4.0
         let baseFontSize: CGFloat = forIphone ? 6.0 : 8.0
         let videoAspectRatio = max(0.2, video.aspectRatio ?? 1.0)
@@ -785,6 +778,57 @@ public final class ThumbnailProcessor: Sendable {
         let maxFontByHeight = totalPreferredLineScale > 0 ? availableHeight / (totalPreferredLineScale * 1.5) : fontSize
         fontSize = raisedToMinimumHeight ? maxFontByHeight : min(fontSize, maxFontByHeight)
         fontSize = max(baseFontSize, fontSize)
+        return HeaderMetrics(padding: padding, baseFontSize: baseFontSize, fontSize: fontSize, rowSpecs: rowSpecs, height: metadataHeight)
+    }
+
+    /// Creates a metadata header image to be placed at the top of the mosaic
+    /// - Parameters:
+    ///   - video: The video object containing metadata information
+    ///   - width: The width of the mosaic
+    ///   - height: Optional height override for the metadata header
+    ///   - thumbnailHeight: Height of a thumbnail in the layout, used to enforce a
+    ///     density-based minimum header height so the header stays readable at high densities
+    ///   - backgroundColor: Optional background color (if nil, platform-specific default will be used)
+    /// - Returns: A CGImage containing the metadata header
+    public func createMetadataHeader(
+        for video: VideoInput,
+        width: Int,
+        height: Int? = nil,
+        thumbnailHeight: CGFloat? = nil,
+        backgroundColor: CGColor? = nil,
+        forIphone: Bool = false,
+        headerConfig: HeaderConfig = .default,
+        swatchColors: [CGColor] = []
+    ) -> CGImage? {
+        signposter.emitEvent("createMetadataHeaderVideo")
+        let intervalState = signposter.beginInterval("createMetadataHeaderVideo")
+        defer { signposter.endInterval("createMetadataHeaderVideo", intervalState) }
+        logger.debug("🏷️ Creating metadata header - Width: \(width)")
+
+        // Background colour: config override → caller override → platform default
+        let bgColor: CGColor
+        if let cfgBg = headerConfig.backgroundColor {
+            bgColor = cfgBg.cgColor
+        } else if let callerBg = backgroundColor {
+            bgColor = callerBg
+        } else {
+            #if canImport(AppKit)
+            bgColor = NSColor(white: 0.1, alpha: 0.25).cgColor
+            #elseif canImport(UIKit)
+            bgColor = UIColor(white: 0.1, alpha: 0.25).cgColor
+            #endif
+        }
+
+        let metrics = headerMetrics(
+            for: video, width: width, height: height, thumbnailHeight: thumbnailHeight,
+            forIphone: forIphone, headerConfig: headerConfig
+        )
+        let padding = metrics.padding
+        let baseFontSize = metrics.baseFontSize
+        let fontSize = metrics.fontSize
+        let rowSpecs = metrics.rowSpecs
+        let metadataHeight = metrics.height
+        let availableHeight = CGFloat(metadataHeight) - (padding * 4)
 
         // Create bitmap context
         let colorSpace = CGColorSpaceCreateDeviceRGB()

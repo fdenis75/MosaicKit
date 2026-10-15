@@ -115,8 +115,8 @@ extension MosaicConfiguration {
                 )
             }
         }
-        // Only .adaptCanvas is implemented so far (plan G-4 adds letterbox and stretch, G-5 crop).
-        if grid.fit != .adaptCanvas {
+        // `.crop` is not implemented yet (plan G-5).
+        if grid.fit == .crop {
             throw MosaicError.invalidConfiguration("The grid fit mode .\(grid.fit.rawValue) is not available in this build yet; use .adaptCanvas")
         }
     }

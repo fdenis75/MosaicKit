@@ -148,7 +148,7 @@ Every PR updates its row here (status) and the matching §4.2 / §6.1 entries in
 | G-1 | fixed grid: model, validation, hash | done | #68 |
 | G-2 | fixed grid: `.adaptCanvas` layout ⚡ | done; A/B/A gate in §8.1 | #69 |
 | G-3 | fixed grid: sampling, header cap, overlays ⚡ | done; A/B/A gate in §8.1; the header-height helper moved to G-4 | |
-| G-4 | fixed grid: letterbox and stretch | planned | |
+| G-4 | fixed grid: letterbox and stretch | done (CI only; the header-height helper `metadataHeaderHeight` landed here) | |
 | G-5 | fixed grid: crop ⚡ | planned | |
 | G-6 | fixed grid: docs and examples | planned | |
 | G-7 | fixed grid: saliency-aware crop (optional) | planned | |

@@ -166,7 +166,7 @@ knowledge base §5.2–§5.3.
   - `auto`: screen-aware, measured in pixels (fixed in F-7, I-9).
   - `dynamic`: deprecated (removed in 2.0); laid out as `custom` (F-7, I-8).
   - `iphone`: mobile-optimized.
-  - `fixedGrid`: caller-chosen rows × columns (`LayoutConfiguration.grid`); `.adaptCanvas` works (G-1, G-2), other fit modes are rejected until G-4/G-5. Spec: `codebase-analysis-docs/specs/SPEC_FIXED_GRID_LAYOUT.md`.
+  - `fixedGrid`: caller-chosen rows × columns (`LayoutConfiguration.grid`); `.adaptCanvas`, `.letterbox` and `.stretch` work (G-1…G-4); `.crop` is rejected until G-5. Spec: `codebase-analysis-docs/specs/SPEC_FIXED_GRID_LAYOUT.md`.
 - **`AspectRatio`:** `16:9`, `4:3`, `1:1`, `21:9`, `9:16`.
 - **Codable rule:** add new keys with `decodeIfPresent` plus a default (in `MosaicConfiguration`,
   a `MissingKeyDefault` constant). A required new key breaks configs saved by older versions;
