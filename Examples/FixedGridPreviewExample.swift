@@ -114,14 +114,23 @@ struct FixedGridEditor: View {
     }
 }
 
-/// Generating the mosaic uses the same grid, so the output matches the preview.
-func generateFixedGridMosaic(videoURL: URL, outputDirectory: URL) async throws -> URL {
+/// Generating the mosaic with the grid the editor shows. The preview above passes no overlay
+/// height, so the header and the ColorDNA strip are turned off here: the output then has exactly
+/// the previewed cells. To keep them, compute `overlayHeight` as described on
+/// `FixedGridPreview.overlayHeight` and pass the same value to the preview.
+func generateFixedGridMosaic(
+    grid: GridSpecification,
+    videoURL: URL,
+    outputDirectory: URL
+) async throws -> URL {
     let video = try await VideoInput(from: videoURL)
-    var config = MosaicConfiguration(width: 5120, format: .heif)
-    config.layout = .fixedGrid(rows: 4, columns: 6, fit: .letterbox, aspectRatio: .widescreen)
+    var config = MosaicConfiguration(width: 5120, format: .heif, includeMetadata: false)
+    config.layout = LayoutConfiguration(aspectRatio: .widescreen, layoutType: .fixedGrid, grid: grid)
+    config.overlay.colorDNA.show = false
     config.outputdirectory = outputDirectory
-    // An infeasible grid throws `MosaicError.invalidConfiguration` with the planner's explanation
-    // before any frame is decoded.
+    // Before any frame is decoded, an infeasible grid throws `MosaicError.invalidConfiguration`
+    // with the planner's explanation, and a video that cannot fill it (unknown dimensions, fewer
+    // distinct frames than cells) throws `MosaicError.invalidVideo`.
     return try await MetalMosaicGenerator().generate(for: video, config: config)
 }
 
