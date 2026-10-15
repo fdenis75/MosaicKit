@@ -178,47 +178,52 @@ public final class ThumbnailProcessor: Sendable {
             do {
                 let duration = try await assetRef.load(.duration).seconds
                 let times = calculateExtractionTimes(duration: duration, count: layout.positions.count, policy: sampling)
-                // One feeder per generator. With several groups they decode at the same time, so
-                // small and large tiles do not wait for each other; each keeps at most 8 frames
-                // in labeling, as the single generator always did.
-                try await withThrowingTaskGroup(of: Void.self) { feeders in
-                    for (indices, generator) in zip(groups, generatorRefs) {
-                        nonisolated(unsafe) let generator = generator
-                        feeders.addTask {
-                            try await withThrowingTaskGroup(of: (Int, CGImage).self) { group in
-                                var pending = 0
-                                var position = 0
-                                for try await result in generator.images(for: indices.map { times[$0] }) {
-                                    try Task.checkCancellation()
-                                    guard case .success(_, let image, let actualTime) = result else {
-                                        throw MosaicError.processingFailed("Frame extraction failed")
-                                    }
-                                    let frameIndex = indices[position]
-                                    position += 1
-                                    group.addTask {
-                                        // Crop once, so the ColorDNA strip samples what the cell shows.
-                                        let image = crop.map { Self.croppedCenter(image, toAspect: $0.aspect) } ?? image
-                                        await collectColor?(frameIndex, image)
-                                        let labeled = processor.addTimestampToImage(
-                                            image: image, timestamp: processor.formatTimestamp(seconds: actualTime.seconds),
-                                            frameIndex: frameIndex, size: sizes[frameIndex], labelConfig: labelConfig
-                                        )
-                                        try Task.checkCancellation()
-                                        return (frameIndex, labeled)
-                                    }
-                                    pending += 1
-                                    if pending >= 8, let result = try await group.next() {
-                                        continuation.yield(result)
-                                        pending -= 1
-                                    }
-                                }
-                                while let result = try await group.next() {
-                                    continuation.yield(result)
-                                }
+                // Decodes one group's frames with its generator and labels them, at most 8 at a time.
+                @Sendable func feed(_ indices: [Int], _ generator: AVAssetImageGenerator) async throws {
+                    try await withThrowingTaskGroup(of: (Int, CGImage).self) { group in
+                        var pending = 0
+                        var position = 0
+                        for try await result in generator.images(for: indices.map { times[$0] }) {
+                            try Task.checkCancellation()
+                            guard case .success(_, let image, let actualTime) = result else {
+                                throw MosaicError.processingFailed("Frame extraction failed")
+                            }
+                            let frameIndex = indices[position]
+                            position += 1
+                            group.addTask {
+                                // Crop once, so the ColorDNA strip samples what the cell shows.
+                                let image = crop.map { Self.croppedCenter(image, toAspect: $0.aspect) } ?? image
+                                await collectColor?(frameIndex, image)
+                                let labeled = processor.addTimestampToImage(
+                                    image: image, timestamp: processor.formatTimestamp(seconds: actualTime.seconds),
+                                    frameIndex: frameIndex, size: sizes[frameIndex], labelConfig: labelConfig
+                                )
+                                try Task.checkCancellation()
+                                return (frameIndex, labeled)
+                            }
+                            pending += 1
+                            if pending >= 8, let result = try await group.next() {
+                                continuation.yield(result)
+                                pending -= 1
                             }
                         }
+                        while let result = try await group.next() {
+                            continuation.yield(result)
+                        }
                     }
-                    try await feeders.waitForAll()
+                }
+                if groups.count == 1 {
+                    try await feed(groups[0], generatorRefs[0])
+                } else {
+                    // Several tile sizes decode at the same time, so small and large tiles do not
+                    // wait for each other; each group keeps its own 8-frame labeling window.
+                    try await withThrowingTaskGroup(of: Void.self) { feeders in
+                        for (indices, generator) in zip(groups, generatorRefs) {
+                            nonisolated(unsafe) let generator = generator
+                            feeders.addTask { try await feed(indices, generator) }
+                        }
+                        try await feeders.waitForAll()
+                    }
                 }
                 continuation.finish()
             } catch {
