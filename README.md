@@ -21,11 +21,31 @@ A high-performance Swift package for generating video mosaics with Metal-acceler
 
 ## Unreleased
 
-- Add a line here for every change; output-naming and location changes (📁) also get a **Behavior changes** note.
+- Nothing yet. Add a line here for every change; output-naming and location changes (📁) also get a **Behavior changes** note.
+
+## New in 1.12.0
+
+Minor release on top of 1.11.0: a new layout type, `LayoutType.uneven`, that shows frames at several sizes. Nothing is removed or renamed, other layouts render as before, and output names of existing configurations do not change. One source break: an exhaustive `switch` over `LayoutType` needs an `.uneven` branch. Upgrading from 1.11.x? [MIGRATING-TO-1.12.md](MIGRATING-TO-1.12.md) lists what can affect an app.
 
 ### New API
 
-- **`LayoutType.uneven`: tiles in several sizes** (plan U-1 to U-3, #77, #78) — a bento grid where every larger tile is a whole multiple of the smallest (2 × 2, 3 × 3 … unit tiles), so frames are never cropped or distorted and the grid has no holes. The width is exact; the height is as close to `width / aspectRatio` as whole tiles allow. Density sets the frame count as for `.custom` and the largest tile: `XXL`/`XL` 2 ×, `L`/`M` 3 ×, `S`/`XS` 4 ×, `XXS` 5 ×. Each frame is decoded at its own tile size (plan U-3), so small tiles are not shrunk from a large decode. Fewer than 12 frames, or a source aspect outside 0.2…5, use the classic layout; `forIphone` still selects the iPhone layout. Output goes to a new folder (`5120_M_16-9_uneven`); other layouts are unchanged. Source note: `LayoutType` has a new case, so an exhaustive `switch` over it needs an `.uneven` branch (or a `default`); a configuration saved with `"uneven"` does not decode in older MosaicKit versions. Design: `codebase-analysis-docs/specs/SPEC_UNEVEN_TILES_LAYOUT.md`.
+- **`LayoutType.uneven`: tiles in several sizes** (plan U-1 to U-3, #77, #78, #79) — a bento grid where every larger tile is a whole multiple of the smallest (2 × 2, 3 × 3 … unit tiles), so frames are never cropped or distorted and the grid has no holes. The width is exact; the height is as close to `width / aspectRatio` as whole tiles allow. Density sets the frame count as for `.custom` and the largest tile: `XXL`/`XL` 2 ×, `L`/`M` 3 ×, `S`/`XS` 4 ×, `XXS` 5 ×. Each frame is decoded at its own tile size (plan U-3), so small tiles are not shrunk from a large decode. Fewer than 12 frames, or a source aspect outside 0.2…5, use the classic layout; `forIphone` still selects the iPhone layout. Output goes to a new folder (`5120_M_16-9_uneven`); other layouts are unchanged. Source note: `LayoutType` has a new case, so an exhaustive `switch` over it needs an `.uneven` branch (or a `default`); a configuration saved with `"uneven"` does not decode in older MosaicKit versions. Design: `codebase-analysis-docs/specs/SPEC_UNEVEN_TILES_LAYOUT.md`.
+
+### Behavior changes
+
+- **A fixed grid reserves a tall fixed header** (U-2, #78) — with `.adaptCanvas` and `overlay.header.height = .fixed(h)`, the room kept for the header below the 16,384 px texture limit is now at least `h` (it was always `0.10 × width + 32`). Only grids that previously failed at render time because canvas plus header exceeded the limit change: they are planned a little shorter.
+
+### Docs
+
+- **Uneven tiles docs** — README layout sections, DocC `LayoutAlgorithms`, and [MIGRATING-TO-1.12.md](MIGRATING-TO-1.12.md).
+
+### Internal
+
+- **Opt-in benchmark scenarios** for the uneven layout (`MOSAICKIT_BENCHMARK_UNEVEN=1`).
+
+### Known issue
+
+- **Native preview export can stall under macOS background scheduling** (I-26), unchanged. See the `PreviewExporting` article.
 
 ## New in 1.11.0
 
@@ -264,7 +284,7 @@ Add MosaicKit to your `Package.swift`:
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/fdenis75/MosaicKit.git", from: "1.11.0")
+    .package(url: "https://github.com/fdenis75/MosaicKit.git", from: "1.12.0")
 ]
 ```
 
