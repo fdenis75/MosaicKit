@@ -495,7 +495,8 @@ config.overlay.header = HeaderConfig(
     ],
     height:          .fixed(80),     // .auto (fit content) | .fixed(Int)
     textColor:       nil,            // nil → platform default
-    backgroundColor: nil             // nil → semi-transparent dark default
+    backgroundColor: nil,            // nil → semi-transparent dark default
+    filePathShowsFileNameOnly: false // true → "Path: clip.mov" instead of the full path
 )
 ```
 

@@ -49,6 +49,25 @@ struct OverlayConfigurationTests {
 
     // MARK: - HeaderHeight (manual Codable)
 
+    @Test("HeaderConfig.filePathShowsFileNameOnly defaults to false and round-trips")
+    func headerFilePathFileNameOnlyCodable() throws {
+        #expect(HeaderConfig().filePathShowsFileNameOnly == false)
+        let config = HeaderConfig(filePathShowsFileNameOnly: true)
+        let decoded = try JSONDecoder().decode(HeaderConfig.self, from: JSONEncoder().encode(config))
+        #expect(decoded.filePathShowsFileNameOnly)
+    }
+
+    @Test("HeaderConfig saved without filePathShowsFileNameOnly still decodes (full path)")
+    func headerConfigLegacyPayloadDecodes() throws {
+        var object = try #require(
+            JSONSerialization.jsonObject(with: JSONEncoder().encode(HeaderConfig())) as? [String: Any]
+        )
+        object.removeValue(forKey: "filePathShowsFileNameOnly")
+        let legacy = try JSONSerialization.data(withJSONObject: object)
+        let decoded = try JSONDecoder().decode(HeaderConfig.self, from: legacy)
+        #expect(decoded.filePathShowsFileNameOnly == false)
+    }
+
     @Test("HeaderHeight.auto round-trips through Codable")
     func headerHeightAutoCodable() throws {
         let data = try JSONEncoder().encode(HeaderHeight.auto)

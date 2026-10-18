@@ -793,7 +793,7 @@ public final class ThumbnailProcessor: Sendable {
         var primaryFieldStrings: [String] = []
         var filePathRowText: String?
         for field in textFields {
-            guard let fieldText = formatHeaderField(field, video: video) else { continue }
+            guard let fieldText = formatHeaderField(field, video: video, fileNameOnly: headerConfig.filePathShowsFileNameOnly) else { continue }
             if case .filePath = field {
                 filePathRowText = fieldText
             } else {
@@ -1022,7 +1022,7 @@ public final class ThumbnailProcessor: Sendable {
     }
 
     /// Format a single `MetadataField` to a display string using `VideoInput` data.
-    private func formatHeaderField(_ field: MetadataField, video: VideoInput) -> String? {
+    private func formatHeaderField(_ field: MetadataField, video: VideoInput, fileNameOnly: Bool = false) -> String? {
         signposter.emitEvent("formatHeaderField")
         let intervalState = signposter.beginInterval("formatHeaderField")
         defer { signposter.endInterval("formatHeaderField", intervalState) }
@@ -1046,7 +1046,7 @@ public final class ThumbnailProcessor: Sendable {
             guard let fps = video.frameRate else { return nil }
             return "FPS: \(String(format: "%.2f", fps))"
         case .filePath:
-            return "Path: \(video.url.path)"
+            return "Path: \(fileNameOnly ? video.url.lastPathComponent : video.url.path)"
         case .custom(let label, let value):
             return "\(label): \(value)"
         case .colorPalette:

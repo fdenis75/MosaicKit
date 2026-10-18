@@ -172,17 +172,36 @@ public struct HeaderConfig: Codable, Sendable {
     public var textColor: MosaicColor?
     /// Background fill override. `nil` → semi-transparent dark default.
     public var backgroundColor: MosaicColor?
+    /// When `true`, the `.filePath` field shows only the file name (last path component)
+    /// instead of the full path. Defaults to `false` (full path).
+    public var filePathShowsFileNameOnly: Bool
 
     public init(
         fields: [MetadataField] = [.title, .duration, .fileSize, .codec, .resolution, .bitrate, .filePath],
         height: HeaderHeight = .auto,
         textColor: MosaicColor? = nil,
-        backgroundColor: MosaicColor? = nil
+        backgroundColor: MosaicColor? = nil,
+        filePathShowsFileNameOnly: Bool = false
     ) {
         self.fields = fields
         self.height = height
         self.textColor = textColor
         self.backgroundColor = backgroundColor
+        self.filePathShowsFileNameOnly = filePathShowsFileNameOnly
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case fields, height, textColor, backgroundColor, filePathShowsFileNameOnly
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.fields = try c.decode([MetadataField].self, forKey: .fields)
+        self.height = try c.decode(HeaderHeight.self, forKey: .height)
+        self.textColor = try c.decodeIfPresent(MosaicColor.self, forKey: .textColor)
+        self.backgroundColor = try c.decodeIfPresent(MosaicColor.self, forKey: .backgroundColor)
+        // Absent in configurations saved before this option existed.
+        self.filePathShowsFileNameOnly = try c.decodeIfPresent(Bool.self, forKey: .filePathShowsFileNameOnly) ?? false
     }
 
     /// The swatch count of the first `.colorPalette` field, or `nil` when the header has none.
