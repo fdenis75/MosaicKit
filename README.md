@@ -21,7 +21,9 @@ A high-performance Swift package for generating video mosaics with Metal-acceler
 
 ## Unreleased
 
-- Nothing yet. Add a line here for every change; output-naming and location changes (📁) also get a **Behavior changes** note.
+- **New API:** `HeaderConfig.filePathShowsFileNameOnly` (default `false`) prints only the file name on the header's `.filePath` row (I-29).
+- **Behavior change:** `.creatingMosaic` progress now runs monotonically from 0.02 to 0.9 instead of jumping to ~0.745 and falling back at `.savingMosaic` (I-28). See [MIGRATING-TO-1.13.md](MIGRATING-TO-1.13.md).
+- Add a line here for every change; output-naming and location changes (📁) also get a **Behavior changes** note.
 
 ## New in 1.12.0
 
@@ -495,7 +497,8 @@ config.overlay.header = HeaderConfig(
     ],
     height:          .fixed(80),     // .auto (fit content) | .fixed(Int)
     textColor:       nil,            // nil → platform default
-    backgroundColor: nil             // nil → semi-transparent dark default
+    backgroundColor: nil,            // nil → semi-transparent dark default
+    filePathShowsFileNameOnly: false // true → "Path: clip.mov" instead of the full path
 )
 ```
 

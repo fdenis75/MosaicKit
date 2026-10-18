@@ -428,6 +428,7 @@ Default values worth knowing:
 | `MIGRATING-TO-1.10.md` | High | Upgrade guide from 1.9.x to 1.10.0 (one new function, one header change). Verified against tags `1.9.1` and `1.10.0` (public API diff: additive only). |
 | `MIGRATING-TO-1.11.md` | High | Upgrade guide from 1.10.x to 1.11.0 (fixed-grid layout; one source break: the new `LayoutType` case). Verified against tags `1.10.0` and `1.11.0` (public API diff: additive plus the new enum case). |
 | `MIGRATING-TO-1.12.md` | High | Upgrade guide from 1.11.x to 1.12.0 (uneven-tiles layout; one source break: the new `LayoutType` case; the fixed-grid header reserve). Includes a Tessera checklist |
+| `MIGRATING-TO-1.13.md` | High | Upgrade guide from 1.12.x to 1.13.0 (additive: `HeaderConfig.filePathShowsFileNameOnly`; `.creatingMosaic` progress now 0.02 → 0.9 and monotonic) |
 | `CLAUDE.md` / `AGENTS.md` | High (rewritten 2026-09-26) | Both files are identical except for the title and first paragraph, and point agents to this document first. Earlier errors (swift-log, "no Makefile", `swift run` examples, nonexistent workflows, `Models/AspectRatio.swift`, Core Graphics/vImage, `VideoFormat` as the mosaic format) are corrected. Keep the two files in sync. |
 | `MosaicKit-DeepDive.md` | **Stale — do not trust architecture sections** | Describes the removed dual engine (`CoreGraphicsMosaicGenerator`, `MosaicGeneratorFactory`, vImage buffer pool) and a `.gif` still format. The coordinator concurrency formula it gives is for previews only, and the cap of 8 it quotes is really 2. |
 | `spec.md` | **Design intent, only partly implemented** | Describes a `GenerationRequest/Plan`, `JobHandle/BatchHandle`, checkpoint ledger, and a single processing-service actor. None of these exist. What does exist: `VideoSource`, `OutputTransaction`, validation, `GenerationJobController` (the spec's `MosaicFrameSource` shipped in 1.7.0, was reverted, and was removed in S-1, #38). |
@@ -457,7 +458,7 @@ register:
 2. **Mosaic output-dimension limit.** `MetalMosaicGenerator` rejects `config.width > 16_384`
    inside generation (not in `validate()`) and videos shorter than 5 s, both as
    `MosaicError.invalidVideo`.
-   [[F:Sources/Processing/MetalMosaicGenerator.swift#318-321#9ea8c950]]
+   [[F:Sources/Processing/MetalMosaicGenerator.swift#318-321#38f103eb]]
 3. **Preview skip-if-exists never matches in default naming mode.** With `fullPathInName ==
    false` and no `filenameTemplate`, `PreviewConfiguration.generateFilename` embeds a
    run-time timestamp (`yyyy-MM-dd_HH-mm-ss`). As a result, `overwrite == false` never finds an
@@ -635,9 +636,9 @@ Full sequence including the coordinator: `codebase-analysis-docs/assets/mosaic-s
 #### Stage-by-stage table
 
 The stage body is `MetalMosaicGenerator.generate`
-[[F:Sources/Processing/MetalMosaicGenerator.swift#98-233#9ea8c950]]. Since S-2, stages 2–5 run in
+[[F:Sources/Processing/MetalMosaicGenerator.swift#98-233#38f103eb]]. Since S-2, stages 2–5 run in
 `planMosaic`, stages 6–12 in `composeMosaic` and stage 14 in `exportAnimation`
-[[F:Sources/Processing/MetalMosaicGenerator.swift#296-552#9ea8c950]]. `generateMosaicImage` calls
+[[F:Sources/Processing/MetalMosaicGenerator.swift#296-622#38f103eb]]. `generateMosaicImage` calls
 the same `planMosaic` + `composeMosaic`, so both entry points compose the same image.
 
 | # | Stage | Code | Runs on | Key facts |
@@ -649,13 +650,13 @@ the same `planMosaic` + `composeMosaic`, so both entry points compose the same i
 | 4 | Layout | `LayoutProcessor.calculateLayout` [[F:Sources/Processing/LayoutProcessor.swift#101-205#0e830e57]] | generator actor (under `NSRecursiveLock`) | Cache key: `aspectRatio-originalAR-count-width-density-layoutType`. `.auto` is never cached. `.dynamic` is mapped to `.custom` first (F-7). For `.fixedGrid` the key gains `-grid=<R>x<C>-<fit>-<tol>-<fill>-sp=<spacing>-rh=<reservedHeight>`; for `.uneven`, `-rh=<reservedHeight>`. Invalid input returns an **empty** layout, which later throws "Empty mosaic layout" (a grid is planned first by `makeLayout`, so it throws its own typed error instead). `.iphone` forces width 1200, 1 column, max height 8000. |
 | 5 | Aspect normalization | `planMosaic`: `adjustedConfig.updateAspectRatio(AspectRatio.findNearest(to: layout.mosaicSize))` | generator actor | The config passed down may carry a **different** `layout.aspectRatio` than the caller set. Path/filename generation still uses the caller's original `config`. |
 | 6 | Header | `ThumbnailProcessor.createMetadataHeader` | generator actor (synchronous CPU) | Only when `includeMetadata`. Height is added on top of the layout height. |
-| 7 | Frame extraction | `ThumbnailProcessor.processedFramesStream` [[F:Sources/Processing/ThumbnailProcessor.swift#153-238#ab4751a8]] | producer `Task` on the global executor | One `AVAssetImageGenerator` with the batched `images(for:)` API. `maximumSize` = largest cell × `decodeQualityScale` (1). Exception (U-3): when the largest cell is more than 2.05× the smallest (`.uneven`), `extractionGroups` splits the indices by tile size and each group gets its own generator sized to its tile; groups decode in parallel (one feeder each, 8-frame labeling window each), each in time order. Tolerance ±1 s, or 0 when `useAccurateTimestamps`. Sampling: first 20 % of frames in the first 33 % of the 5–95 % window, 60 % in the middle, 20 % in the last third [[F:Sources/Processing/ThumbnailProcessor.swift#659-697#ab4751a8]]. Any `.failure` throws: mosaics are strict (**no placeholder frames**). |
+| 7 | Frame extraction | `ThumbnailProcessor.processedFramesStream` [[F:Sources/Processing/ThumbnailProcessor.swift#153-238#3ca7d902]] | producer `Task` on the global executor | One `AVAssetImageGenerator` with the batched `images(for:)` API. `maximumSize` = largest cell × `decodeQualityScale` (1). Exception (U-3): when the largest cell is more than 2.05× the smallest (`.uneven`), `extractionGroups` splits the indices by tile size and each group gets its own generator sized to its tile; groups decode in parallel (one feeder each, 8-frame labeling window each), each in time order. Tolerance ±1 s, or 0 when `useAccurateTimestamps`. Sampling: first 20 % of frames in the first 33 % of the 5–95 % window, 60 % in the middle, 20 % in the last third [[F:Sources/Processing/ThumbnailProcessor.swift#659-697#3ca7d902]]. Any `.failure` throws: mosaics are strict (**no placeholder frames**). |
 | 8 | Labeling + color sampling | same | child tasks, **≤ 8 in flight** | Each frame is labeled (`addTimestampToImage`). If Color DNA is on, `OverlayProcessor.averageColor` goes into `FrameColorCollector`. Results are yielded **out of order**; the index travels with each frame. |
 | 9 | Background | `processImagesToMTLTexture` [[F:Sources/Processing/MetalImageProcessor.swift#580-700#04cfcb88]] | caller of `generateMosaicStream` (nonisolated) | Takes the first ≤ 5 frames. Up to 3 of them go to `DominantColors` (`.fair`, `.euclidean`, excluding black, white, and gray). The 3 lightest colors form a diagonal gradient, blurred with a CIGaussianBlur of radius 12. Falls back to gray 0.1 (or 0.5 inside the helper). When `useMovieColorsForBg == false`, uses a solid `backgroundColor`. |
 | 10 | Compositing | `generateMosaicStream` [[F:Sources/Processing/MetalImageProcessor.swift#864-998#04cfcb88]], `processBatch` @L1000, `renderFrame` @L1077 | nonisolated async | One setup command buffer (fill + header), awaited. Frames are then rendered in **20-frame command buffers**, committed without waiting. Each frame: `createTexture(from: CGImage)`, `scaleTexture` if the size differs, `compositeTexture`, optional `addBorder`. The shadow path draws a CPU `CGContext` shadow and composites that. Duplicate or out-of-range indices throw. **All** positions must be filled, or it throws "Missing mosaic frames". |
 | 11 | GPU sync + readback | `synchronizeGPU` @L1058, `createCGImage(from:)` | nonisolated | An empty barrier command buffer is committed last and awaited. GPU errors from completion handlers are collected in `CommandBufferErrorState` and rethrown as `MetalProcessorError.commandBufferExecutionFailed`. |
 | 12 | Have the macOS stall retry wait until the app is active again, as iOS waits for foreground, and document background exporting for apps. Done: mechanism reproduced (background scheduling, background QoS cap; #46), CI attributed to the runner VM (known issue there, #47) | I-26 | A stalled export fails after 120 s and retries while still throttled | S |
-| 13 | Encode + commit | `saveMosaic` [[F:Sources/Processing/MetalMosaicGenerator.swift#653-764#9ea8c950]] | generator actor (synchronous CPU) | Output path = `generateOutputDirectory` + `generateFilename`. Encodes with `CGImageDestination` (HEIF embeds a thumbnail, `HasAlpha = false`), or the injected WebP encoder, into the staging file. Then `OutputTransaction.commit()`. |
+| 13 | Encode + commit | `saveMosaic` [[F:Sources/Processing/MetalMosaicGenerator.swift#703-815#38f103eb]] | generator actor (synchronous CPU) | Output path = `generateOutputDirectory` + `generateFilename`. Encodes with `CGImageDestination` (HEIF embeds a thumbnail, `HasAlpha = false`), or the injected WebP encoder, into the staging file. Then `OutputTransaction.commit()`. |
 | 14 | Animation | `exportAnimation` (`extractFramesForGif` + `AnimatedGifGenerator.save`), shared by the `.gifOnly`, `.withMosaic` and skip-if-exists backfill sites | generator actor → global | This is a **second, full decode pass** with a separate generator: `.large` caps at 1280×720, `.small` at 960×540. Missing frames are skipped and then checked by count, so any missing frame throws. `frameDelay = 1 / gifFps`. |
 
 **Progress reported to handlers** (`MosaicGenerationProgress.progress`):
@@ -664,12 +665,12 @@ the same `planMosaic` + `composeMosaic`, so both entry points compose the same i
 |---|---|
 | `.countingThumbnails` | 0 |
 | `.computingLayout` | 0 |
-| `.creatingMosaic` | `0.7 + 0.299 × p`, where p comes from the GPU: 0.15, 0.25, 0.25–0.95 per batch, 0.95, 1.0 |
+| `.creatingMosaic` | `0.02 + 0.88 × s`, where `s = (p − 0.15) / 0.85` clamped to 0…1 and p comes from the GPU: 0.15, 0.25, 0.25–0.95 per batch, 0.95, 1.0. So 0.02 → 0.9, monotonic (I-28) |
 | `.savingMosaic` | 0.9, then 0.999 |
 
 - The coordinator adds `.queued`/`.inProgress` at 0 and `.completed` at 1.0.
 - `.extractingThumbnails` is declared but **never emitted**. There is no progress signal during
-  decoding; the first frames arrive before 0.745.
+  decoding; the first frames arrive before `.creatingMosaic` leaves 0.02.
 
 ### 2.4 Preview data flow (F8–F9)
 
@@ -1265,7 +1266,7 @@ backbone. Read `LayoutProcessor` algorithms, `ThumbnailProcessor` header/label r
   |---|---|---|---|
   | Frame "visual treatment" (rounded corners 8 %, vignette 0.65→1.0 radius, 35 % black) | **always on, even with `show: false`** | `ThumbnailProcessor.addTimestampToImage` (CPU, per frame, ≤ 8 in parallel) | Baked into each frame before the GPU |
   | Frame label (`FrameLabelConfig`: `.timestamp` "HH:MM:SS" of the *actual* decoded time / `.frameIndex` "Frame N" / `.none`; 5 positions; `.pill` gradient, `.fullWidth` band, or `.none` background) | show, timestamp, bottomRight, white, pill | same | Per frame. Font = `clamp(0.08 × max(cellW, cellH), 10, 24) × 1.5`, semibold system font. |
-  | Header (`HeaderConfig`) | fields: title, duration, fileSize, codec, resolution, bitrate, filePath; height `.auto`; background white 0.1 α 0.25; text black on macOS | `ThumbnailProcessor.createMetadataHeader` (CPU) | Separate image composited at the top by the GPU; the mosaic grows by its height |
+  | Header (`HeaderConfig`) | fields: title, duration, fileSize, codec, resolution, bitrate, filePath; height `.auto`; `filePathShowsFileNameOnly` `false`; background white 0.1 α 0.25; text black on macOS | `ThumbnailProcessor.createMetadataHeader` (CPU) | Separate image composited at the top by the GPU; the mosaic grows by its height |
   | Border (`VisualSettings.addBorder`) | **off**, white, 1 px | Metal `addBorder` kernel | Per cell |
   | Shadow (`VisualSettings.addShadow`) | **on**, opacity 0.5, radius 4, offset (0, −2) | **CPU** `CGContext` shadow per frame in `createShadowedImage`, then composited | Per cell. This replaces the GPU scale path for that frame. |
   | Watermark (`WatermarkConfig`: `.text` or `.image(URL)`) | none | `OverlayProcessor.applyWatermark` (CPU, full-mosaic redraw) | After compositing |
@@ -1273,7 +1274,9 @@ backbone. Read `LayoutProcessor` algorithms, `ThumbnailProcessor` header/label r
 
 - **Header layout rules:**
   - Text fields are joined with " | ", 3 per row. `filePath` always goes on its own
-    shrink-to-fit row (scale 0.78, minimum 0.45).
+    shrink-to-fit row (scale 0.78, minimum 0.45). It reads `Path: <full path>`, or
+    `Path: <file name with extension>` when `HeaderConfig.filePathShowsFileNameOnly` is `true`
+    (a batch shares one config, so a per-video `.custom` field cannot do this; I-29).
   - Base font = `max(8 (6 on iPhone), 1 % of width × verticality)`, where verticality is
     √(videoVerticality × outputVerticality), each clamped to 0.6…2.
   - `.auto` height = `lineHeight × Σ rowScales + 16`.
@@ -1862,6 +1865,8 @@ robustness, performance, or cosmetic.
 | I-25 | Hygiene | Dead or misleading code: `generateallcombinations` ignores the caller's config; unused private helpers in `MetalMosaicGenerator` (`extractFramesWithVideoToolbox`, `calculateExtractionTimes`, `calculateAspectRatio`); unused `MosaicFrameSource`/`makeFrameSource`, `prioritizeVideos`, `VideoError`, `LibraryError`; never-emitted statuses. | **Mostly fixed.** S-1 (#38) removed the unused private helpers and `MosaicFrameSource`. S-6 deprecated the unused public API (`generateallcombinations`, the array-based `ThumbnailProcessor`/`MetalImageProcessor` paths, the job controller, `drawMosaicASCIIArt`, `FFmpegEncodingOptions.forPreview`, two preview-coordinator getters) for removal in 2.0. Still open: `LibraryError` and the never-emitted statuses; `VideoError` stays because F-6 will throw it. | Low | §2.12, §5.4 | Remove, or document as intentionally unused (`MosaicFrameSource` has history, §2.6). |
 | I-26 | F8/F9 | **Native preview export stalls mid-encode.** `AVAssetExportSession` stops progressing while state updates keep arriving at a frozen percentage. Reproduced under macOS background scheduling (`PRIO_DARWIN_BG`, `taskpolicy -b`) and under a background QoS clamp (`taskpolicy -c background`). Also seen intermittently in `PreviewExportSmokeTests` on CI (runs 36323934052 on #40; 36732100248 on #45 and 36742667122 on #46, both frozen at exactly 60 % encoding for 120 s) and once locally. | **Mechanism reproduced; CI attributed to the virtual machine (known issue there)**. `ExportStressTests` on the maintainer's M-series Mac: normal priority 0 stalls in 640 exports (fixture and 4K/1080p drone footage, 10 at once plus HEIC/mosaic load); `taskpolicy -b` 6 of 60 (7 of 60 with `allowsParallelizedExport` off, so that flag is not a factor), 0 of 60 after `leaveBackground()`; `taskpolicy -c background` 7 of 60 even after `leaveBackground()` (a process cannot lift a QoS clamp). In one throttled round all 6 exports froze together for 194 s. The `.userInitiated` activity does not prevent it; the maintainer saw the same with backgrounded apps. **CI:** the GitHub macOS runner is a virtual machine and starts tests at utility QoS (logged: `mainThreadQoS=0x11 virtualMachine=true darwinBackground=false`). A utility QoS cap alone does not reproduce the stall on real hardware (0 of 60), and CI stalls always freeze at exactly 60 %, unlike the scattered local positions, so the VM (no real media hardware) is the remaining cause. It cannot be reproduced without a VM. Since #47 the smoke test records `exportStalled` as a known intermittent issue **only when `kern.hv_vmm_present` reports a VM**; on real Macs, and for any other error, it fails | Medium (apps exporting in the background; CI reliability) | `ExportStressTests`, CI logs above | Product (roadmap #12): the library never changes its host's scheduling; apps should export while active, and the macOS stall retry in `PreviewGeneratorCoordinator` could wait until the app is active again, as iOS waits for foreground. |
 | I-27 | F9 | **`runFFmpeg` can hang forever after ffmpeg exits.** Found by F-2's real-encode test: a 0.07 s ffmpeg run left `waitUntilExit()` blocked on a dispatch thread with no ffmpeg process left, while the stderr `readabilityHandler` spun on empty EOF reads (~75 % CPU). | **Fixed (F-2)**: the exit status comes from `terminationHandler`, installed before `run()`, through a `Mutex`-guarded continuation (no blocked thread); the stderr handler detaches at EOF. A standalone repro hung within 300 fast runs with `waitUntilExit` (with or without the EOF fix) and completed 300/300 with `terminationHandler`. **Test:** `FFmpegArgumentsTests` real-encode test (15 consecutive passes); `PreviewReliabilityRegressionTests` ffmpeg cancellation still passes | Medium (ffmpeg users; short clips) | `FFmpegEncoder.runFFmpeg` waited with `DispatchQueue.global().async { waitUntilExit() }`. | Done. |
+| I-28 | F2/F5 | **Per-item progress jumps and runs backwards.** `.creatingMosaic` was mapped as `0.7 + 0.299 × p` with p starting at 0.15, so the bar went 0 → ~0.745, climbed to ~0.999, then fell to 0.9 when `.savingMosaic` reported. | **Fixed.** `composeMosaic` maps the stream onto 0.02 → 0.9 (`0.02 + 0.88 × s`), so `.savingMosaic` (0.9, 0.999) continues it. Tessera also keeps a per-item high-water mark in `ProgressUpdatePump`. | Low | `MetalMosaicGenerator.composeMosaic`, §2.3 | Done. |
+| I-29 | F5 | **Header `.filePath` always prints the full path.** A batch shares one `MosaicConfiguration`, so a caller could not show only the file name (a per-video `.custom` field is impossible). | **Fixed.** New `HeaderConfig.filePathShowsFileNameOnly` (default `false`, `decodeIfPresent`); `ThumbnailProcessor.formatHeaderField` prints `lastPathComponent` when set. | Low | `OverlayConfigurationTests`, §3 F5 | Done. |
 
 ### 4.3 Performance: hotspots & budgets
 
@@ -1925,7 +1930,7 @@ budgets, because throughput depends on the hardware.
 | Sandbox / security scope | Access is balanced for input folders, output directories, and staging files. **Not** for watermark image URLs or `ffmpegTempFolder`. | Callers must hold access to watermark URLs and temp folders themselves. |
 | Temp data | ffmpeg intermediates in `$TMPDIR/MosaicKitFFmpeg/<UUID>` (removed with `defer`). Hidden `.mosaickit-*` staging files are removed with `defer`, but survive a crash. | Consider a startup sweep of stale `.mosaickit-*` files older than N hours. |
 | Resource exhaustion | Unbounded frame stream; `.nochange` animation frames in memory; 16,384² textures allowed (~1 GB RGBA). | Lower limits for iOS hosts, or check `os_proc_available_memory()` before large jobs. |
-| Privacy | Headers can embed **full file paths** (`.filePath` is on by default in `HeaderConfig.default`), and `fullPathInName` embeds paths in filenames. | Beware when sharing outputs. Consider defaulting `.filePath` off for share-oriented presets. |
+| Privacy | Headers can embed **full file paths** (`.filePath` is on by default in `HeaderConfig.default`; set `filePathShowsFileNameOnly` to keep only the file name), and `fullPathInName` embeds paths in filenames. | Beware when sharing outputs. Consider defaulting `.filePath` off, or `filePathShowsFileNameOnly` on, for share-oriented presets. |
 
 ### 4.5 Hard-coded business rules & constants
 
@@ -2339,7 +2344,8 @@ Enum-typed fields are omitted for readability (see §5.2.3). The source is
 | `MosaicConfiguration` | custom | **throws** for everything except `outputdirectory`, `createOutputSubdirectory` (→ `true`), and the two templates | Rule 2 in §4.1 |
 | `PreviewConfiguration` | custom, tolerant | defaults (`exportMode` falls back to legacy `useNativeExport`, then `.native`; `sJSExportPresetName` → `.hevc`; resolution → `"1080p"`; flags → defaults) | Required: `targetDuration`, `density`, `format`, `includeAudio`, `fullPathInName`, `compressionQuality` |
 | `DensityConfig` | custom | only `factor` is required; the other fields come from the matching preset or `"Custom"` | Validates on decode |
-| `LayoutConfiguration`, `VisualSettings`, `ShadowSettings`, `FrameLabelConfig`, `HeaderConfig`, `WatermarkConfig`, `ColorDNAConfig`, `OverlayConfiguration`, `FFmpegEncodingOptions`, `VideoInput`, `VideoSource`, `VideoMetadata`, `MosaicColor` | synthesized | non-optional keys are **required**; optionals may be absent | Synthesized decoding **bypasses init clamps** (`WatermarkConfig` opacity/scale, `ColorDNAConfig` min height 8) |
+| `LayoutConfiguration`, `VisualSettings`, `ShadowSettings`, `FrameLabelConfig`, `WatermarkConfig`, `ColorDNAConfig`, `OverlayConfiguration`, `FFmpegEncodingOptions`, `VideoInput`, `VideoSource`, `VideoMetadata`, `MosaicColor` | synthesized | non-optional keys are **required**; optionals may be absent | Synthesized decoding **bypasses init clamps** (`WatermarkConfig` opacity/scale, `ColorDNAConfig` min height 8) |
+| `HeaderConfig` | custom | `fields` and `height` are required; `textColor`, `backgroundColor` optional; `filePathShowsFileNameOnly` (added in 1.13) → `false` when absent | Configs saved before the option existed still decode (I-29) |
 | `HeaderHeight`, `MetadataField`, `WatermarkContent` | custom, tagged by `"type"` | unknown `HeaderHeight` type → `.auto`; unknown `MetadataField`/`WatermarkContent` type → `.custom` / `.text` | see JSON below |
 | `MosaicLayout` | custom | required | positions encode as `{x, y}` |
 | String-raw enums | synthesized | **unknown raw value throws** | never rename raw values |
@@ -2380,8 +2386,8 @@ Enum-typed fields are omitted for readability (see §5.2.3). The source is
 | `.inProgress` | coordinator (single) | 0 | |
 | `.countingThumbnails`, `.computingLayout` | generator | 0 | |
 | `.extractingThumbnails` | **never** (only inside commented-out code) | — | |
-| `.creatingMosaic` | generator (GPU callback) | 0.745 → ~0.999 | |
-| `.savingMosaic` | generator | 0.9, then 0.999 | |
+| `.creatingMosaic` | generator (GPU callback) | 0.02 → 0.9 (monotonic; I-28) | |
+| `.savingMosaic` | generator | 0.9, then 0.999 | continues from `.creatingMosaic` without going backwards |
 | `.completed` | coordinator; `generateMosaicImage` | 1.0 | `generate` itself doesn't emit `.completed` |
 | `.failed` / `.cancelled` | coordinator | 0 | `.cancelled` for `CancellationError`, `MetalProcessorError.cancelled`, `VideoError.cancelled` |
 | `PreviewGenerationStatus.queued` | coordinator batch; native `.pending`/`.waiting` states | 0 | |
@@ -2441,7 +2447,8 @@ let mosaicURL = try await MetalMosaicGenerator().generate(for: video, config: cf
 MosaicKitWebP.register()
 cfg.overlay = OverlayConfiguration(
     frameLabel: FrameLabelConfig(format: .timestamp, position: .bottomRight),
-    header: HeaderConfig(fields: [.title, .duration, .resolution, .codec]),
+    header: HeaderConfig(fields: [.title, .duration, .resolution, .codec, .filePath],
+                         filePathShowsFileNameOnly: true),  // "Path: clip.mov" instead of the full path
     watermark: WatermarkConfig(content: .text("© Studio"), position: .bottomRight),
     colorDNA: ColorDNAConfig(show: true, style: .gradient))
 cfg.gifMode = .withMosaic; cfg.animatedFormat = .webp; cfg.gifSize = .small
@@ -2564,6 +2571,7 @@ with the code.
 | 12 | ~~Root-cause the intermittent native export stall~~ (done: macOS background scheduling, #46). Remaining: have the macOS stall retry wait until the app is active again, as iOS waits for foreground, and document background exporting for apps | I-26 | A stalled export fails after 120 s and retries while still throttled | S |
 | 13 | **Fixed rows × columns layout** (`LayoutType.fixedGrid`): spec merged (#66); G-1 model, validation and hash, G-2 `.adaptCanvas` layout, G-3 sampling/overlays ⚡ and G-4 `.letterbox`/`.stretch`, G-5 `.crop` ⚡ and G-6 docs and examples done; released in 1.11.0; G-7 (saliency crop) optional | — (feature) | Maintainer request 2026-10-15; [specs/SPEC_FIXED_GRID_LAYOUT.md](specs/SPEC_FIXED_GRID_LAYOUT.md) | M each |
 | 14 | **Uneven tiles layout** (`LayoutType.uneven`): spec merged (#67, all Q-U recommendations agreed); U-1 packer (#77), U-2 layout type (#78) and U-3 per-size extraction ⚡ (#79) done; released in 1.12.0; U-4 and U-5 optional. See `IMPLEMENTATION_PLAN.md` §8 | — | Maintainer request | M |
+| 15 | ~~Monotonic per-item progress; header `.filePath` as file name only~~ **Done** (`composeMosaic` maps `.creatingMosaic` onto 0.02 → 0.9; `HeaderConfig.filePathShowsFileNameOnly`) | I-28, I-29 | Tessera's iOS progress view and header needed both | S |
 
 ### 6.2 Open questions (still unresolved)
 
@@ -2612,14 +2620,14 @@ P1 = core feature, P2 = supporting, P3 = docs/infra.
 | # | Pri | Path | Type | Lines | Hash8 | Notes |
 |---|---|---|---|---|---|---|
 | 1 | P0 | `Package.swift` | config | 61 | 721e2854 | Products, targets, deps, platforms |
-| 2 | P0 | `Sources/Processing/MetalMosaicGenerator.swift` | code | 817 | 9ea8c950 | Mosaic entry actor; pipeline orchestration; shared `planMosaic`/`composeMosaic`/`exportAnimation` @L299; `saveMosaic` @L524 |
+| 2 | P0 | `Sources/Processing/MetalMosaicGenerator.swift` | code | 825 | 38f103eb | Mosaic entry actor; pipeline orchestration; shared `planMosaic`/`composeMosaic`/`exportAnimation` @L299; `saveMosaic` @L524 |
 | 3 | P0 | `Sources/Processing/MosaicGeneratorProtocol.swift` | code | 56 | 5685ed03 | Actor protocol |
 | 4 | P0 | `Sources/Processing/MosaicGeneratorCoordinator.swift` | code | 730 | 62277ee6 | Batch actor (per-attempt tracking, `runBatch`), progress/result/status types, factory funcs at the end |
 | 5 | P0 | `Sources/Processing/Preview/PreviewVideoGenerator.swift` | code | 1474 | 7546d65f | Preview actor + `PreviewGenerationLogic` (compose @L604, export paths @L1093/1115/1425) |
 | 6 | P0 | `Sources/Processing/Preview/PreviewGeneratorCoordinator.swift` | code | 492 | 092dc7ff | Preview batch (`runBatch`), concurrency cap 2 @L402, retry @L425 |
 | 7 | P0 | `Sources/Models/MosaicConfiguration.swift` | model | 698 | a2091850 | Config + path templating + format enums |
 | 8 | P0 | `Sources/Models/PreviewConfiguration.swift` | model | 817 | ee2900f9 | Config + extract math + path templating |
-| 9 | P1 | `Sources/Processing/ThumbnailProcessor.swift` | code | 1784 | ab4751a8 | Frame stream @L140, GIF frames @L76, header @L598/862 |
+| 9 | P1 | `Sources/Processing/ThumbnailProcessor.swift` | code | 1784 | 3ca7d902 | Frame stream @L140, GIF frames @L76, header @L598/862 |
 | 10 | P1 | `Sources/Processing/MetalImageProcessor.swift` | code | 1336 | 04cfcb88 | Metal pipeline, `generateMosaicStream` @L864, DominantColors @L601 |
 | 11 | P1 | `Sources/Processing/LayoutProcessor.swift` | code | 662 | 0e830e57 | Layout algorithms, cache @L22/135/182 |
 | 12 | P1 | `Sources/Models/VideoInput.swift` | model | 139 | 6b6bfcbf | Unit of work |
@@ -2712,7 +2720,7 @@ RELATED PRs (merged): #32 this doc (+README unreleased note); #33 iOS CI scheme 
              #31 closed (duplicate of #33). Open: #37 CLAUDE.md/AGENTS.md rewrite + this refresh
 
 FILE_MAP_SUMMARY: Appendix A (71 files; P0 = 8, P1 = 21)
-ISSUE REGISTER:   §4.2 I-1 … I-27   (High: I-1, I-2; Medium: I-3 I-4 I-8 I-12 I-16 I-20 I-22 I-24 I-26 I-27; fixed: I-1 I-2 I-3 I-9 I-11 I-12 I-5 I-6 I-7 I-10 I-15 I-17 I-18 I-19 I-22 I-16 I-23 I-24 I-27)
+ISSUE REGISTER:   §4.2 I-1 … I-29   (High: I-1, I-2; Medium: I-3 I-4 I-8 I-12 I-16 I-20 I-22 I-24 I-26 I-27; fixed: I-1 I-2 I-3 I-9 I-11 I-12 I-5 I-6 I-7 I-10 I-15 I-17 I-18 I-19 I-22 I-16 I-23 I-24 I-27 I-28 I-29)
 ROADMAP:          §6.1 → IMPLEMENTATION_PLAN.md (decisions §6.4)
 OPEN_QUESTIONS:   §6.2 (Q11 Q14 Q16 Q17; Q13 answered in F-2)
 GLOSSARY:         §5.1

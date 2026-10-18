@@ -49,6 +49,46 @@ struct OverlayConfigurationTests {
 
     // MARK: - HeaderHeight (manual Codable)
 
+    @Test("HeaderConfig.filePathShowsFileNameOnly defaults to false and round-trips")
+    func headerFilePathFileNameOnlyCodable() throws {
+        #expect(HeaderConfig().filePathShowsFileNameOnly == false)
+        let config = HeaderConfig(filePathShowsFileNameOnly: true)
+        let decoded = try JSONDecoder().decode(HeaderConfig.self, from: JSONEncoder().encode(config))
+        #expect(decoded.filePathShowsFileNameOnly)
+    }
+
+    @Test("HeaderConfig saved without filePathShowsFileNameOnly still decodes (full path)")
+    func headerConfigLegacyPayloadDecodes() throws {
+        var object = try #require(
+            JSONSerialization.jsonObject(with: JSONEncoder().encode(HeaderConfig())) as? [String: Any]
+        )
+        object.removeValue(forKey: "filePathShowsFileNameOnly")
+        let legacy = try JSONSerialization.data(withJSONObject: object)
+        let decoded = try JSONDecoder().decode(HeaderConfig.self, from: legacy)
+        #expect(decoded.filePathShowsFileNameOnly == false)
+    }
+
+    @Test("formatHeaderField prints the full path, or only the file name when asked (I-29)")
+    func filePathRowHonorsFileNameOnly() {
+        let url = URL(fileURLWithPath: "/Volumes/Media/Movies/clip.mp4")
+        let video = VideoInput(canonicalID: UUID(), url: url)
+        let processor = ThumbnailProcessor(config: .default)
+        #expect(processor.formatHeaderField(.filePath, video: video) == "Path: \(url.path)")
+        #expect(processor.formatHeaderField(.filePath, video: video, fileNameOnly: true) == "Path: clip.mp4")
+    }
+
+    @Test(".creatingMosaic progress is monotonic and stays below the 0.9 saving report (I-28)")
+    func creatingMosaicProgressIsMonotonic() {
+        let samples = stride(from: 0.0, through: 1.0, by: 0.05).map {
+            MetalMosaicGenerator.creatingMosaicProgress(streamProgress: $0)
+        }
+        #expect(samples.first == 0.02)
+        #expect(abs(MetalMosaicGenerator.creatingMosaicProgress(streamProgress: 0.15) - 0.02) < 1e-9)
+        #expect(abs(MetalMosaicGenerator.creatingMosaicProgress(streamProgress: 1.0) - 0.9) < 1e-9)
+        #expect(zip(samples, samples.dropFirst()).allSatisfy { $0 <= $1 })
+        #expect(samples.allSatisfy { $0 >= 0.02 && $0 <= 0.9 })
+    }
+
     @Test("HeaderHeight.auto round-trips through Codable")
     func headerHeightAutoCodable() throws {
         let data = try JSONEncoder().encode(HeaderHeight.auto)
