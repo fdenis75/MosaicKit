@@ -519,6 +519,14 @@ public actor MetalMosaicGenerator: MosaicGeneratorProtocol {
         ) as CGImage?
     }
 
+    /// Maps the Metal stream's progress (0.15 = first frames sampled ... 1.0 = image built) onto
+    /// 0.02 ... 0.9 so the bar starts right after planning (0.0) and rises smoothly. It used to
+    /// jump 0 -> 0.745, and the 0.9 "saving" report that follows then ran backwards from 0.984.
+    static func creatingMosaicProgress(streamProgress progress: Double) -> Double {
+        let streamed = min(max((progress - 0.15) / 0.85, 0), 1)
+        return 0.02 + (0.88 * streamed)
+    }
+
     /// Composes the mosaic image: metadata header, streamed frames through Metal (progress
     /// `.creatingMosaic`, 0.02 → 0.9), then the ColorDNA strip and the watermark.
     private func composeMosaic(
@@ -561,12 +569,7 @@ public actor MetalMosaicGenerator: MosaicGeneratorProtocol {
             metadataHeader: metadataHeader,
             forIphone: forIphone,
             progressHandler: { @Sendable progress in
-                // The stream reports 0.15 (first frames sampled) ... 1.0 (image built). Map that
-                // onto 0.02 ... 0.9 so the bar starts right after planning (0.0) and rises
-                // smoothly; it used to jump 0 -> 0.745, and the 0.9 "saving" report that follows
-                // then ran backwards from 0.984.
-                let streamed = min(max((progress - 0.15) / 0.85, 0), 1)
-                let scaledProgress = 0.02 + (0.88 * streamed)
+                let scaledProgress = Self.creatingMosaicProgress(streamProgress: progress)
                 progressHandler?(MosaicGenerationProgress(
                     video: video,
                     progress: scaledProgress,

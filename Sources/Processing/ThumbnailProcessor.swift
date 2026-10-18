@@ -1022,7 +1022,7 @@ public final class ThumbnailProcessor: Sendable {
     }
 
     /// Format a single `MetadataField` to a display string using `VideoInput` data.
-    private func formatHeaderField(_ field: MetadataField, video: VideoInput, fileNameOnly: Bool = false) -> String? {
+    func formatHeaderField(_ field: MetadataField, video: VideoInput, fileNameOnly: Bool = false) -> String? {
         signposter.emitEvent("formatHeaderField")
         let intervalState = signposter.beginInterval("formatHeaderField")
         defer { signposter.endInterval("formatHeaderField", intervalState) }
