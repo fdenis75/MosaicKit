@@ -21,9 +21,19 @@ A high-performance Swift package for generating video mosaics with Metal-acceler
 
 ## Unreleased
 
-- **New API:** `HeaderConfig.filePathShowsFileNameOnly` (default `false`) prints only the file name on the header's `.filePath` row (I-29).
-- **Behavior change:** `.creatingMosaic` progress now runs monotonically from 0.02 to 0.9 instead of jumping to ~0.745 and falling back at `.savingMosaic` (I-28). See [MIGRATING-TO-1.13.md](MIGRATING-TO-1.13.md).
-- Add a line here for every change; output-naming and location changes (📁) also get a **Behavior changes** note.
+- Nothing yet. Add a line here for every change; output-naming and location changes (📁) also get a **Behavior changes** note.
+
+## New in 1.13.0
+
+Minor release on top of 1.12.0: one new header option and a monotonic mosaic progress bar. Nothing is removed or renamed, and output names do not change. Upgrading from 1.12.x? [MIGRATING-TO-1.13.md](MIGRATING-TO-1.13.md) lists what can affect an app.
+
+### New API
+
+- **`HeaderConfig.filePathShowsFileNameOnly`** (I-29, #81) — default `false`. When `true`, the header's `.filePath` row prints `Path: <file name>` instead of the full path. Configurations saved before this option still decode.
+
+### Behavior changes
+
+- **`.creatingMosaic` progress is 0.02 → 0.9 and monotonic** (I-28, #81) — it used to jump from 0 to about 0.745, reach about 0.999, then fall back to 0.9 at `.savingMosaic`. Apps that map progress ranges to phases (for example `progress >= 0.7` as "creating mosaic") need to adjust.
 
 ## New in 1.12.0
 
@@ -286,7 +296,7 @@ Add MosaicKit to your `Package.swift`:
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/fdenis75/MosaicKit.git", from: "1.12.0")
+    .package(url: "https://github.com/fdenis75/MosaicKit.git", from: "1.13.0")
 ]
 ```
 

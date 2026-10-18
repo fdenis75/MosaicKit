@@ -120,6 +120,7 @@ flowchart LR
 - **1.10.0** (2026-10-15): F-8c and F-8d (I-10, I-17) plus the faster CI; additive API only. F-4 and F-5 are still open.
 - **1.11.0** (2026-10-15): the fixed-grid layout (G-1 to G-6, `LayoutType.fixedGrid`); additive API plus one source break (the new enum case in exhaustive `switch`es). G-7, F-4 and F-5 are still open.
 - **1.12.0** (2026-10-16): the uneven-tiles layout (U-1 to U-3, `LayoutType.uneven`); additive API plus one source break (the new enum case in exhaustive `switch`es). U-4, U-5, G-7, F-4 and F-5 are still open.
+- **1.13.0** (2026-10-18): header option `HeaderConfig.filePathShowsFileNameOnly` and monotonic `.creatingMosaic` progress (I-28, I-29, #81); additive API, no source break.
 - **2.0.0** removes everything deprecated in S-6.
 
 ## 8. Tracking
