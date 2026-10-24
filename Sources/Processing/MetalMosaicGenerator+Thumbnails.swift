@@ -50,8 +50,9 @@ extension MetalMosaicGenerator {
     /// Each frame is encoded as soon as it is decoded, so only one frame is held in memory. Files
     /// are named `<video file name>_<number>.<extension>`, numbered from 1 in temporal order and
     /// zero-padded to at least four digits (`clip_0001.jpg`). A file of the same name in
-    /// `directory` is replaced. If the export fails or is cancelled, the files it wrote are removed
-    /// (and the directory too, when MosaicKit created it). Cancellation works as in
+    /// `directory` is replaced. If the export fails or is cancelled, the files it wrote are removed;
+    /// so is the directory, when MosaicKit created it under the temporary directory or when a
+    /// caller directory is left empty. Other files in a caller directory are never touched. Cancellation works as in
     /// ``extractThumbnails(for:options:)``.
     /// - Parameters:
     ///   - video: The video to read.
@@ -81,6 +82,10 @@ extension MetalMosaicGenerator {
         options: ThumbnailExtractionOptions,
         _ body: (Int, CGImage, TimeInterval) async throws -> Void
     ) async throws {
+        // `VideoInput(from:)` releases its security-scoped grant when it returns; hold one for the
+        // whole decode so a user-selected file stays readable in a sandboxed app.
+        let didStartAccessingSource = video.url.startAccessingSecurityScopedResource()
+        defer { if didStartAccessingSource { video.url.stopAccessingSecurityScopedResource() } }
         let asset = AVURLAsset(url: video.url)
         let duration: Double
         if let known = video.duration { duration = known } else { duration = try await asset.load(.duration).seconds }
@@ -106,7 +111,6 @@ extension MetalMosaicGenerator {
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
         let didStartAccessing = directory.startAccessingSecurityScopedResource()
         defer { if didStartAccessing { directory.stopAccessingSecurityScopedResource() } }
-        let directoryExisted = fileManager.fileExists(atPath: directory.path)
         try fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
 
         let baseName = video.url.deletingPathExtension().lastPathComponent
@@ -126,10 +130,16 @@ extension MetalMosaicGenerator {
                 files.append(ThumbnailExport.File(index: index, time: time, url: url))
             }
         } catch {
-            if directoryExisted {
-                files.forEach { try? fileManager.removeItem(at: $0.url) }
-            } else {
+            if requestedDirectory == nil {
+                // The private UUID directory belongs to this attempt alone.
                 try? fileManager.removeItem(at: directory)
+            } else {
+                // A caller directory may be shared with concurrent exports: remove only this
+                // attempt's files, and the directory only if that leaves it empty.
+                files.forEach { try? fileManager.removeItem(at: $0.url) }
+                if (try? fileManager.contentsOfDirectory(atPath: directory.path))?.isEmpty == true {
+                    try? fileManager.removeItem(at: directory)
+                }
             }
             logger.error("Thumbnail export failed for \(video.url.lastPathComponent, privacy: .public): \(error.localizedDescription, privacy: .public)")
             throw error

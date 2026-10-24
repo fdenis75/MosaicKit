@@ -116,6 +116,27 @@ struct ThumbnailExtractionTests {
         #expect(!FileManager.default.fileExists(atPath: directory.path))
     }
 
+    @Test("A cancelled export into a shared caller directory keeps other files")
+    func cancelledExportKeepsOtherFiles() async throws {
+        let video = try await fixture("test_video")
+        let generator = try MetalMosaicGenerator()
+        let directory = scratchDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        // Another export's output in the same directory, under another video's name.
+        let other = try await generator.exportThumbnails(
+            for: video, options: ThumbnailExtractionOptions(count: 1, maximumSize: CGSize(width: 64, height: 64)), to: directory
+        )
+        let otherFile = try #require(other.files.first?.url)
+        let renamed = directory.appendingPathComponent("other_0001.jpg")
+        try FileManager.default.moveItem(at: otherFile, to: renamed)
+        let task = Task {
+            try await generator.exportThumbnails(for: video, options: ThumbnailExtractionOptions(count: 50), to: directory)
+        }
+        task.cancel()
+        await #expect(throws: CancellationError.self) { try await task.value }
+        #expect(FileManager.default.fileExists(atPath: renamed.path))
+    }
+
     @Test("Invalid options are rejected before any decode", arguments: [
         ThumbnailExtractionOptions(count: 0),
         ThumbnailExtractionOptions(count: ThumbnailExtractionOptions.maximumCount + 1),

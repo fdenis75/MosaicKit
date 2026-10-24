@@ -1183,8 +1183,10 @@ backbone. Read `LayoutProcessor` algorithms, `ThumbnailProcessor` header/label r
     `cancelAll()` reach them. Decoding is `ThumbnailProcessor.forEachFrame` (strict, the same
     decoder as F6 animation frames); `.uniform` sampling maps to `FrameSamplingPolicy.uniform`.
     Export encodes each frame as it arrives through `ImageFileWriter` + `OutputTransaction`
-    (overwrite), and on failure removes what it wrote (the whole directory when it created it, by
-    default under `temporaryDirectory/MosaicKitThumbnails/<UUID>/`). They are not
+    (overwrite). On failure it removes its private `temporaryDirectory/MosaicKitThumbnails/<UUID>/`
+    whole, but in a caller directory (possibly shared by concurrent exports) only its own files,
+    and the directory only if then empty. The decode holds security-scoped access on `video.url`
+    (`VideoInput(from:)` releases its own grant). They are not
     `MosaicGeneratorProtocol` requirements, so external conformers are unaffected. Tests:
     `ThumbnailExtractionTests`. The S-6-deprecated `ThumbnailProcessor` helpers stay deprecated
     (they need a `MosaicLayout` and burn in labels) and now point here.

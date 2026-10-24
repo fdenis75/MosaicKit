@@ -722,7 +722,7 @@ Frames are raw (no timestamp label), upright, and never scaled up. `sampling: .u
 spaces them evenly over 5–95 % of the video; `.weighted` uses the mosaic's denser middle. Extraction
 is strict (an undecodable frame throws), runs off the generator actor, and stops with
 `CancellationError` on `cancel(for:)`, `cancelAll()` or task cancellation. A failed or cancelled
-export removes the files it wrote. `format: .webp` needs `MosaicKitWebP.register()`.
+export removes only the files it wrote. `format: .webp` needs `MosaicKitWebP.register()`.
 
 ### Batch Processing
 

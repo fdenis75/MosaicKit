@@ -35,8 +35,8 @@ defer { try? FileManager.default.removeItem(at: export.directory) }
   `MosaicError.invalidConfiguration` before any decode; `.webp` files without
   `MosaicKitWebP.register()` throw `MosaicKitWebPError.encoderNotRegistered`.
 - Cancellation: `cancel(for:)` (same `VideoInput.id`), `cancelAll()` and cancelling the calling task
-  throw `CancellationError`. A failed or cancelled export removes the files it wrote, and the
-  directory when MosaicKit created it.
+  throw `CancellationError`. A failed or cancelled export removes the files it wrote (never other
+  files), its private temporary directory, and a caller directory only if that leaves it empty.
 - `exportThumbnails(for:options:to:)` names files `<video name>_<number>.<ext>` from `_0001`, and
   replaces a file of the same name in the directory you pass.
 - The methods are on `MetalMosaicGenerator` only, not on `MosaicGeneratorProtocol`, so existing
