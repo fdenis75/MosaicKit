@@ -122,6 +122,7 @@ flowchart LR
 - **1.12.0** (2026-10-16): the uneven-tiles layout (U-1 to U-3, `LayoutType.uneven`); additive API plus one source break (the new enum case in exhaustive `switch`es). U-4, U-5, G-7, F-4 and F-5 are still open.
 - **1.13.0** (2026-10-18): header option `HeaderConfig.filePathShowsFileNameOnly` and monotonic `.creatingMosaic` progress (I-28, I-29, #81); additive API, no source break.
 - **1.14.0** (2026-10-24): public thumbnail extraction on `MetalMosaicGenerator` (`extractThumbnails`, `extractThumbnailImages`, `exportThumbnails`, `ThumbnailExtractionOptions`; #83); additive API, no output-naming change.
+- **1.15.0** (2026-10-25): remote download links as sources (I-30, #85): MIME override for extensionless remote URLs, `VideoInput.outputBaseName`, `validateOutputLocation(for:)`, remote file size; 📁 names change only for extensionless remote URLs.
 - **2.0.0** removes everything deprecated in S-6.
 
 ## 8. Tracking
