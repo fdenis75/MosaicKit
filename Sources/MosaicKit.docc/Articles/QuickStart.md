@@ -202,6 +202,21 @@ let results = try await coordinator.generateMosaicsforbatch(
 print("Generated \(results.count) mosaics")
 ```
 
+## Step 7: Extract Individual Thumbnails
+
+Get frames without building a mosaic, as images or as files in a directory:
+
+```swift
+let options = ThumbnailExtractionOptions(count: 12, maximumSize: CGSize(width: 640, height: 640))
+
+let images = try await generator.extractThumbnailImages(for: video, options: options)
+
+let export = try await generator.exportThumbnails(for: video, options: options)
+// export.directory is a new folder under the temporary directory: remove it when done.
+```
+
+See ``MetalMosaicGenerator/extractThumbnails(for:options:)`` and ``ThumbnailExtractionOptions``.
+
 ## Next Steps
 
 Now that you've created your first mosaics, explore:

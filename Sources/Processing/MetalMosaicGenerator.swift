@@ -44,6 +44,8 @@ public actor MetalMosaicGenerator: MosaicGeneratorProtocol {
 
     private var generationTasks: [UUID: [UUID: Task<URL, Error>]] = [:]
     private var imageGenerationTasks: [UUID: [UUID: Task<CGImage, Error>]] = [:]
+    /// Cancellers of thumbnail extractions and exports, keyed like `generationTasks`.
+    private var thumbnailTaskCancellers: [UUID: [UUID: @Sendable () -> Void]] = [:]
     private var progressHandlerRevisions: [UUID: UUID] = [:]
     private var progressHandlers: [UUID: @Sendable (MosaicGenerationProgress) -> Void] = [:]
     
@@ -640,6 +642,8 @@ public actor MetalMosaicGenerator: MosaicGeneratorProtocol {
         generationTasks[video.id] = nil
         imageGenerationTasks[video.id]?.values.forEach { $0.cancel() }
         imageGenerationTasks[video.id] = nil
+        thumbnailTaskCancellers[video.id]?.values.forEach { $0() }
+        thumbnailTaskCancellers[video.id] = nil
     }
 
     /// Cancel all ongoing mosaic generation operations
@@ -651,6 +655,8 @@ public actor MetalMosaicGenerator: MosaicGeneratorProtocol {
         generationTasks.removeAll()
         imageGenerationTasks.values.forEach { $0.values.forEach { $0.cancel() } }
         imageGenerationTasks.removeAll()
+        thumbnailTaskCancellers.values.forEach { $0.values.forEach { $0() } }
+        thumbnailTaskCancellers.removeAll()
     }
     
     /// Set a progress handler for a specific video
@@ -688,6 +694,26 @@ public actor MetalMosaicGenerator: MosaicGeneratorProtocol {
         return metrics
     }
     
+    /// Runs `operation` in a tracked task that `cancel(for:)` and `cancelAll()` reach, bridging the
+    /// caller's cancellation into it. `operation` is nonisolated, so its work runs off this actor.
+    internal func runTrackedThumbnailTask<T: Sendable>(
+        for videoID: UUID,
+        _ operation: @escaping @Sendable () async throws -> T
+    ) async throws -> T {
+        let attemptID = UUID()
+        let task = Task<T, Error> { try await operation() }
+        thumbnailTaskCancellers[videoID, default: [:]][attemptID] = { task.cancel() }
+        defer {
+            thumbnailTaskCancellers[videoID]?[attemptID] = nil
+            if thumbnailTaskCancellers[videoID]?.isEmpty == true { thumbnailTaskCancellers[videoID] = nil }
+        }
+        return try await withTaskCancellationHandler {
+            try await task.value
+        } onCancel: {
+            task.cancel()
+        }
+    }
+
     // MARK: - Private Methods
     
     /// Save a mosaic image to disk
@@ -743,37 +769,9 @@ public actor MetalMosaicGenerator: MosaicGeneratorProtocol {
         defer { transaction.discard() }
         try Task.checkCancellation()
         
-        if config.format == .webp {
-            let didStartAccessingDirectory = mosaicURL.deletingLastPathComponent().startAccessingSecurityScopedResource()
-            defer {
-                if didStartAccessingDirectory {
-                    mosaicURL.deletingLastPathComponent().stopAccessingSecurityScopedResource()
-                }
-            }
-            guard let encoder = MosaicKitWebPSupport.encoder else {
-                throw MosaicKitWebPError.encoderNotRegistered
-            }
-            let data = try encoder.encodeStillWebP(mosaic, quality: Float(config.compressionQuality * 100))
-            try data.write(to: transaction.stagingURL)
-            try transaction.commit()
-            return mosaicURL
-        }
-
-        let identifier: CFString
-        switch config.format {
-        case .jpeg:
-            identifier = UTType.jpeg.identifier as CFString
-        case .png:
-            identifier = UTType.png.identifier as CFString
-        case .heif:
-            identifier = UTType.heic.identifier as CFString
-        case .webp:
-            identifier = UTType.webP.identifier as CFString
-        }
-
-        // Use security scoped resource for HEIF
+        // Use security scoped resource for WebP and HEIF
         var didStartAccessingDirectory = false
-        if config.format == .heif {
+        if config.format == .webp || config.format == .heif {
             let directory = mosaicURL.deletingLastPathComponent()
             didStartAccessingDirectory = directory.startAccessingSecurityScopedResource()
         }
@@ -783,29 +781,8 @@ public actor MetalMosaicGenerator: MosaicGeneratorProtocol {
             }
         }
 
-        guard let destination = CGImageDestinationCreateWithURL(
-            transaction.stagingURL as CFURL,
-            identifier,
-            1,
-            nil
-        ) else {
-            throw MosaicError.saveFailed(mosaicURL, NSError(domain: "com.mosaicKit", code: -1))
-        }
-
-        var options: [String: Any] = [:]
-        if config.format == .jpeg || config.format == .heif {
-            options[kCGImageDestinationLossyCompressionQuality as String] = config.compressionQuality
-        }
-        if config.format == .heif {
-            options[kCGImageDestinationEmbedThumbnail as String] = true
-            options[kCGImagePropertyHasAlpha as String] = false
-        }
-
-        CGImageDestinationAddImage(destination, mosaic, options as CFDictionary)
-
-        if !CGImageDestinationFinalize(destination) {
-            throw MosaicError.saveFailed(mosaicURL, NSError(domain: "com.mosaicKit", code: -1))
-        }
+        try ImageFileWriter.write(mosaic, format: config.format, compressionQuality: config.compressionQuality,
+                                  to: transaction.stagingURL, reportedURL: mosaicURL)
 
         try transaction.commit()
         return mosaicURL

@@ -118,6 +118,34 @@ extension MosaicConfiguration {
     }
 }
 
+extension ThumbnailExtractionOptions {
+    /// Rejects a count, size or quality that cannot be extracted, and `.webp` without a
+    /// registered encoder.
+    public func validate() throws {
+        try validateFrameSelection()
+        guard compressionQuality.isFinite, (0...1).contains(compressionQuality) else {
+            throw MosaicError.invalidConfiguration("Compression quality must be finite and between zero and one")
+        }
+        if format == .webp, MosaicKitWebPSupport.encoder == nil {
+            throw MosaicKitWebPError.encoderNotRegistered
+        }
+    }
+
+    /// The checks in-memory extraction needs: it ignores `format` and `compressionQuality`.
+    func validateFrameSelection() throws {
+        guard (1...Self.maximumCount).contains(count) else {
+            throw MosaicError.invalidConfiguration("Thumbnail count must be between 1 and \(Self.maximumCount) (got \(count))")
+        }
+        if let maximumSize {
+            guard maximumSize.width.isFinite, maximumSize.height.isFinite,
+                  maximumSize.width >= 1, maximumSize.height >= 1,
+                  maximumSize.width <= 16_384, maximumSize.height <= 16_384 else {
+                throw MosaicError.invalidConfiguration("Thumbnail maximum size must be between 1 and 16384 px on each side")
+            }
+        }
+    }
+}
+
 extension PreviewConfiguration {
     /// Validates numeric settings and combinations supported by the selected exporter.
     public func validate() throws {

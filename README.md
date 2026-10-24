@@ -21,7 +21,15 @@ A high-performance Swift package for generating video mosaics with Metal-acceler
 
 ## Unreleased
 
-- Nothing yet. Add a line here for every change; output-naming and location changes (📁) also get a **Behavior changes** note.
+Upgrading from 1.13.x? [MIGRATING-TO-1.14.md](MIGRATING-TO-1.14.md) lists what can affect an app.
+
+### New API
+
+- **Thumbnail extraction** — `MetalMosaicGenerator.extractThumbnails(for:options:)` returns `[VideoThumbnail]` (index, decoded time, `CGImage`), `extractThumbnailImages(for:options:)` returns `[CGImage]`, and `exportThumbnails(for:options:to:)` writes one image file per frame to a directory (a new one under the temporary directory by default) and returns a `ThumbnailExport`. `ThumbnailExtractionOptions` sets the count, size box, sampling (`.uniform` or the mosaic's `.weighted`), accuracy, file format and quality. No mosaic is built; no output names change.
+
+### Deprecations
+
+- The deprecated `ThumbnailProcessor` frame helpers (`extractThumbnails`, `extractFramesStream`, `extractThumbnailsUI`) stay deprecated and now point to `MetalMosaicGenerator.extractThumbnails(for:options:)`.
 
 ## New in 1.13.0
 
@@ -690,6 +698,31 @@ previewConfig.filenameTemplate = "{name}_prev_{duration}_{audio}.{ext}"
 | `{date}` | `yyyy-MM-dd` |
 
 ## Advanced Usage
+
+### Thumbnail Extraction
+
+Extract individual frames without building a mosaic, in memory or as files:
+
+```swift
+let generator = try MetalMosaicGenerator()
+let video = try await VideoInput(from: videoURL)
+let options = ThumbnailExtractionOptions(count: 12, maximumSize: CGSize(width: 640, height: 640))
+
+// In memory: [VideoThumbnail] (index, time in seconds, CGImage), or just [CGImage]
+let thumbnails = try await generator.extractThumbnails(for: video, options: options)
+let images = try await generator.extractThumbnailImages(for: video, options: options)
+
+// On disk: one file per frame (clip_0001.jpg, …). With no directory, MosaicKit creates one under
+// the temporary directory; the caller owns it and removes it when done.
+let export = try await generator.exportThumbnails(for: video, options: options)
+print(export.directory, export.files.map(\.url))
+```
+
+Frames are raw (no timestamp label), upright, and never scaled up. `sampling: .uniform` (default)
+spaces them evenly over 5–95 % of the video; `.weighted` uses the mosaic's denser middle. Extraction
+is strict (an undecodable frame throws), runs off the generator actor, and stops with
+`CancellationError` on `cancel(for:)`, `cancelAll()` or task cancellation. A failed or cancelled
+export removes the files it wrote. `format: .webp` needs `MosaicKitWebP.register()`.
 
 ### Batch Processing
 
