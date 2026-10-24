@@ -508,7 +508,7 @@ public struct PreviewConfiguration: Codable, Sendable, Hashable {
     ///     Defaults to `Date()`.
     /// - Returns: Filename string
     public func generateFilename(for videoInput: VideoInput, referenceDate: Date = Date()) -> String {
-        let originalFilename = videoInput.url.deletingPathExtension().lastPathComponent.replacingNonAlphanumerics(with: "_")
+        let originalFilename = videoInput.outputBaseName.replacingNonAlphanumerics(with: "_")
 
         if let template = filenameTemplate {
             return resolveFilenameTemplate(

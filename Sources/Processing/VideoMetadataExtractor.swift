@@ -29,7 +29,7 @@ actor VideoMetadataExtractor {
     /// Optimized for performance with parallel property loading
     func extractMetadataValues(from url: URL) async throws -> VideoMetadataValues {
         try Task.checkCancellation()
-        let asset = AVURLAsset(url: url)
+        let asset = RemoteVideoSupport.makeAsset(url: url)
 
         // Load multiple properties at once for better performance
         let (tracks, duration) = try await asset.load(.tracks, .duration)
@@ -48,8 +48,13 @@ actor VideoMetadataExtractor {
         var bitrate: Int64?
         var height: Double?
         var width: Double?
-        var fileSize: Int64?
-         fileSize = try? FileManager.default.attributesOfItem(atPath: url.path)[.size] as? Int64
+        // A remote source has no file attributes: ask the server for the size (I-30).
+        let fileSize: Int64?
+        if url.isFileURL {
+            fileSize = try? FileManager.default.attributesOfItem(atPath: url.path)[.size] as? Int64
+        } else {
+            fileSize = await RemoteVideoSupport.contentLength(of: url)
+        }
         // Find video track and load properties
         if let videoTrack = tracks.first(where: { $0.mediaType == .video }) {
             // Load multiple track properties at once for better performance
@@ -98,7 +103,7 @@ actor VideoMetadataExtractor {
         }
 
         // Calculate bitrate from file size and duration (more reliable than estimatedDataRate)
-        bitrate = calculateBitrate(for: url, duration: duration.seconds)
+        bitrate = calculateBitrate(fileSize: fileSize, duration: duration.seconds)
 
         // Extract file creation date
         let fileCreationDate = extractFileCreationDate(from: url)
@@ -121,18 +126,17 @@ actor VideoMetadataExtractor {
 
     /// Extract file creation date from file attributes
     private func extractFileCreationDate(from url: URL) -> Date? {
-        guard let attributes = try? FileManager.default.attributesOfItem(atPath: url.path) else {
+        guard url.isFileURL, let attributes = try? FileManager.default.attributesOfItem(atPath: url.path) else {
             return nil
         }
         return attributes[.creationDate] as? Date
     }
 
     /// Calculate bitrate from file size and duration
-    private func calculateBitrate(for url: URL, duration: TimeInterval) -> Int64? {
+    private func calculateBitrate(fileSize: Int64?, duration: TimeInterval) -> Int64? {
         guard duration.isFinite, duration > 0 else { return nil }
 
-        guard let fileSize = try? FileManager.default.attributesOfItem(atPath: url.path)[.size] as? Int64,
-              fileSize > 0 else {
+        guard let fileSize, fileSize > 0 else {
             return nil
         }
 

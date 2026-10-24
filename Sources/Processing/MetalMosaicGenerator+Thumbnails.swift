@@ -86,7 +86,7 @@ extension MetalMosaicGenerator {
         // whole decode so a user-selected file stays readable in a sandboxed app.
         let didStartAccessingSource = video.url.startAccessingSecurityScopedResource()
         defer { if didStartAccessingSource { video.url.stopAccessingSecurityScopedResource() } }
-        let asset = AVURLAsset(url: video.url)
+        let asset = RemoteVideoSupport.makeAsset(url: video.url)
         let duration: Double
         if let known = video.duration { duration = known } else { duration = try await asset.load(.duration).seconds }
         guard duration.isFinite, duration > 0 else { throw MosaicError.invalidVideo("Invalid duration") }
@@ -113,7 +113,7 @@ extension MetalMosaicGenerator {
         defer { if didStartAccessing { directory.stopAccessingSecurityScopedResource() } }
         try fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
 
-        let baseName = video.url.deletingPathExtension().lastPathComponent
+        let baseName = video.outputBaseName
         let digits = max(4, String(options.count).count)
         var files: [ThumbnailExport.File] = []
         files.reserveCapacity(options.count)

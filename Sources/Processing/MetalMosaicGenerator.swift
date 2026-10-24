@@ -102,6 +102,7 @@ public actor MetalMosaicGenerator: MosaicGeneratorProtocol {
         let intervalState = signposter.beginInterval("generate")
         defer { signposter.endInterval("generate", intervalState) }
         try config.validate()
+        try config.validateOutputLocation(for: video)
         let videoID = video.id
 
         try Task.checkCancellation()
@@ -134,14 +135,14 @@ public actor MetalMosaicGenerator: MosaicGeneratorProtocol {
                 } else {
                     let rootFolder = config.outputdirectory ?? video.url.deletingLastPathComponent()
                     let outputDir = config.generateOutputDirectory(rootDirectory: rootFolder, videoInput: video, referenceDate: referenceDate)
-                    let originalFilename = video.url.deletingPathExtension().lastPathComponent
+                    let originalFilename = video.outputBaseName
                     let filename = config.generateFilename(originalFilename: originalFilename, videoInput: video)
                     let mosaicURL = outputDir.appendingPathComponent(filename)
                     if FileManager.default.fileExists(atPath: mosaicURL.path) {
                         if config.gifMode == .withMosaic {
                             let animationURL = config.animatedOutputURL(for: video, referenceDate: referenceDate)
                             if !FileManager.default.fileExists(atPath: animationURL.path) {
-                                let asset = AVURLAsset(url: video.url)
+                                let asset = RemoteVideoSupport.makeAsset(url: video.url)
                                 let duration = try await asset.load(.duration).seconds
                                 guard duration.isFinite, duration > 0 else { throw MosaicError.invalidVideo("Invalid duration") }
                                 // The same layout `planMosaic` computes (P2): one shared helper.
@@ -314,7 +315,7 @@ public actor MetalMosaicGenerator: MosaicGeneratorProtocol {
         forIphone: Bool,
         progressHandler: (@Sendable (MosaicGenerationProgress) -> Void)?
     ) async throws -> MosaicPlan {
-        let asset = AVURLAsset(url: video.url)
+        let asset = RemoteVideoSupport.makeAsset(url: video.url)
         let duration: Double
         if let known = video.duration { duration = known } else { duration = try await asset.load(.duration).seconds }
         guard duration.isFinite, duration > 0, config.width > 0, config.width <= 16_384, (video.width ?? 1).isFinite, (video.height ?? 1).isFinite, (video.width ?? 1) > 0, (video.height ?? 1) > 0 else { throw MosaicError.invalidVideo("Invalid duration or dimensions") }
@@ -759,8 +760,7 @@ public actor MetalMosaicGenerator: MosaicGeneratorProtocol {
                                                 attributes: nil)
 
         // Generate filename using configuration method
-        let videoURL = video.url
-        let originalFilename = videoURL.deletingPathExtension().lastPathComponent
+        let originalFilename = video.outputBaseName
         let filename = config.generateFilename(originalFilename: originalFilename, videoInput: video)
 
         mosaicURL = baseOutputDirectory.appendingPathComponent(filename)
