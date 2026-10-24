@@ -14,7 +14,7 @@ name: Swift
 # Anything outside these paths, including Package.swift, workflows and sources, still runs.
 on:
   push:
-    branches: ["main", "claude/**"]
+    branches: ["validation/**"]
     paths-ignore:
       - "**/*.md"
       - "codebase-analysis-docs/**"
