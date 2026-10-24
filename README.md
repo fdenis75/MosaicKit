@@ -21,11 +21,15 @@ A high-performance Swift package for generating video mosaics with Metal-acceler
 
 ## Unreleased
 
-Upgrading from 1.13.x? [MIGRATING-TO-1.14.md](MIGRATING-TO-1.14.md) lists what can affect an app.
+- Nothing yet. Add a line here for every change; output-naming and location changes (📁) also get a **Behavior changes** note.
+
+## New in 1.14.0
+
+Minor release on top of 1.13.0: a public thumbnail extraction API. Nothing is removed or renamed, mosaic output does not change, and output names do not change. Upgrading from 1.13.x? [MIGRATING-TO-1.14.md](MIGRATING-TO-1.14.md) lists what can affect an app.
 
 ### New API
 
-- **Thumbnail extraction** — `MetalMosaicGenerator.extractThumbnails(for:options:)` returns `[VideoThumbnail]` (index, decoded time, `CGImage`), `extractThumbnailImages(for:options:)` returns `[CGImage]`, and `exportThumbnails(for:options:to:)` writes one image file per frame to a directory (a new one under the temporary directory by default) and returns a `ThumbnailExport`. `ThumbnailExtractionOptions` sets the count, size box, sampling (`.uniform` or the mosaic's `.weighted`), accuracy, file format and quality. No mosaic is built; no output names change.
+- **Thumbnail extraction** — `MetalMosaicGenerator.extractThumbnails(for:options:)` returns `[VideoThumbnail]` (index, decoded time, `CGImage`), `extractThumbnailImages(for:options:)` returns `[CGImage]`, and `exportThumbnails(for:options:to:)` writes one image file per frame to a directory (a new one under the temporary directory by default) and returns a `ThumbnailExport` (#83). `ThumbnailExtractionOptions` sets the count, size box, sampling (`.uniform` or the mosaic's `.weighted`), accuracy, file format and quality. No mosaic is built; no output names change.
 
 ### Deprecations
 
@@ -304,7 +308,7 @@ Add MosaicKit to your `Package.swift`:
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/fdenis75/MosaicKit.git", from: "1.13.0")
+    .package(url: "https://github.com/fdenis75/MosaicKit.git", from: "1.14.0")
 ]
 ```
 
