@@ -38,7 +38,7 @@ public final class ThumbnailProcessor: Sendable {
     ///   - preview: Whether generating preview thumbnails
     ///   - accurate: Whether to use accurate timestamp extraction
     /// - Returns: Array of tuples containing thumbnail images and their timestamps
-    @available(*, deprecated, message: "Unused by MosaicKit. Removed in MosaicKit 2.0. Use MetalMosaicGenerator.generateMosaicImage(for:config:forIphone:) for a mosaic, or AVAssetImageGenerator for raw frames.")
+    @available(*, deprecated, message: "Unused by MosaicKit. Removed in MosaicKit 2.0. Use MetalMosaicGenerator.generateMosaicImage(for:config:forIphone:) for a mosaic, or MetalMosaicGenerator.extractThumbnails(for:options:) for raw frames.")
     public func extractThumbnails(
         from file: URL,
         layout: MosaicLayout,
@@ -96,6 +96,50 @@ public final class ThumbnailProcessor: Sendable {
         signposter.emitEvent("extractFramesForGif")
         let intervalState = signposter.beginInterval("extractFramesForGif")
         defer { signposter.endInterval("extractFramesForGif", intervalState) }
+        let maximumSize: CGSize? = switch gifSize {
+        case .nochange: nil
+        case .large: CGSize(width: 1280, height: 720)
+        case .small: CGSize(width: 960, height: 540)
+        }
+        let frames = try await extractFrames(from: asset, count: count, maximumSize: maximumSize,
+                                             accurate: accurate, policy: policy)
+        return frames.map(\.image)
+    }
+
+    /// Decodes `count` raw frames (no label) at the times `policy` picks, in temporal order, with
+    /// the time each decoded frame actually shows. Strict: an undecodable frame throws (rules
+    /// card #10). Shared by animation export and the public thumbnail extraction.
+    func extractFrames(
+        from asset: AVAsset,
+        count: Int,
+        maximumSize: CGSize?,
+        accurate: Bool,
+        policy: FrameSamplingPolicy,
+        duration knownDuration: Double? = nil
+    ) async throws -> [(image: CGImage, time: CMTime)] {
+        var frames: [(image: CGImage, time: CMTime)] = []
+        frames.reserveCapacity(count)
+        try await forEachFrame(from: asset, count: count, maximumSize: maximumSize, accurate: accurate,
+                               policy: policy, duration: knownDuration) { _, image, time in
+            frames.append((image, time))
+        }
+        return frames
+    }
+
+    /// `extractFrames` without holding the frames: `body` gets each one (index, image, decoded
+    /// time) as soon as it is decoded, so a caller writing files keeps one frame in memory.
+    func forEachFrame(
+        from asset: AVAsset,
+        count: Int,
+        maximumSize: CGSize?,
+        accurate: Bool,
+        policy: FrameSamplingPolicy,
+        duration knownDuration: Double? = nil,
+        _ body: (Int, CGImage, CMTime) async throws -> Void
+    ) async throws {
+        signposter.emitEvent("forEachFrame")
+        let intervalState = signposter.beginInterval("forEachFrame")
+        defer { signposter.endInterval("forEachFrame", intervalState) }
         try Task.checkCancellation()
         let generator = AVAssetImageGenerator(asset: asset)
         generator.appliesPreferredTrackTransform = true
@@ -107,27 +151,34 @@ public final class ThumbnailProcessor: Sendable {
             generator.requestedTimeToleranceBefore = CMTime(seconds: 1.0, preferredTimescale: 600)
             generator.requestedTimeToleranceAfter = CMTime(seconds: 1.0, preferredTimescale: 600)
         }
-
-        switch gifSize {
-        case .nochange:
-            break
-        case .large:
-            generator.maximumSize = CGSize(width: 1280, height: 720)
-        case .small:
-            generator.maximumSize = CGSize(width: 960, height: 540)
+        if let maximumSize {
+            generator.maximumSize = maximumSize
         }
+        let cancellation = ImageGeneratorCancellation([generator])
 
-        var frames: [CGImage] = []
-        let duration = try await asset.load(.duration).seconds
+        let duration: Double
+        if let knownDuration { duration = knownDuration } else { duration = try await asset.load(.duration).seconds }
         let times = calculateExtractionTimes(duration: duration, count: count, policy: policy)
-        for try await result in generator.images(for: times) {
-            try Task.checkCancellation()
-            guard case .success(_, let image, _) = result else { continue }
-            frames.append(image)
+        guard !times.isEmpty else { throw MosaicError.invalidVideo("Invalid duration or frame count") }
+        var delivered = 0
+        try await withTaskCancellationHandler {
+            for try await result in generator.images(for: times) {
+                try Task.checkCancellation()
+                switch result {
+                case .success(_, let image, let actualTime):
+                    try await body(delivered, image, actualTime)
+                    delivered += 1
+                case .failure(let requestedTime, let error):
+                    throw MosaicError.processingFailed(
+                        "Frame extraction failed at \(String(format: "%.2f", requestedTime.seconds)) s: \(error.localizedDescription)"
+                    )
+                }
+            }
+        } onCancel: {
+            cancellation.cancel()
         }
         try Task.checkCancellation()
-        guard frames.count == count, !frames.isEmpty else { throw MosaicError.processingFailed("Missing animation frames") }
-        return frames
+        guard delivered == times.count else { throw MosaicError.processingFailed("Missing frames") }
     }
     
     /// Extract thumbnails from video with timestamps as an async stream
@@ -137,7 +188,7 @@ public final class ThumbnailProcessor: Sendable {
     ///   - asset: Video asset to extract thumbnails from
     ///   - accurate: Whether to use accurate timestamp extraction
     /// - Returns: Async stream of tuples containing index, thumbnail image and timestamp
-    @available(*, deprecated, message: "Unused by MosaicKit. Removed in MosaicKit 2.0. Use MetalMosaicGenerator.generateMosaicImage(for:config:forIphone:) for a mosaic, or AVAssetImageGenerator for raw frames.")
+    @available(*, deprecated, message: "Unused by MosaicKit. Removed in MosaicKit 2.0. Use MetalMosaicGenerator.generateMosaicImage(for:config:forIphone:) for a mosaic, or MetalMosaicGenerator.extractThumbnails(for:options:) for raw frames.")
     public func extractFramesStream(
         from file: URL,
         layout: MosaicLayout,
@@ -280,7 +331,7 @@ public final class ThumbnailProcessor: Sendable {
     ///   - asset: Video asset to extract thumbnails from
     ///   - accurate: Whether to use accurate timestamp extraction
     /// - Returns: Array of tuples containing thumbnail images and their timestamps
-    @available(*, deprecated, message: "Unused by MosaicKit. Removed in MosaicKit 2.0. Use AVAssetImageGenerator for raw frames.")
+    @available(*, deprecated, message: "Unused by MosaicKit. Removed in MosaicKit 2.0. Use MetalMosaicGenerator.extractThumbnails(for:options:) for raw frames.")
     public func extractThumbnailsUI(
         from file: URL,
         count: Int,

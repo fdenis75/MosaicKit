@@ -48,6 +48,13 @@ MosaicKit is a powerful Swift package that generates beautiful video mosaics by 
 - ``VideoDiscoveryFailure``
 - ``VideoMetadataExtractor``
 
+### Thumbnail Extraction
+
+- ``ThumbnailExtractionOptions``
+- ``ThumbnailSampling``
+- ``VideoThumbnail``
+- ``ThumbnailExport``
+
 ### Configuration
 
 - ``MosaicConfiguration``

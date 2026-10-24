@@ -458,7 +458,7 @@ register:
 2. **Mosaic output-dimension limit.** `MetalMosaicGenerator` rejects `config.width > 16_384`
    inside generation (not in `validate()`) and videos shorter than 5 s, both as
    `MosaicError.invalidVideo`.
-   [[F:Sources/Processing/MetalMosaicGenerator.swift#318-321#38f103eb]]
+   [[F:Sources/Processing/MetalMosaicGenerator.swift#320-323#d32ded48]]
 3. **Preview skip-if-exists never matches in default naming mode.** With `fullPathInName ==
    false` and no `filenameTemplate`, `PreviewConfiguration.generateFilename` embeds a
    run-time timestamp (`yyyy-MM-dd_HH-mm-ss`). As a result, `overwrite == false` never finds an
@@ -636,28 +636,28 @@ Full sequence including the coordinator: `codebase-analysis-docs/assets/mosaic-s
 #### Stage-by-stage table
 
 The stage body is `MetalMosaicGenerator.generate`
-[[F:Sources/Processing/MetalMosaicGenerator.swift#98-233#38f103eb]]. Since S-2, stages 2–5 run in
+[[F:Sources/Processing/MetalMosaicGenerator.swift#100-235#d32ded48]]. Since S-2, stages 2–5 run in
 `planMosaic`, stages 6–12 in `composeMosaic` and stage 14 in `exportAnimation`
-[[F:Sources/Processing/MetalMosaicGenerator.swift#296-622#38f103eb]]. `generateMosaicImage` calls
+[[F:Sources/Processing/MetalMosaicGenerator.swift#298-623#d32ded48]]. `generateMosaicImage` calls
 the same `planMosaic` + `composeMosaic`, so both entry points compose the same image.
 
 | # | Stage | Code | Runs on | Key facts |
 |---|---|---|---|---|
-| 0 | Validate | `MosaicConfiguration.validate()` [[F:Sources/Models/ConfigurationValidation.swift#15-64#bd4a99c9]] | caller → actor | Checks geometry, quality, fps, colors, the fixedGrid rules (G-1), and whether WebP is registered. |
+| 0 | Validate | `MosaicConfiguration.validate()` [[F:Sources/Models/ConfigurationValidation.swift#15-64#54fe2ea5]] | caller → actor | Checks geometry, quality, fps, colors, the fixedGrid rules (G-1), and whether WebP is registered. |
 | 1 | Skip-if-exists | inside `generate` | generator actor | Uses one `referenceDate` for both the check and the save, so `{time}` resolves identically. With `.withMosaic`, a missing animation is backfilled. |
 | 2 | Duration / AR | inside `generate` | generator actor | Uses `video.duration` if known, else loads it. Rejects `< 5 s`, `width > 16 384`, and non-finite dimensions. Aspect ratio = `video.width / video.height`, which are display dimensions since F-1 (`preferredTransform` is applied in the extractor). |
 | 3 | Thumbnail count | `LayoutProcessor.calculateThumbnailCount` [[F:Sources/Processing/LayoutProcessor.swift#545-581#0e830e57]] | generator actor | `count = clamp((width/200 + 10·ln(duration)) × density.factor, 4, 800)`. `.auto` uses the largest screen instead: `⌊screenW/160⌋ × ⌊screenH/(160/videoAR)⌋` (points, so the same in pixels; F-7), clamped to 4…800. `.fixedGrid` returns exactly `rows × columns`, before the short-video rule (G-2). |
 | 4 | Layout | `LayoutProcessor.calculateLayout` [[F:Sources/Processing/LayoutProcessor.swift#101-205#0e830e57]] | generator actor (under `NSRecursiveLock`) | Cache key: `aspectRatio-originalAR-count-width-density-layoutType`. `.auto` is never cached. `.dynamic` is mapped to `.custom` first (F-7). For `.fixedGrid` the key gains `-grid=<R>x<C>-<fit>-<tol>-<fill>-sp=<spacing>-rh=<reservedHeight>`; for `.uneven`, `-rh=<reservedHeight>`. Invalid input returns an **empty** layout, which later throws "Empty mosaic layout" (a grid is planned first by `makeLayout`, so it throws its own typed error instead). `.iphone` forces width 1200, 1 column, max height 8000. |
 | 5 | Aspect normalization | `planMosaic`: `adjustedConfig.updateAspectRatio(AspectRatio.findNearest(to: layout.mosaicSize))` | generator actor | The config passed down may carry a **different** `layout.aspectRatio` than the caller set. Path/filename generation still uses the caller's original `config`. |
 | 6 | Header | `ThumbnailProcessor.createMetadataHeader` | generator actor (synchronous CPU) | Only when `includeMetadata`. Height is added on top of the layout height. |
-| 7 | Frame extraction | `ThumbnailProcessor.processedFramesStream` [[F:Sources/Processing/ThumbnailProcessor.swift#153-238#3ca7d902]] | producer `Task` on the global executor | One `AVAssetImageGenerator` with the batched `images(for:)` API. `maximumSize` = largest cell × `decodeQualityScale` (1). Exception (U-3): when the largest cell is more than 2.05× the smallest (`.uneven`), `extractionGroups` splits the indices by tile size and each group gets its own generator sized to its tile; groups decode in parallel (one feeder each, 8-frame labeling window each), each in time order. Tolerance ±1 s, or 0 when `useAccurateTimestamps`. Sampling: first 20 % of frames in the first 33 % of the 5–95 % window, 60 % in the middle, 20 % in the last third [[F:Sources/Processing/ThumbnailProcessor.swift#659-697#3ca7d902]]. Any `.failure` throws: mosaics are strict (**no placeholder frames**). |
+| 7 | Frame extraction | `ThumbnailProcessor.processedFramesStream` [[F:Sources/Processing/ThumbnailProcessor.swift#204-289#39119646]] | producer `Task` on the global executor | One `AVAssetImageGenerator` with the batched `images(for:)` API. `maximumSize` = largest cell × `decodeQualityScale` (1). Exception (U-3): when the largest cell is more than 2.05× the smallest (`.uneven`), `extractionGroups` splits the indices by tile size and each group gets its own generator sized to its tile; groups decode in parallel (one feeder each, 8-frame labeling window each), each in time order. Tolerance ±1 s, or 0 when `useAccurateTimestamps`. Sampling: first 20 % of frames in the first 33 % of the 5–95 % window, 60 % in the middle, 20 % in the last third [[F:Sources/Processing/ThumbnailProcessor.swift#710-748#39119646]]. Any `.failure` throws: mosaics are strict (**no placeholder frames**). |
 | 8 | Labeling + color sampling | same | child tasks, **≤ 8 in flight** | Each frame is labeled (`addTimestampToImage`). If Color DNA is on, `OverlayProcessor.averageColor` goes into `FrameColorCollector`. Results are yielded **out of order**; the index travels with each frame. |
 | 9 | Background | `processImagesToMTLTexture` [[F:Sources/Processing/MetalImageProcessor.swift#580-700#04cfcb88]] | caller of `generateMosaicStream` (nonisolated) | Takes the first ≤ 5 frames. Up to 3 of them go to `DominantColors` (`.fair`, `.euclidean`, excluding black, white, and gray). The 3 lightest colors form a diagonal gradient, blurred with a CIGaussianBlur of radius 12. Falls back to gray 0.1 (or 0.5 inside the helper). When `useMovieColorsForBg == false`, uses a solid `backgroundColor`. |
 | 10 | Compositing | `generateMosaicStream` [[F:Sources/Processing/MetalImageProcessor.swift#864-998#04cfcb88]], `processBatch` @L1000, `renderFrame` @L1077 | nonisolated async | One setup command buffer (fill + header), awaited. Frames are then rendered in **20-frame command buffers**, committed without waiting. Each frame: `createTexture(from: CGImage)`, `scaleTexture` if the size differs, `compositeTexture`, optional `addBorder`. The shadow path draws a CPU `CGContext` shadow and composites that. Duplicate or out-of-range indices throw. **All** positions must be filled, or it throws "Missing mosaic frames". |
 | 11 | GPU sync + readback | `synchronizeGPU` @L1058, `createCGImage(from:)` | nonisolated | An empty barrier command buffer is committed last and awaited. GPU errors from completion handlers are collected in `CommandBufferErrorState` and rethrown as `MetalProcessorError.commandBufferExecutionFailed`. |
 | 12 | Have the macOS stall retry wait until the app is active again, as iOS waits for foreground, and document background exporting for apps. Done: mechanism reproduced (background scheduling, background QoS cap; #46), CI attributed to the runner VM (known issue there, #47) | I-26 | A stalled export fails after 120 s and retries while still throttled | S |
-| 13 | Encode + commit | `saveMosaic` [[F:Sources/Processing/MetalMosaicGenerator.swift#703-815#38f103eb]] | generator actor (synchronous CPU) | Output path = `generateOutputDirectory` + `generateFilename`. Encodes with `CGImageDestination` (HEIF embeds a thumbnail, `HasAlpha = false`), or the injected WebP encoder, into the staging file. Then `OutputTransaction.commit()`. |
-| 14 | Animation | `exportAnimation` (`extractFramesForGif` + `AnimatedGifGenerator.save`), shared by the `.gifOnly`, `.withMosaic` and skip-if-exists backfill sites | generator actor → global | This is a **second, full decode pass** with a separate generator: `.large` caps at 1280×720, `.small` at 960×540. Missing frames are skipped and then checked by count, so any missing frame throws. `frameDelay = 1 / gifFps`. |
+| 13 | Encode + commit | `saveMosaic` [[F:Sources/Processing/MetalMosaicGenerator.swift#729-789#d32ded48]] | generator actor (synchronous CPU) | Output path = `generateOutputDirectory` + `generateFilename`. Encodes through `ImageFileWriter.write` (shared with thumbnail export): `CGImageDestination` (HEIF embeds a thumbnail, `HasAlpha = false`), or the injected WebP encoder, into the staging file. Then `OutputTransaction.commit()`. |
+| 14 | Animation | `exportAnimation` (`extractFramesForGif` + `AnimatedGifGenerator.save`), shared by the `.gifOnly`, `.withMosaic` and skip-if-exists backfill sites | generator actor → global | This is a **second, full decode pass** with a separate generator (`ThumbnailProcessor.forEachFrame`, shared with the public thumbnail extraction): `.large` caps at 1280×720, `.small` at 960×540. Any failed frame throws. `frameDelay = 1 / gifFps`. |
 
 **Progress reported to handlers** (`MosaicGenerationProgress.progress`):
 
@@ -1175,6 +1175,21 @@ backbone. Read `LayoutProcessor` algorithms, `ThumbnailProcessor` header/label r
     **Deprecated in S-6** (on the generator and the protocol requirement); removed in 2.0.
   - `cancel(for:)`, `cancelAll()`, `setProgressHandler(for:handler:)`,
     `getPerformanceMetrics()`.
+  - **Thumbnail extraction (1.14):** `extractThumbnails(for:options:) → [VideoThumbnail]`,
+    `extractThumbnailImages(for:options:) → [CGImage]`, `exportThumbnails(for:options:to:) →
+    ThumbnailExport` (`MetalMosaicGenerator+Thumbnails.swift`). Raw, upright frames, no mosaic,
+    no progress handler, no 5 s minimum. They run in `@concurrent` static helpers (off the actor,
+    rules card #6) inside a task tracked in `thumbnailTaskCancellers`, so `cancel(for:)` and
+    `cancelAll()` reach them. Decoding is `ThumbnailProcessor.forEachFrame` (strict, the same
+    decoder as F6 animation frames); `.uniform` sampling maps to `FrameSamplingPolicy.uniform`.
+    Export encodes each frame as it arrives through `ImageFileWriter` + `OutputTransaction`
+    (overwrite). On failure it removes its private `temporaryDirectory/MosaicKitThumbnails/<UUID>/`
+    whole, but in a caller directory (possibly shared by concurrent exports) only its own files,
+    and the directory only if then empty. The decode holds security-scoped access on `video.url`
+    (`VideoInput(from:)` releases its own grant). They are not
+    `MosaicGeneratorProtocol` requirements, so external conformers are unaffected. Tests:
+    `ThumbnailExtractionTests`. The S-6-deprecated `ThumbnailProcessor` helpers stay deprecated
+    (they need a `MosaicLayout` and burn in labels) and now point here.
 - **How it works:** see the stage table in §2.3 (M0–M14). Also, `forIphone: true` forces
   `.iphone` layout (except for `.fixedGrid`, which wins: `effectiveLayoutType`, G-2) and smaller header fonts. `planMosaic` and the animation backfill compute the layout through one `makeLayout` helper (P2). It no longer affects background color; that is now
   controlled by `useMovieColorsForBg`.
@@ -1776,8 +1791,8 @@ none.
 
 ### 4.1 The rules card (read this first)
 
-1. **`OutputTransaction` is shared by five features** (mosaic, animation, and the three preview
-   exporters). Any change affects all of them. The no-overwrite path is intentionally not
+1. **`OutputTransaction` is shared by six features** (mosaic, animation, thumbnail export, and the
+   three preview exporters). Any change affects all of them. The no-overwrite path is intentionally not
    `link(2)` because of SMB (§F12). Keep `MosaicError.fileExists` semantics.
 2. **Add new `Codable` fields with `decodeIfPresent` plus a default.**
    `MosaicConfiguration.init(from:)` uses `decode` for most keys, so configs persisted by older
@@ -2160,7 +2175,7 @@ def dynamic(n,W,ar):
 
 | Symbol | Kind | Key members (all `async` unless noted) |
 |---|---|---|
-| `MetalMosaicGenerator` | `actor`, `MosaicGeneratorProtocol` | `init(layoutProcessor: LayoutProcessor = LayoutProcessor()) throws` (throws `MetalProcessorError` without Metal) · `generate(for:config:forIphone:) throws -> URL` · `generateMosaicImage(for:config:forIphone:) throws -> CGImage` · `generateallcombinations(for:config:) throws -> [URL]` (deprecated, S-6) · `cancel(for:)` · `cancelAll()` · `setProgressHandler(for:handler:)` (one-shot per generation) · `getPerformanceMetrics() -> [String: Any]` |
+| `MetalMosaicGenerator` | `actor`, `MosaicGeneratorProtocol` | `init(layoutProcessor: LayoutProcessor = LayoutProcessor()) throws` (throws `MetalProcessorError` without Metal) · `generate(for:config:forIphone:) throws -> URL` · `generateMosaicImage(for:config:forIphone:) throws -> CGImage` · `generateallcombinations(for:config:) throws -> [URL]` (deprecated, S-6) · `extractThumbnails(for:options:) throws -> [VideoThumbnail]` · `extractThumbnailImages(for:options:) throws -> [CGImage]` · `exportThumbnails(for:options:to:) throws -> ThumbnailExport` (thumbnail extraction, 1.14; not protocol requirements; run off the actor, reached by `cancel(for:)`/`cancelAll()`) · `cancel(for:)` · `cancelAll()` · `setProgressHandler(for:handler:)` (one-shot per generation) · `getPerformanceMetrics() -> [String: Any]` |
 | `MosaicGeneratorProtocol` | `protocol …: Actor` | Same seven requirements as above (`forIphone` has no default at the protocol level) |
 | `MosaicGeneratorCoordinator<Generator: MosaicGeneratorProtocol>` | generic `actor` | `init(mosaicGenerator:concurrencyLimit: = 0)` · `setConcurrencyLimit(_:)` · `generateMosaic(for:config:forIphone:progressHandler:) throws -> MosaicGenerationResult` · `generateMosaicImage(…) throws -> MosaicGenerationImage` · `generateMosaicsforbatch(videos:config:forIphone:progressHandler:) throws -> [MosaicGenerationResult]` · `generateMosaicsForFiles(_:config:forIphone:progressHandler:) throws -> [MosaicGenerationResult]` · `cancelGeneration(for:)` · `cancelAllGenerations()`. Public stored: `logger`, `signposter`, `mosaicGenerator`, `concurrencyLimit`. Public computed: `activeTasks` (read-only view by video ID since S-3) |
 | `createDefaultMosaicCoordinator(concurrencyLimit: = 0) throws` / `createMosaicCoordinatorWithMetal(…)` | free funcs | Return `MosaicGeneratorCoordinator<MetalMosaicGenerator>` |
@@ -2179,7 +2194,7 @@ def dynamic(n,W,ar):
 | Symbol | Notes |
 |---|---|
 | `LayoutProcessor` (`final class`) | `init(aspectRatio:)`, `mosaicAspectRatio`, `updateAspectRatio(_:)`, `calculateLayout(originalAspectRatio:mosaicAspectRatio:thumbnailCount:mosaicWidth:density:layoutType:grid:spacing:reservedHeight:overlayHeight:) -> MosaicLayout` (the last four default), `calculateThumbnailCount(duration:width:density:layoutType:videoAR:grid:) -> Int`, `planFixedGrid(_:sourceAspectRatio:mosaicAspectRatio:mosaicWidth:spacing:reservedHeight:overlayHeight:) -> FixedGridPlan` (G-2, G-4: `overlayHeight` is the exact header + strip height for `.letterbox`/`.stretch`, from `ThumbnailProcessor.metadataHeaderHeight(for:width:height:thumbnailHeight:forIphone:headerConfig:)` and `ColorDNAConfig` for the width `LayoutProcessor.fixedGridCanvasWidth(requestedWidth:mosaicAspectRatio:)`; `.layout(MosaicLayout, effectiveWidth:, notes:)` or `.infeasible(FixedGridIssue, suggestions:)`; issues carry the numbers and an English `explanation`) |
-| `ThumbnailProcessor` (`final class: Sendable`) | `init(config:decodeQualityScale:)`, `extractFramesForGif(…)`, `createMetadataHeader(for:width:height:thumbnailHeight:backgroundColor:forIphone:headerConfig:swatchColors:)`. Deprecated in S-6 (removed in 2.0): `extractThumbnails(…)`, `extractFramesStream(…)`, `extractThumbnailsUI(…)`, `generateMosaic(…)` (CG fallback), legacy `createMetadataHeader(metadata:…)` |
+| `ThumbnailProcessor` (`final class: Sendable`) | `init(config:decodeQualityScale:)`, `extractFramesForGif(…)`, `createMetadataHeader(for:width:height:thumbnailHeight:backgroundColor:forIphone:headerConfig:swatchColors:)`. Internal `extractFrames`/`forEachFrame(from:count:maximumSize:accurate:policy:duration:_:)`: the strict raw-frame decoder shared by animation frames and the public thumbnail extraction. Deprecated in S-6 (removed in 2.0; messages point to `MetalMosaicGenerator.extractThumbnails(for:options:)`): `extractThumbnails(…)`, `extractFramesStream(…)`, `extractThumbnailsUI(…)`, `generateMosaic(…)` (CG fallback), legacy `createMetadataHeader(metadata:…)` |
 | `MetalImageProcessor` (`final class: @unchecked Sendable`) | `init() throws`, texture helpers (`createTexture(from: CVPixelBuffer / CGImage)`, `createCGImage(from:)`, `scaleTexture`, `compositeTexture`, `createFilledTexture`, `addBorder`), `generateMosaic(from:…)` (array; deprecated, S-6), `generateMosaicStream(stream:…)`, `getPerformanceMetrics()` |
 | `OverlayProcessor` (`enum`) | `averageColor(of:)`, `applyColorDNA(to:frameColors:config:) -> CGImage?`, `applyWatermark(to:config:) -> CGImage?` |
 | `AnimatedGifGenerator` (`struct`) | `static save(frames:to:format: = .gif, frameDelay: = 0.1, overwrite: = true) throws` |
@@ -2283,6 +2298,8 @@ Factories: `from(quality:format:)` and `forPreview(quality:)` (deprecated, S-6) 
 | `VideoInput` | `id: UUID`, `url`, `title` (defaults to the filename), `duration?`, `width?`, `height?`, `frameRate?`, `fileSize?`, `metadata: VideoMetadata`, `postID?`. Computed `resolution`, `aspectRatio`. `validate()`, `withID(_:)` |
 | `VideoMetadata` | `codec?`, `bitrate?` (bits/s, computed from file size), `custom: [String: String]` |
 | `MosaicLayout` / `Position` | `rows`, `cols`, `thumbnailSize`, `positions: [Position(x, y)]`, `thumbCount`, `thumbnailSizes`, `mosaicSize`. `description()`, `drawMosaicASCIIArt()` (deprecated, S-6) |
+| `ThumbnailExtractionOptions` (`Codable`, every key optional on decode) | `count` (1…`maximumCount` = 10 000, default 10), `maximumSize: CGSize?` (`nil` = display size), `sampling: ThumbnailSampling` (`.uniform` default = `FrameSamplingPolicy.uniform`; `.weighted` = the mosaic 20/60/20 split), `accurate` (default `false`, ±1 s), `format: OutputFormat` (default `.jpeg`, files only), `compressionQuality` (0.8). `validate()` in `ConfigurationValidation.swift` |
+| `VideoThumbnail` / `ThumbnailExport` (+ `.File`) | `index`, `time` (s, decoded), `image` / `directory`, `files: [File(index, time, url)]`. Export names `<video name>_<NNNN>.<ext>` from 1, each published through `OutputTransaction` (overwrite) |
 | `MosaicGenerationProgress` | `video`, `progress` (0…1), `status: MosaicGenerationStatus`, `outputURL?`, `error?` |
 | `MosaicGenerationResult` / `MosaicGenerationImage` | `video`, `outputURL?` / `image?`, `error?`, `isSuccess` |
 | `PreviewGenerationProgress` | `video`, `progress`, `status: PreviewGenerationStatus`, `outputURL?`, `error?`, `message?`. Statics `.queued/.completed/.failed/.cancelled(for:)` |
@@ -2496,6 +2513,11 @@ _ = try await MetalMosaicGenerator().generate(for: video, config: cfg)   // infe
 
 // 9) Tiles in several sizes (bento grid, nothing cropped)
 cfg.layout = LayoutConfiguration(layoutType: .uneven)        // largest tile from density; < 12 frames → classic
+
+// 10) Individual thumbnails, no mosaic: in memory, or one file each in a new temp directory
+let topts = ThumbnailExtractionOptions(count: 12, maximumSize: CGSize(width: 640, height: 640))
+let frames = try await MetalMosaicGenerator().extractThumbnailImages(for: video, options: topts)   // [CGImage]
+let export = try await MetalMosaicGenerator().exportThumbnails(for: video, options: topts)       // caller removes export.directory
 ```
 
 ### 5.7 Output artifact naming reference

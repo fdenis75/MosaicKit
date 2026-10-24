@@ -143,7 +143,7 @@ MosaicKit/
 | `MetalImageProcessor` | `Processing/MetalImageProcessor.swift` | Metal shader dispatch |
 | `OverlayProcessor` | `Processing/OverlayProcessor.swift` | Header, labels, watermark, ColorDNA |
 | `AnimatedGifGenerator` | `Processing/AnimatedGifGenerator.swift` | GIF / HEICS / WebP export |
-| `OutputTransaction` | `Processing/OutputTransaction.swift` | Staged output publication (shared by 5 features) |
+| `OutputTransaction` | `Processing/OutputTransaction.swift` | Staged output publication (shared by 6 features) |
 | `VideoMetadataExtractor` | `Processing/VideoMetadataExtractor.swift` | AVFoundation metadata |
 | `scanVideos(in:recursive:)` | `VideoInputScanner.swift` | Directory scan → `[VideoInput]` |
 | `PreviewVideoGenerator` | `Processing/Preview/PreviewVideoGenerator.swift` | Highlight-reel generation |
