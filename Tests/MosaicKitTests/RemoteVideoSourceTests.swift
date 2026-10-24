@@ -49,6 +49,16 @@ struct RemoteVideoSourceTests {
         #expect(name.hasPrefix("Holiday_"))
     }
 
+    @Test("A title can't make a name that leaves the output directory")
+    func titleIsOneComponent() {
+        #expect(input(downloadLink, title: "../outside").outputBaseName == "_outside")
+        #expect(input(downloadLink, title: "a/b\\c:d").outputBaseName == "a_b_c_d")
+        #expect(input(downloadLink, title: "..").outputBaseName.hasPrefix("download-"))
+        let thumbnail = URL(fileURLWithPath: "/tmp/export")
+            .appendingPathComponent(input(downloadLink, title: "../../etc/x").outputBaseName + "_0001.jpg")
+        #expect(thumbnail.deletingLastPathComponent().path == "/tmp/export")
+    }
+
     @Test("Content-Range and Content-Length give the remote size")
     func totalLength() {
         #expect(RemoteVideoSupport.totalLength(statusCode: 206, contentRange: "bytes 0-0/32220698", expectedContentLength: 1) == 32_220_698)

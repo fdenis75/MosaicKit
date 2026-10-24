@@ -45,17 +45,27 @@ enum RemoteVideoSupport {
     /// The URL's last path component ("download") is shared by every link of such a service, so
     /// it gets the first 8 hex digits of the SHA-256 of the full URL. A caller-supplied `title`
     /// (one that differs from that component) is used instead, so names stay stable when a
-    /// signed link is refreshed.
+    /// signed link is refreshed. The title is reduced to one file-name component (see
+    /// ``fileNameComponent(_:)``), because thumbnail export appends it to a directory as is.
     static func outputBaseName(url: URL, title: String) -> String {
         let stem = url.deletingPathExtension().lastPathComponent
         let trimmedTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
         if !trimmedTitle.isEmpty, trimmedTitle != stem {
-            return trimmedTitle
+            let component = fileNameComponent(trimmedTitle)
+            if !component.isEmpty { return component }
         }
         let digest = SHA256.hash(data: Data(url.absoluteString.utf8))
         let hash = digest.prefix(4).map { String(format: "%02x", $0) }.joined()
         let base = stem.isEmpty || stem == "/" ? "video" : stem
         return "\(base)-\(hash)"
+    }
+
+    /// `name` as a single path component: path separators become `_` and leading dots are
+    /// dropped, so `../outside` gives `.._outside` → `_outside` and can't leave the directory.
+    static func fileNameComponent(_ name: String) -> String {
+        let separators = CharacterSet(charactersIn: "/\\:")
+        let joined = name.components(separatedBy: separators).joined(separator: "_")
+        return String(joined.drop(while: { $0 == "." }))
     }
 
     /// The total size of an `http`/`https` resource, from a one-byte range request.
