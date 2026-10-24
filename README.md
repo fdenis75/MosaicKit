@@ -21,12 +21,19 @@ A high-performance Swift package for generating video mosaics with Metal-acceler
 
 ## Unreleased
 
-- Add a line here for every change; output-naming and location changes (📁) also get a **Behavior changes** note.
-- **Remote download links (I-30).** An `https` source without a file extension, served as `application/octet-stream` (such as `https://host/download/?fid=…`), now opens: MosaicKit tells AVFoundation to read it as MPEG-4. Its file size comes from a one-byte range request, so the `.fileSize` and `.bitrate` header fields are filled. New `VideoInput.outputBaseName` and `validateOutputLocation(for:)` on `MosaicConfiguration` and `PreviewConfiguration`. See [MIGRATING-TO-1.15.md](MIGRATING-TO-1.15.md).
+- Nothing yet. Add a line here for every change; output-naming and location changes (📁) also get a **Behavior changes** note.
+
+## New in 1.15.0
+
+Minor release on top of 1.14.0: remote download links work as video sources. Nothing is removed or renamed, and output names of local files do not change. Upgrading from 1.14.x? [MIGRATING-TO-1.15.md](MIGRATING-TO-1.15.md) lists what can affect an app.
+
+### Fixes and new API
+
+- **Remote download links (I-30, #85).** An `https` source without a file extension, served as `application/octet-stream` (such as `https://host/download/?fid=…`), now opens: MosaicKit tells AVFoundation to read it as MPEG-4. Its file size comes from a one-byte range request, so the `.fileSize` and `.bitrate` header fields are filled. New `VideoInput.outputBaseName` and `validateOutputLocation(for:)` on `MosaicConfiguration` and `PreviewConfiguration`. See [MIGRATING-TO-1.15.md](MIGRATING-TO-1.15.md).
 
 ### Behavior changes
 
-- 📁 Outputs of an extensionless remote URL are named from the supplied `title`, or `<last path component>-<8 hex of the URL's SHA-256>`, instead of `download` for every link. Local files and remote URLs with a video extension keep their names.
+- 📁 Outputs of an extensionless remote URL are named from the supplied `title` (path separators become `_`, leading dots are dropped), or `<last path component>-<8 hex of the URL's SHA-256>`, instead of `download` for every link. Local files and remote URLs with a video extension keep their names.
 - A remote source with no local output folder (`outputdirectory` / `outputDirectory` unset) now throws `invalidConfiguration` before any I/O, instead of failing while writing.
 
 ## New in 1.14.0
@@ -314,7 +321,7 @@ Add MosaicKit to your `Package.swift`:
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/fdenis75/MosaicKit.git", from: "1.14.0")
+    .package(url: "https://github.com/fdenis75/MosaicKit.git", from: "1.15.0")
 ]
 ```
 
