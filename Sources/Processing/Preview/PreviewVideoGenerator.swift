@@ -95,6 +95,7 @@ public actor PreviewVideoGenerator {
         let handler: (@Sendable (PreviewGenerationProgress) -> Void)? = { delivery.send($0) }
         defer { delivery.finish() }
         try config.validate()
+        try config.validateOutputLocation(for: video)
         try Task.checkCancellation()
         logger.info("Starting preview generation for \(video.title)")
 
@@ -287,7 +288,7 @@ struct PreviewGenerationLogic {
         progressHandler(0.0, .analyzing, nil, nil)
         
         // Load asset
-        let asset = AVURLAsset(url: video.url, options: [AVURLAssetPreferPreciseDurationAndTimingKey: true])
+        let asset = RemoteVideoSupport.makeAsset(url: video.url, options: [AVURLAssetPreferPreciseDurationAndTimingKey: true])
         
         // Validate
         try await validateVideo(asset: asset, video: video, config: config)
@@ -409,7 +410,7 @@ struct PreviewGenerationLogic {
         progressHandler(0.0, .analyzing, nil, nil)
         
         // Load asset
-        let asset = AVURLAsset(url: video.url, options: [AVURLAssetPreferPreciseDurationAndTimingKey: true])
+        let asset = RemoteVideoSupport.makeAsset(url: video.url, options: [AVURLAssetPreferPreciseDurationAndTimingKey: true])
         
         // Validate
         try await validateVideo(asset: asset, video: video, config: config)

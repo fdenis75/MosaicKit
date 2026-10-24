@@ -148,6 +148,26 @@ The inspection step validates that duration and dimensions are finite and positi
 task cancellation before and after metadata extraction, so a cancelled queued job does not retain
 AVFoundation work.
 
+### Remote sources
+
+A video can also be an `https` URL, including a download link with no file extension that the
+server sends as `application/octet-stream` (for example `https://host/download/?fid=…`). Such a
+link is read as MPEG-4. Set an output directory, because a remote URL has no folder to write
+next to (generation throws ``MosaicError/invalidConfiguration(_:)`` otherwise), and pass a
+`title`: it names the outputs (``VideoInput/outputBaseName``), so the name stays the same when
+the signed link is refreshed. Without a title the name is the last path component plus 8 hex
+digits of the URL's SHA-256.
+
+```swift
+let input = try await VideoSource(url: downloadLink, title: "Holiday").inspect()
+var config = MosaicConfiguration()
+config.outputdirectory = outputFolder
+let mosaicURL = try await MetalMosaicGenerator().generate(for: input, config: config)
+```
+
+Frames are fetched over the network as the mosaic is built, so a local copy is faster for large
+files or slow links.
+
 ### Cancellation, pause, and retry
 
 Coordinator methods support cancelling one video (`cancelGeneration(for:)`) or an entire batch

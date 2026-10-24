@@ -372,7 +372,7 @@ public struct MosaicConfiguration: Codable, Sendable {
     public func animatedOutputURL(for video: VideoInput, referenceDate: Date = Date()) -> URL {
         let rootFolder = outputdirectory ?? video.url.deletingLastPathComponent()
         let outputDir = generateOutputDirectory(rootDirectory: rootFolder, videoInput: video, referenceDate: referenceDate)
-        let originalFilename = video.url.deletingPathExtension().lastPathComponent
+        let originalFilename = video.outputBaseName
         let mosaicFilename = generateFilename(originalFilename: originalFilename, videoInput: video)
 
         let animFilename = "\(gifSize.name) -" + (mosaicFilename as NSString).deletingPathExtension + ".\(animatedFormat.fileExtension)"

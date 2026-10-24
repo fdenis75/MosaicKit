@@ -63,6 +63,18 @@ extension MosaicConfiguration {
         try validateFixedGrid()
     }
 
+    /// Rejects a remote source (I-30) whose outputs would land next to it: without
+    /// `outputdirectory` (or an absolute `outputDirectoryTemplate`), the output folder is the
+    /// source URL's parent, which is not a local folder for an `https` link.
+    public func validateOutputLocation(for video: VideoInput) throws {
+        let root = outputdirectory ?? video.url.deletingLastPathComponent()
+        guard generateOutputDirectory(rootDirectory: root, videoInput: video).isFileURL else {
+            throw MosaicError.invalidConfiguration(
+                "A remote video (\(video.url.scheme ?? "no scheme") URL) needs outputdirectory: outputs cannot be written next to it"
+            )
+        }
+    }
+
     /// Checks a ``LayoutType/fixedGrid`` configuration. Only the configuration is known here; the
     /// checks that need the source video (its aspect ratio, frame count) run when the layout is
     /// planned.
@@ -147,6 +159,17 @@ extension ThumbnailExtractionOptions {
 }
 
 extension PreviewConfiguration {
+    /// Rejects a remote source (I-30) whose preview would land next to it: without
+    /// `outputDirectory` (or an absolute `outputDirectoryTemplate`), the output folder is the
+    /// source URL's parent, which is not a local folder for an `https` link.
+    public func validateOutputLocation(for video: VideoInput) throws {
+        guard generateOutputDirectory(for: video).isFileURL else {
+            throw PreviewError.invalidConfiguration(
+                "A remote video (\(video.url.scheme ?? "no scheme") URL) needs outputDirectory: the preview cannot be written next to it"
+            )
+        }
+    }
+
     /// Validates numeric settings and combinations supported by the selected exporter.
     public func validate() throws {
         do { try density.validate() } catch {

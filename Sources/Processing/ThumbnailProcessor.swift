@@ -579,7 +579,7 @@ public final class ThumbnailProcessor: Sendable {
         try Task.checkCancellation()
         // Takes the URL, not an `AVAsset`: assets are not Sendable, and this runs off the
         // generator's actor.
-        let asset = AVURLAsset(url: url)
+        let asset = RemoteVideoSupport.makeAsset(url: url)
         let duration: Double
         if let knownDuration {
             duration = knownDuration
