@@ -984,6 +984,11 @@ graph LR
   - Swift Testing, 32 files. `CombinationTests` and `PreviewCombinationTests` are `.serialized`.
   - Suites that need a media folder read `MOSAICKIT_SUITE_MODE` (`single` | `folder` | `none`;
     unrecognized values → `single`, missing → `none`) and skip in `none`.
+  - Every external input (video files, media folder, playlist, output folder, ffmpeg binary) is
+    read through `Tests/MosaicKitTests/TestEnvironment.swift`: `MOSAICKIT_LOCALVIDEO1…4`,
+    `MOSAICKIT_LOCALFOLDER`, `MOSAICKIT_LOCALPLAYLIST`, `MOSAICKIT_OUTPUTFOLDER`,
+    `MOSAICKIT_FFMPEG_PATH`. Tests hard-code no path and an unset input skips the test; a new
+    input goes into that helper and its table (also in `CLAUDE.md`), not into a literal path.
   - `BenchmarkTests` (plan P-1, #39) is an opt-in throughput benchmark, enabled only by
     `MOSAICKIT_BENCHMARK=1` plus `MOSAICKIT_LOCALFOLDER=/path/to/videos`. It is the before/after gate for pipeline changes
     (§4.3).

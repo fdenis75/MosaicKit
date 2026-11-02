@@ -2,7 +2,7 @@ import Foundation
 
 /// The single place where the tests read environment variables. No test hard-codes a path to a
 /// local or remote file: every external input comes from here, and every variable is documented
-/// in this table (also summarised in the README "Test environment" section).
+/// in this table (also summarised in the "Test environment variables" section of `CLAUDE.md` and `AGENTS.md`).
 ///
 /// ## Inputs: files and folders
 ///
