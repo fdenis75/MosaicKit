@@ -23,6 +23,22 @@ A high-performance Swift package for generating video mosaics with Metal-acceler
 
 - Nothing yet. Add a line here for every change; output-naming and location changes (📁) also get a **Behavior changes** note.
 
+## New in 1.15.1
+
+Patch release on top of 1.15.0: test-suite housekeeping only. No library code, public API, configuration or output name changes, so there is no migration note.
+
+### Tests
+
+- **Test input paths consolidated.** Tests no longer hard-code paths to local or remote files, and no longer read ad-hoc variables. Every external input comes from one helper, `Tests/MosaicKitTests/TestEnvironment.swift`, whose table is also summarised in `CLAUDE.md` and `AGENTS.md`:
+  - `MOSAICKIT_LOCALVIDEO1` … `MOSAICKIT_LOCALVIDEO4`: video files.
+  - `MOSAICKIT_LOCALFOLDER`: folder of videos.
+  - `MOSAICKIT_LOCALPLAYLIST`: `.m3u8` playlist.
+  - `MOSAICKIT_OUTPUTFOLDER`: where tests write outputs (default: a temporary directory).
+  - `MOSAICKIT_FFMPEG_PATH`: ffmpeg binary.
+- **Renamed variables.** If you run the opt-in suites, update your environment: `MOSAICKIT_TEST_VIDEOS_DIR`, `PREVIEW_FOLDER`, `PREVIEW_CANCELLATION_TEST_DIR` and `MOSAICKIT_STRESS_SOURCE` are now `MOSAICKIT_LOCALFOLDER`; `MOSAIC_TEST_VIDEO` is `MOSAICKIT_LOCALVIDEO1`; `MOSAIC_TARGET_FOLDER` and `MOSAICKIT_PLAYLIST_OUTPUT` are `MOSAICKIT_OUTPUTFOLDER`; `MOSAICKIT_PLAYLIST` is `MOSAICKIT_LOCALPLAYLIST`; `FFMPEG_PATH` is `MOSAICKIT_FFMPEG_PATH`; `PREVIEW_COMBO_RUN`, `PREVIEW_RECURSIVE` and `MOSAIC_TEST_MAX_CONCURRENT` are `MOSAICKIT_PREVIEW_COMBO_RUN`, `MOSAICKIT_PREVIEW_RECURSIVE` and `MOSAICKIT_COMBO_MAX_CONCURRENT`.
+- **Benchmark invocation changed.** `MOSAICKIT_BENCHMARK` is now a switch: `MOSAICKIT_BENCHMARK=1 MOSAICKIT_LOCALFOLDER=/path/to/videos swift test -c release --filter BenchmarkTests`. `MOSAICKIT_BENCHMARK_JSON` is replaced by `MOSAICKIT_OUTPUTFOLDER` (writes `Benchmark/benchmark.json`).
+- **CI fix.** The playlist end-to-end test ran on CI against a path that only exists on one machine and failed; it is skipped again unless `MOSAICKIT_LOCALPLAYLIST` is set.
+
 ## New in 1.15.0
 
 Minor release on top of 1.14.0: remote download links work as video sources. Nothing is removed or renamed, and output names of local files do not change. Upgrading from 1.14.x? [MIGRATING-TO-1.15.md](MIGRATING-TO-1.15.md) lists what can affect an app.
@@ -321,7 +337,7 @@ Add MosaicKit to your `Package.swift`:
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/fdenis75/MosaicKit.git", from: "1.15.0")
+    .package(url: "https://github.com/fdenis75/MosaicKit.git", from: "1.15.1")
 ]
 ```
 

@@ -123,6 +123,7 @@ flowchart LR
 - **1.13.0** (2026-10-18): header option `HeaderConfig.filePathShowsFileNameOnly` and monotonic `.creatingMosaic` progress (I-28, I-29, #81); additive API, no source break.
 - **1.14.0** (2026-10-24): public thumbnail extraction on `MetalMosaicGenerator` (`extractThumbnails`, `extractThumbnailImages`, `exportThumbnails`, `ThumbnailExtractionOptions`; #83); additive API, no output-naming change.
 - **1.15.0** (2026-10-25): remote download links as sources (I-30, #85): MIME override for extensionless remote URLs, `VideoInput.outputBaseName`, `validateOutputLocation(for:)`, remote file size; 📁 names change only for extensionless remote URLs.
+- **1.15.1** (2026-11-02): test-only patch (#88): all test file/folder/ffmpeg inputs read through `TestEnvironment` (`MOSAICKIT_LOCALVIDEO1…4`, `LOCALFOLDER`, `LOCALPLAYLIST`, `OUTPUTFOLDER`, `FFMPEG_PATH`); no library change.
 - **2.0.0** removes everything deprecated in S-6.
 
 ## 8. Tracking
