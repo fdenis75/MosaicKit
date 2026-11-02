@@ -985,7 +985,7 @@ graph LR
   - Suites that need a media folder read `MOSAICKIT_SUITE_MODE` (`single` | `folder` | `none`;
     unrecognized values → `single`, missing → `none`) and skip in `none`.
   - `BenchmarkTests` (plan P-1, #39) is an opt-in throughput benchmark, enabled only by
-    `MOSAICKIT_BENCHMARK=/path/to/videos`. It is the before/after gate for pipeline changes
+    `MOSAICKIT_BENCHMARK=1` plus `MOSAICKIT_LOCALFOLDER=/path/to/videos`. It is the before/after gate for pipeline changes
     (§4.3).
 - **CI (`.github/workflows/swift.yml`):**
   - Triggers: push to `main`/`claude/**`, and PRs to `main`. Docs-only changes skip the

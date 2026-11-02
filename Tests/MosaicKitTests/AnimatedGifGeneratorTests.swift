@@ -11,7 +11,7 @@ import MosaicKitWebP
 /// pull_request (`MOSAICKIT_SKIP_ANIMATED=1`) and runs them in the nightly `Swift` workflow run,
 /// or on demand with `gh workflow run Swift --ref <branch>`. Locally the variable is unset, so
 /// they always run. The fast synthetic-frame encoder tests below are never skipped.
-private let animatedIntegrationEnabled = ProcessInfo.processInfo.environment["MOSAICKIT_SKIP_ANIMATED"] != "1"
+private let animatedIntegrationEnabled = !TestEnvironment.skipAnimated
 private let animatedIntegrationSkipReason: Comment = "Skipped when MOSAICKIT_SKIP_ANIMATED=1; runs nightly in CI"
 
 struct AnimatedGifGeneratorTests {
@@ -341,7 +341,7 @@ struct AnimatedGifGeneratorTests {
     /// lines, while each dimension is already covered by a dedicated test. Skipped
     /// when `MOSAICKIT_SUITE_MODE=none` (CI); run it locally as an extended suite.
     @Test("create all versions",
-          .enabled(if: ProcessInfo.processInfo.environment["MOSAICKIT_SUITE_MODE"] != "none",
+          .enabled(if: !TestEnvironment.isCIMode,
                    "Extended matrix; skipped when MOSAICKIT_SUITE_MODE=none"))
     func createAllModes() async throws {
         let videoURL = try embeddedVideoURL

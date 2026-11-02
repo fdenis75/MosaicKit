@@ -72,13 +72,7 @@ struct FFmpegArgumentsTests {
     // MARK: - Real ffmpeg (macOS, when a binary is installed)
 
     #if os(macOS)
-    private static var ffmpegPath: String? {
-        let fm = FileManager.default
-        if let env = ProcessInfo.processInfo.environment["FFMPEG_PATH"],
-           fm.isExecutableFile(atPath: env) { return env }
-        return ["/opt/homebrew/bin/ffmpeg", "/usr/local/bin/ffmpeg", "/usr/bin/ffmpeg"]
-            .first { fm.isExecutableFile(atPath: $0) }
-    }
+    private static var ffmpegPath: String? { TestEnvironment.ffmpegPath }
 
     /// Run ffmpeg with the generated arguments and return the displayed output size.
     private func encodedSize(input: URL, maxResolution: ExportMaxResolution,

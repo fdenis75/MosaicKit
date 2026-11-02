@@ -1,6 +1,69 @@
 {
   "configurations" : [
-
+    {
+      "enabled" : false,
+      "id" : "D910D0DD-A64B-467F-A5F6-B22D4B0881ED",
+      "name" : "Configuration 1",
+      "options" : {
+        "environmentVariableEntries" : [
+          {
+            "enabled" : false,
+            "key" : "MOSAICKIT_SUITE_MODE",
+            "value" : "folder"
+          },
+          {
+            "enabled" : false,
+            "key" : "MOSAICKIT_LOCALFOLDER",
+            "value" : ""
+          },
+          {
+            "enabled" : false,
+            "key" : "MOSAICKIT_LOCALVIDEO1",
+            "value" : ""
+          },
+          {
+            "enabled" : false,
+            "key" : "MOSAICKIT_LOCALVIDEO2",
+            "value" : ""
+          },
+          {
+            "enabled" : false,
+            "key" : "MOSAICKIT_LOCALVIDEO3",
+            "value" : ""
+          },
+          {
+            "enabled" : false,
+            "key" : "MOSAICKIT_LOCALVIDEO4",
+            "value" : ""
+          },
+          {
+            "enabled" : false,
+            "key" : "MOSAICKIT_LOCALPLAYLIST",
+            "value" : ""
+          },
+          {
+            "enabled" : false,
+            "key" : "MOSAICKIT_OUTPUTFOLDER",
+            "value" : ""
+          },
+          {
+            "enabled" : false,
+            "key" : "MOSAICKIT_FFMPEG_PATH",
+            "value" : ""
+          },
+          {
+            "enabled" : false,
+            "key" : "MOSAICKIT_PREVIEW_COMBO_RUN",
+            "value" : "1"
+          }
+        ],
+        "targetForVariableExpansion" : {
+          "containerPath" : "container:",
+          "identifier" : "MosaicKitTests",
+          "name" : "MosaicKitTests"
+        }
+      }
+    }
   ],
   "defaultOptions" : {
     "codeCoverage" : false,
@@ -12,20 +75,56 @@
       },
       {
         "enabled" : false,
-        "key" : "PREVIEW_FOLDER",
-        "value" : "\/Volumes\/Ext-Photos5\/PB\/test"
+        "key" : "MOSAICKIT_LOCALFOLDER",
+        "value" : ""
       },
       {
         "enabled" : false,
-        "key" : "MOSAIC_TARGET_FOLDER",
-        "value" : "\/Users\/francois\/Downloads\/testvidsnodelete\/output"
+        "key" : "MOSAICKIT_LOCALVIDEO1",
+        "value" : ""
       },
       {
-        "key" : "PREVIEW_COMBO_RUN",
+        "enabled" : false,
+        "key" : "MOSAICKIT_LOCALVIDEO2",
+        "value" : ""
+      },
+      {
+        "enabled" : false,
+        "key" : "MOSAICKIT_LOCALVIDEO3",
+        "value" : ""
+      },
+      {
+        "enabled" : false,
+        "key" : "MOSAICKIT_LOCALVIDEO4",
+        "value" : ""
+      },
+      {
+        "enabled" : false,
+        "key" : "MOSAICKIT_LOCALPLAYLIST",
+        "value" : ""
+      },
+      {
+        "enabled" : false,
+        "key" : "MOSAICKIT_OUTPUTFOLDER",
+        "value" : ""
+      },
+      {
+        "enabled" : false,
+        "key" : "MOSAICKIT_FFMPEG_PATH",
+        "value" : ""
+      },
+      {
+        "enabled" : false,
+        "key" : "MOSAICKIT_PREVIEW_COMBO_RUN",
         "value" : "1"
       }
     ],
-    "performanceAntipatternCheckerEnabled" : true
+    "performanceAntipatternCheckerEnabled" : true,
+    "targetForVariableExpansion" : {
+      "containerPath" : "container:",
+      "identifier" : "MosaicKitTests",
+      "name" : "MosaicKitTests"
+    }
   },
   "testTargets" : [
     {
@@ -35,13 +134,58 @@
             "name" : "AnimatedGifGeneratorTests"
           },
           {
+            "name" : "BenchmarkTests"
+          },
+          {
+            "name" : "ColorPaletteSwatchTests"
+          },
+          {
             "name" : "CombinationTests"
+          },
+          {
+            "name" : "ConfigurationInitializerTests"
           },
           {
             "name" : "ErrorTypesTests"
           },
           {
+            "name" : "ExportStressTests"
+          },
+          {
+            "name" : "ExportWatchdogTests"
+          },
+          {
+            "name" : "FFmpegArgumentsTests"
+          },
+          {
+            "name" : "FixedGridConfigurationTests"
+          },
+          {
+            "name" : "FixedGridFixedAspectTests"
+          },
+          {
+            "name" : "FixedGridLayoutTests"
+          },
+          {
+            "name" : "FixedGridSamplingAndOverlayTests"
+          },
+          {
+            "name" : "InputValidationRegressionTests"
+          },
+          {
             "name" : "LayoutProcessorTests"
+          },
+          {
+            "name" : "LegacyConfigurationDecodingTests"
+          },
+          {
+            "name" : "MosaicBatchRunnerTests"
+          },
+          {
+            "name" : "MosaicCancellationTests"
+          },
+          {
+            "name" : "MosaicCompositionPathTests"
           },
           {
             "name" : "MosaicConfigurationTests"
@@ -50,17 +194,25 @@
             "name" : "MosaicGeneratorCoordinatorTests"
           },
           {
+            "name" : "MosaicPipelineReliabilityTests"
+          },
+          {
+            "name" : "OutputTransactionTests"
+          },
+          {
             "name" : "OverlayConfigurationTests"
           },
           {
             "name" : "OverlayProcessorTests"
           },
           {
-            "name" : "PreviewCombinationTests",
-            "testFunctions" : [
-              "phase2_sequentialVideos()",
-              "phase3_concurrentVideos()"
-            ]
+            "name" : "PreviewBatchRunnerTests"
+          },
+          {
+            "name" : "PreviewCancellationTests"
+          },
+          {
+            "name" : "PreviewCombinationTests"
           },
           {
             "name" : "PreviewConfigurationTests"
@@ -69,10 +221,40 @@
             "name" : "PreviewCoordinatorTests"
           },
           {
+            "name" : "PreviewExportSmokeTests"
+          },
+          {
+            "name" : "PreviewReliabilityRegressionTests"
+          },
+          {
+            "name" : "PreviewSkipExistingTests"
+          },
+          {
             "name" : "PreviewVideoGeneratorTests"
           },
           {
+            "name" : "RemoteVideoSourceTests"
+          },
+          {
+            "name" : "RotatedSourceTests"
+          },
+          {
+            "name" : "ThumbnailExtractionTests"
+          },
+          {
             "name" : "ThumbnailProcessorTests"
+          },
+          {
+            "name" : "UnevenLayoutTests"
+          },
+          {
+            "name" : "UnevenTilePackerTests"
+          },
+          {
+            "name" : "VideoCodecSupportTests"
+          },
+          {
+            "name" : "VideoDiscoveryReportTests"
           }
         ]
       },

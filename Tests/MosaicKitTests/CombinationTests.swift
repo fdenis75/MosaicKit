@@ -514,25 +514,24 @@ private func timingSummary(_ results: [ComboResult]) -> String {
 ///
 /// ## Run
 /// ```bash
-/// MOSAIC_TEST_VIDEO=/path/to/video.mp4 swift test --filter CombinationTests
+/// MOSAICKIT_LOCALVIDEO1=/path/to/video.mp4 swift test --filter CombinationTests
 /// # Override output directory:
-/// MOSAIC_TARGET_FOLDER=/my/folder swift test --filter CombinationTests
+/// MOSAICKIT_OUTPUTFOLDER=/my/folder swift test --filter CombinationTests
 /// ```
 ///
-/// The test is **silently skipped** (passes trivially) when `MOSAIC_TEST_VIDEO` is
+/// The test is **silently skipped** (passes trivially) when `MOSAICKIT_LOCALVIDEO1` is
 /// not set so it does not block normal CI runs.
 @Suite("Combination Tests", .serialized)
 struct CombinationTests {
 
     // MARK: Environment
 
-    private static let videoPath: String? =
-        ProcessInfo.processInfo.environment["MOSAIC_TEST_VIDEO"]
+    private static let videoURL: URL? = TestEnvironment.localVideo(1)
 
     private static let defaultMaxConcurrentGenerations = 1
 
     private static var maxConcurrentGenerations: Int {
-        let rawValue = ProcessInfo.processInfo.environment["MOSAIC_TEST_MAX_CONCURRENT"]
+        let rawValue = TestEnvironment.string("MOSAICKIT_COMBO_MAX_CONCURRENT")
         guard let rawValue, let value = Int(rawValue) else {
             return defaultMaxConcurrentGenerations
         }
@@ -540,10 +539,7 @@ struct CombinationTests {
     }
 
     private static var targetFolder: URL {
-        let base = ProcessInfo.processInfo.environment["MOSAIC_TARGET_FOLDER"]
-            ?? URL.homeDirectory
-                   .appendingPathComponent("Desktop/MosaicCombinations").path
-        return URL(fileURLWithPath: base).appendingPathComponent("TARGET_Folder")
+        get throws { try TestEnvironment.outputFolder(named: "MosaicCombinations/TARGET_Folder") }
     }
 
     /// Fixed accent colour — used for `frameLabel.textColor` (the only colour
@@ -556,12 +552,12 @@ struct CombinationTests {
     func runAllCombinations() async throws {
 
         // ── Guard: skip when no video is provided ─────────────────────────────
-        guard let videoPath = Self.videoPath else {
+        guard let videoURL = Self.videoURL else {
             print("""
 
-            ⚠️  CombinationTests skipped — MOSAIC_TEST_VIDEO is not set.
+            ⚠️  CombinationTests skipped — MOSAICKIT_LOCALVIDEO1 is not set.
                 Run with:
-                  MOSAIC_TEST_VIDEO=/path/to/video.mp4 \\
+                  MOSAICKIT_LOCALVIDEO1=/path/to/video.mp4 \\
                   swift test --filter CombinationTests
 
             """)
@@ -569,8 +565,7 @@ struct CombinationTests {
         }
 
         // ── Setup ─────────────────────────────────────────────────────────────
-        let videoURL     = URL(fileURLWithPath: videoPath)
-        let targetFolder = Self.targetFolder
+        let targetFolder = try Self.targetFolder
 
         try FileManager.default.createDirectory(at: targetFolder, withIntermediateDirectories: true)
 

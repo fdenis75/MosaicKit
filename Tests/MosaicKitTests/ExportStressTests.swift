@@ -22,17 +22,17 @@ import MosaicKitWebP
 /// | `MOSAICKIT_STRESS_EXPORTS` | `4` | Concurrent preview exports per round |
 /// | `MOSAICKIT_STRESS_LOAD` | `3` | Concurrent mosaic/HEIC jobs per round (encoder load) |
 /// | `MOSAICKIT_STRESS_STALL` | `30` | Seconds without progress that count as a stall |
-/// | `MOSAICKIT_STRESS_SOURCE` | embedded fixture | Folder of videos the exports cycle through |
+/// | `MOSAICKIT_LOCALFOLDER` | embedded fixture | Folder of videos the exports cycle through |
 /// | `MOSAICKIT_STRESS_LEAVE_BACKGROUND` | — | If set, the process leaves background scheduling first |
 ///
 /// No assertion fails on stalls: the counts are the result, printed as `ExportStress RESULT`.
-@Suite(.serialized, .enabled(if: ProcessInfo.processInfo.environment["MOSAICKIT_STRESS"] != nil,
+@Suite(.serialized, .enabled(if: TestEnvironment.string("MOSAICKIT_STRESS") != nil,
                              "Set MOSAICKIT_STRESS=<rounds> to run"))
 struct ExportStressTests {
     init() { MosaicKitWebP.register() }
 
     @Test func stress() async throws {
-        let env = ProcessInfo.processInfo.environment
+        let env = TestEnvironment.all
         let rounds = Int(env["MOSAICKIT_STRESS"] ?? "") ?? 5
         let exportsPerRound = Int(env["MOSAICKIT_STRESS_EXPORTS"] ?? "") ?? 4
         let loadJobs = Int(env["MOSAICKIT_STRESS_LOAD"] ?? "") ?? 3
@@ -43,13 +43,13 @@ struct ExportStressTests {
         let base = try await VideoInput(from: url)
         // Optional folder of real videos: exports cycle through them.
         var sources: [VideoInput] = [base]
-        if let folder = env["MOSAICKIT_STRESS_SOURCE"] {
-            let files = try FileManager.default.contentsOfDirectory(at: URL(fileURLWithPath: folder), includingPropertiesForKeys: nil)
+        if let folder = TestEnvironment.localFolder {
+            let files = try FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil)
                 .filter { ["mp4", "mov", "m4v"].contains($0.pathExtension.lowercased()) }
                 .sorted { $0.path < $1.path }
             sources = []
             for file in files { sources.append(try await VideoInput(from: file)) }
-            try #require(!sources.isEmpty, "No mp4/mov/m4v files in MOSAICKIT_STRESS_SOURCE=\(folder)")
+            try #require(!sources.isEmpty, "No mp4/mov/m4v files in MOSAICKIT_LOCALFOLDER=\(folder.path)")
             print("ExportStress sources: \(sources.map { "\($0.url.lastPathComponent) \(Int($0.duration ?? 0))s \(Int($0.width ?? 0))x\(Int($0.height ?? 0))" })")
         }
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("ExportStress-\(UUID().uuidString)")

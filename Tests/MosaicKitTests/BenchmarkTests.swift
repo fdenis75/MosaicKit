@@ -13,22 +13,22 @@ import MosaicKitWebP
 ///
 /// | Variable | Default | Meaning |
 /// |---|---|---|
-/// | `MOSAICKIT_BENCHMARK` | — (suite disabled) | Folder of videos, or a single video file |
+/// | `MOSAICKIT_BENCHMARK` | — (suite disabled) | Set to `1` to run; videos come from `MOSAICKIT_LOCALFOLDER`, else `MOSAICKIT_LOCALVIDEO1…4` |
 /// | `MOSAICKIT_BENCHMARK_RUNS` | `3` | Timed runs per scenario, after one untimed warm-up run |
 /// | `MOSAICKIT_BENCHMARK_CONCURRENCY` | `1,0` | Coordinator concurrency limits to measure (`0` = automatic) |
-/// | `MOSAICKIT_BENCHMARK_JSON` | — | Optional path; all measurements are also written there as JSON |
+/// | `MOSAICKIT_OUTPUTFOLDER` | — | If set, all measurements are also written to `<folder>/Benchmark/benchmark.json` |
 /// | `MOSAICKIT_BENCHMARK_GRID` | — | Set to `1` to add the fixed-grid scenarios (recorded, not part of any gate) |
 /// | `MOSAICKIT_BENCHMARK_UNEVEN` | — | Set to `1` to add the uneven-layout scenarios |
 ///
 /// ```bash
-/// MOSAICKIT_BENCHMARK=/path/to/videos swift test -c release --filter BenchmarkTests
+/// MOSAICKIT_BENCHMARK=1 MOSAICKIT_LOCALFOLDER=/path/to/videos swift test -c release --filter BenchmarkTests
 /// ```
 ///
 /// There are no assertions on timing: machines differ, so only same-machine before/after
 /// comparisons are meaningful. The suite fails only when a generation fails.
 @Suite("Throughput benchmark (opt-in)", .serialized,
-       .enabled(if: ProcessInfo.processInfo.environment["MOSAICKIT_BENCHMARK"] != nil,
-                "Set MOSAICKIT_BENCHMARK=/path/to/videos to run"))
+       .enabled(if: TestEnvironment.flag("MOSAICKIT_BENCHMARK"),
+                "Set MOSAICKIT_BENCHMARK=1 and MOSAICKIT_LOCALFOLDER=/path/to/videos to run"))
 struct BenchmarkTests {
 
     init() {
@@ -89,9 +89,9 @@ struct BenchmarkTests {
 
     @Test("Mosaic and animated export throughput")
     func throughput() async throws {
-        let env = ProcessInfo.processInfo.environment
-        let videos = try await loadVideos(from: try #require(env["MOSAICKIT_BENCHMARK"]))
-        try #require(!videos.isEmpty, "No readable videos found in MOSAICKIT_BENCHMARK")
+        let env = TestEnvironment.all
+        let videos = try await loadVideos()
+        try #require(!videos.isEmpty, "No readable videos: set MOSAICKIT_LOCALFOLDER or MOSAICKIT_LOCALVIDEO1")
         let runs = try Self.parseRuns(env["MOSAICKIT_BENCHMARK_RUNS"])
         let concurrencies = try Self.parseConcurrencies(env["MOSAICKIT_BENCHMARK_CONCURRENCY"])
 
@@ -126,10 +126,10 @@ struct BenchmarkTests {
         }
 
         print(Self.markdownTable(measurements, videos: videos.count, sourceSeconds: sourceSeconds, inputMB: inputMB))
-        if let jsonPath = env["MOSAICKIT_BENCHMARK_JSON"] {
+        if TestEnvironment.string("MOSAICKIT_OUTPUTFOLDER") != nil {
             let encoder = JSONEncoder()
             encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-            try encoder.encode(measurements).write(to: URL(fileURLWithPath: jsonPath))
+            try encoder.encode(measurements).write(to: try TestEnvironment.outputFolder(named: "Benchmark").appendingPathComponent("benchmark.json"))
         }
     }
 
@@ -163,16 +163,13 @@ struct BenchmarkTests {
         return sorted.count.isMultiple(of: 2) ? (sorted[middle - 1] + sorted[middle]) / 2 : sorted[middle]
     }
 
-    private func loadVideos(from path: String) async throws -> [VideoInput] {
-        let url = URL(fileURLWithPath: path)
-        var isDirectory: ObjCBool = false
-        guard FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory) else {
-            throw BenchmarkError.pathNotFound(path)
+    private func loadVideos() async throws -> [VideoInput] {
+        if let folder = TestEnvironment.localFolder {
+            return try await discoverVideos(in: folder).sorted { $0.url.path < $1.url.path }
         }
-        if isDirectory.boolValue {
-            return try await discoverVideos(in: url).sorted { $0.url.path < $1.url.path }
-        }
-        return [try await VideoInput(from: url)]
+        var videos: [VideoInput] = []
+        for url in TestEnvironment.localVideos { videos.append(try await VideoInput(from: url)) }
+        return videos
     }
 
     /// Runs one batch into a fresh temporary directory and returns (wall seconds, output bytes).
@@ -251,12 +248,10 @@ struct BenchmarkTests {
 }
 
 private enum BenchmarkError: Error, CustomStringConvertible {
-    case pathNotFound(String)
     case invalidSetting(String, String)
 
     var description: String {
         switch self {
-        case .pathNotFound(let path): return "MOSAICKIT_BENCHMARK path not found: \(path)"
         case .invalidSetting(let name, let value): return "Invalid \(name) value: \(value)"
         }
     }
