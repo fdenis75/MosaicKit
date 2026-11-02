@@ -13,22 +13,48 @@
           },
           {
             "enabled" : false,
-            "key" : "PREVIEW_FOLDER",
-            "value" : "\/Volumes\/Ext-Photos5\/PB\/test"
+            "key" : "MOSAICKIT_LOCALFOLDER",
+            "value" : ""
           },
           {
             "enabled" : false,
-            "key" : "MOSAIC_TARGET_FOLDER",
-            "value" : "\/Users\/francois\/Downloads\/testvidsnodelete\/output"
+            "key" : "MOSAICKIT_LOCALVIDEO1",
+            "value" : ""
           },
           {
             "enabled" : false,
-            "key" : "PREVIEW_COMBO_RUN",
+            "key" : "MOSAICKIT_LOCALVIDEO2",
+            "value" : ""
+          },
+          {
+            "enabled" : false,
+            "key" : "MOSAICKIT_LOCALVIDEO3",
+            "value" : ""
+          },
+          {
+            "enabled" : false,
+            "key" : "MOSAICKIT_LOCALVIDEO4",
+            "value" : ""
+          },
+          {
+            "enabled" : false,
+            "key" : "MOSAICKIT_LOCALPLAYLIST",
+            "value" : ""
+          },
+          {
+            "enabled" : false,
+            "key" : "MOSAICKIT_OUTPUTFOLDER",
+            "value" : ""
+          },
+          {
+            "enabled" : false,
+            "key" : "MOSAICKIT_FFMPEG_PATH",
+            "value" : ""
+          },
+          {
+            "enabled" : false,
+            "key" : "MOSAICKIT_PREVIEW_COMBO_RUN",
             "value" : "1"
-          },
-          {
-            "key" : "MOSAICKIT_PLAYLIST",
-            "value" : "\/Users\/francois\/Dev26\/pik\/playlist.m3u8"
           }
         ],
         "targetForVariableExpansion" : {
@@ -48,22 +74,48 @@
         "value" : "folder"
       },
       {
-        "key" : "MOSAICKIT_PLAYLIST",
-        "value" : "\/Users\/francois\/Dev26\/pik\/playlist.m3u8"
+        "enabled" : false,
+        "key" : "MOSAICKIT_LOCALFOLDER",
+        "value" : ""
       },
       {
         "enabled" : false,
-        "key" : "PREVIEW_FOLDER",
-        "value" : "\/Volumes\/Ext-Photos5\/PB\/test"
+        "key" : "MOSAICKIT_LOCALVIDEO1",
+        "value" : ""
       },
       {
         "enabled" : false,
-        "key" : "MOSAIC_TARGET_FOLDER",
-        "value" : "\/Users\/francois\/Downloads\/testvidsnodelete\/output"
+        "key" : "MOSAICKIT_LOCALVIDEO2",
+        "value" : ""
       },
       {
         "enabled" : false,
-        "key" : "PREVIEW_COMBO_RUN",
+        "key" : "MOSAICKIT_LOCALVIDEO3",
+        "value" : ""
+      },
+      {
+        "enabled" : false,
+        "key" : "MOSAICKIT_LOCALVIDEO4",
+        "value" : ""
+      },
+      {
+        "enabled" : false,
+        "key" : "MOSAICKIT_LOCALPLAYLIST",
+        "value" : ""
+      },
+      {
+        "enabled" : false,
+        "key" : "MOSAICKIT_OUTPUTFOLDER",
+        "value" : ""
+      },
+      {
+        "enabled" : false,
+        "key" : "MOSAICKIT_FFMPEG_PATH",
+        "value" : ""
+      },
+      {
+        "enabled" : false,
+        "key" : "MOSAICKIT_PREVIEW_COMBO_RUN",
         "value" : "1"
       }
     ],

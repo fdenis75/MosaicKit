@@ -65,22 +65,14 @@ private struct PreviewComboConfig: Sendable {
     // MARK: FFmpeg binary discovery
 
     /// Resolves the ffmpeg binary path from, in order:
-    ///  1. `FFMPEG_PATH` environment variable
+    ///  1. `MOSAICKIT_FFMPEG_PATH` environment variable
     ///  2. `/opt/homebrew/bin/ffmpeg`  (Apple Silicon Homebrew)
     ///  3. `/usr/local/bin/ffmpeg`     (Intel Homebrew / custom installs)
     ///  4. `/usr/bin/ffmpeg`           (system, rare)
     ///
     /// Returns `nil` when no executable is found; FFmpeg combos are silently
     /// omitted from the matrix in that case.
-    static var ffmpegBinaryPath: String? {
-        let fm = FileManager.default
-        if let env = ProcessInfo.processInfo.environment["FFMPEG_PATH"],
-           fm.isExecutableFile(atPath: env) { return env }
-        for path in ["/opt/homebrew/bin/ffmpeg", "/usr/local/bin/ffmpeg", "/usr/bin/ffmpeg"] {
-            if fm.isExecutableFile(atPath: path) { return path }
-        }
-        return nil
-    }
+    static var ffmpegBinaryPath: String? { TestEnvironment.ffmpegPath }
 
     // MARK: Short name
 
@@ -181,9 +173,9 @@ private extension PreviewComboConfig {
     ///
     /// Enable with:
     /// ```bash
-    /// PREVIEW_COMBO_RUN=1 swift test --filter PreviewCombinationTests
+    /// MOSAICKIT_PREVIEW_COMBO_RUN=1 MOSAICKIT_LOCALVIDEO1=/path/a.mp4 swift test --filter PreviewCombinationTests
     /// # Optionally override the ffmpeg path:
-    /// FFMPEG_PATH=/opt/homebrew/bin/ffmpeg PREVIEW_COMBO_RUN=1 swift test --filter PreviewCombinationTests
+    /// MOSAICKIT_FFMPEG_PATH=/opt/homebrew/bin/ffmpeg MOSAICKIT_PREVIEW_COMBO_RUN=1 swift test --filter PreviewCombinationTests
     /// ```
     static func makeAll() -> [PreviewComboConfig] {
         let durations:   [TimeInterval]          = [30]
@@ -238,7 +230,7 @@ private extension PreviewComboConfig {
         let ffmpegPath = ffmpegBinaryPath  // nil → omit FFmpeg branch
         if ffmpegPath == nil {
             print("⚠️  ffmpeg not found — FFmpeg combinations will be skipped.")
-            print("    Set FFMPEG_PATH or install via Homebrew (`brew install ffmpeg`).\n")
+            print("    Set MOSAICKIT_FFMPEG_PATH or install via Homebrew (`brew install ffmpeg`).\n")
         }
 
         var configs: [PreviewComboConfig] = []
@@ -378,9 +370,9 @@ private func previewTimingSummary(results: [PreviewComboResult], label: String) 
 
 /// Exhaustive preview-generation parameter combination tests covering all three export engines.
 ///
-/// Runs three ordered phases against real video files in `/Volumes/Ext-Photos5/TestPreviews`.
-/// All output is saved to `/Volumes/Ext-Photos5/TestPreviews/<timestamp>/` and is **not deleted**
-/// after the test completes.
+/// Runs three ordered phases against the real video files `MOSAICKIT_LOCALVIDEO1…4`.
+/// All output is saved to `<MOSAICKIT_OUTPUTFOLDER or temp>/PreviewCombinations/<timestamp>/` and is
+/// **not deleted** after the test completes.
 ///
 /// ## Combination matrix
 ///
@@ -403,30 +395,28 @@ private func previewTimingSummary(results: [PreviewComboResult], label: String) 
 /// | FFmpeg ¹ | hevc_vt/superfast, hevc_vt/fast, h264/CRF23/fast | 72     |
 ///
 /// ¹ FFmpeg combos are included only when an `ffmpeg` binary is discoverable.
-///   Override the path via `FFMPEG_PATH=/path/to/ffmpeg`.
+///   Override the path via `MOSAICKIT_FFMPEG_PATH=/path/to/ffmpeg`.
 ///   VideoToolbox variants use `-realtime 1` and `-q:v` (no `-preset`/`-crf`).
 ///
 /// Total **with** ffmpeg: **144** | without: **72**
 ///
 /// ## Phases
-/// - **Phase 1**: `DJI_0635.MP4` — all combos, sequential
-/// - **Phase 2**: `DJI_0635.MP4` → `DDSC-031.mp4` — all combos each, sequential
-/// - **Phase 3**: `testA.mp4` / `DJI_0635.MP4` / `TestC.mp4` / `DDSC-031.mp4` — 4 files concurrent
+/// - **Phase 1**: `MOSAICKIT_LOCALVIDEO1` — all combos, sequential
+/// - **Phase 2**: `MOSAICKIT_LOCALVIDEO1` → `MOSAICKIT_LOCALVIDEO2` — all combos each, sequential
+/// - **Phase 3**: `MOSAICKIT_LOCALVIDEO1…4` — 4 files concurrent
 ///
 /// ## Run
 /// ```bash
-/// PREVIEW_COMBO_RUN=1 swift test --filter PreviewCombinationTests
+/// MOSAICKIT_PREVIEW_COMBO_RUN=1 MOSAICKIT_LOCALVIDEO1=/path/a.mp4 swift test --filter PreviewCombinationTests
 /// # With a custom ffmpeg path:
-/// FFMPEG_PATH=/opt/homebrew/bin/ffmpeg PREVIEW_COMBO_RUN=1 swift test --filter PreviewCombinationTests
+/// MOSAICKIT_FFMPEG_PATH=/opt/homebrew/bin/ffmpeg MOSAICKIT_PREVIEW_COMBO_RUN=1 swift test --filter PreviewCombinationTests
 /// ```
 ///
-/// The test is silently skipped when `PREVIEW_COMBO_RUN` is not set so it does not block CI.
+/// The test is silently skipped when `MOSAICKIT_PREVIEW_COMBO_RUN` is not set so it does not block CI.
 @Suite("Preview Combination Tests", .serialized)
 struct PreviewCombinationTests {
 
     // MARK: Constants
-
-    private static let videoRoot = URL(fileURLWithPath: "/Volumes/Ext-Photos5/TestPreviews")
 
     /// Timestamp determined once at suite start; all three phases write to the same directory.
     private static let runTimestamp: String = {
@@ -437,10 +427,11 @@ struct PreviewCombinationTests {
     }()
 
     private static let runOutputDirectory: URL =
-        videoRoot.appendingPathComponent(runTimestamp)
+        ((try? TestEnvironment.outputFolder(named: "PreviewCombinations")) ?? FileManager.default.temporaryDirectory)
+            .appendingPathComponent(runTimestamp)
 
     private static var isEnabled: Bool {
-        ProcessInfo.processInfo.environment["PREVIEW_COMBO_RUN"] == "1"
+        TestEnvironment.flag("MOSAICKIT_PREVIEW_COMBO_RUN")
     }
 
     /// All parameter combinations — built once at suite load.
@@ -449,8 +440,16 @@ struct PreviewCombinationTests {
 
     // MARK: Helpers
 
-    private func url(for filename: String) -> URL {
-        Self.videoRoot.appendingPathComponent(filename)
+    /// The `MOSAICKIT_LOCALVIDEO<n>` files for the given 1-based slots, or `nil` (after
+    /// printing why) when one of them is unset or missing.
+    private func requireVideos(_ slots: [Int]) -> [URL]? {
+        let urls = slots.compactMap(TestEnvironment.localVideo)
+        guard urls.count == slots.count else {
+            let keys = slots.map { TestEnvironment.localVideoKeys[$0 - 1] }.joined(separator: ", ")
+            print("⏭️  Skipped: set \(keys) to existing video files")
+            return nil
+        }
+        return urls
     }
 
     private func ensureOutputDirectory() throws {
@@ -477,16 +476,16 @@ struct PreviewCombinationTests {
         """)
     }
 
-    // MARK: - Phase 1 ── DJI_0635.MP4, all combos, sequential
+    // MARK: - Phase 1 ── LOCALVIDEO1, all combos, sequential
 
-    @Test("Phase 1 – DJI_0635.MP4,  combinations sequential")
+    @Test("Phase 1 – LOCALVIDEO1, combinations sequential")
     func phase1_singleVideo() async throws {
         guard Self.isEnabled else {
             print("""
 
-            ⚠️  PreviewCombinationTests skipped — PREVIEW_COMBO_RUN is not set.
+            ⚠️  PreviewCombinationTests skipped — MOSAICKIT_PREVIEW_COMBO_RUN is not set.
                 Run with:
-                  PREVIEW_COMBO_RUN=1 swift test --filter PreviewCombinationTests
+                  MOSAICKIT_PREVIEW_COMBO_RUN=1 MOSAICKIT_LOCALVIDEO1=/path/to/video.mp4 swift test --filter PreviewCombinationTests
 
             """)
             return
@@ -496,10 +495,11 @@ struct PreviewCombinationTests {
 
         let combos    = Self.allCombos
         let outputDir = Self.runOutputDirectory
-        let video     = await VideoInput(url: url(for: "DJI_0003.MP4"))
+        guard let urls = requireVideos([1]) else { return }
+        let video     = await VideoInput(url: urls[0])
         let reporter  = PreviewProgressReporter(total: combos.count)
 
-        printHeader(phase: 1, videos: ["DJI_003.MP4"], combosPerVideo: combos.count)
+        printHeader(phase: 1, videos: [urls[0].lastPathComponent], combosPerVideo: combos.count)
         print(String(format: "  Video info: %@  %.0fs  %dx%d\n",
                      video.title, video.duration ?? 0,
                      Int(video.width ?? 0), Int(video.height ?? 0)))
@@ -515,7 +515,7 @@ struct PreviewCombinationTests {
                 let outputURL = try await generator.generate(for: video, config: config)
                 let r = PreviewComboResult(
                     comboIndex: combo.index, comboName: combo.shortName,
-                    videoFilename: "DJI_0635.MP4", phase: 1,
+                    videoFilename: urls[0].lastPathComponent, phase: 1,
                     elapsed: Date().timeIntervalSince(start),
                     outputURL: outputURL, errorDescription: nil)
                 results.append(r)
@@ -523,7 +523,7 @@ struct PreviewCombinationTests {
             } catch {
                 let r = PreviewComboResult(
                     comboIndex: combo.index, comboName: combo.shortName,
-                    videoFilename: "DJI_0635.MP4", phase: 1,
+                    videoFilename: urls[0].lastPathComponent, phase: 1,
                     elapsed: Date().timeIntervalSince(start),
                     outputURL: nil, errorDescription: error.localizedDescription)
                 results.append(r)
@@ -534,7 +534,7 @@ struct PreviewCombinationTests {
         let succeeded = results.filter(\.succeeded).count
         print("\n── Phase 1 complete: \(succeeded)/\(results.count) succeeded ──\n")
 
-        let summary = previewTimingSummary(results: results, label: "Phase 1 — DJI_0635.MP4")
+        let summary = previewTimingSummary(results: results, label: "Phase 1 — \(urls[0].lastPathComponent)")
         let reportURL = outputDir.appendingPathComponent("phase1_report.txt")
         try summary.write(to: reportURL, atomically: true, encoding: .utf8)
         print(summary)
@@ -543,9 +543,9 @@ struct PreviewCombinationTests {
         #expect(succeeded > 0, "Phase 1: expected at least one successful preview generation")
     }
 
-    // MARK: - Phase 2 ── DJI_0635.MP4 → DDSC-031.mp4, sequential
+    // MARK: - Phase 2 ── LOCALVIDEO1 → LOCALVIDEO2, sequential
 
-    @Test("Phase 2 – DJI_0635.MP4 then DDSC-031.mp4, sequential")
+    @Test("Phase 2 – LOCALVIDEO1 then LOCALVIDEO2, sequential")
     func phase2_sequentialVideos() async throws {
         guard Self.isEnabled else { return }
 
@@ -553,7 +553,8 @@ struct PreviewCombinationTests {
 
         let combos    = Self.allCombos
         let outputDir = Self.runOutputDirectory
-        let filenames = ["DJI_0635.MP4", "DDSC-031.mp4"]
+        guard let urls = requireVideos([1, 2]) else { return }
+        let filenames = urls.map(\.lastPathComponent)
         let reporter  = PreviewProgressReporter(total: combos.count * filenames.count)
 
         printHeader(phase: 2, videos: filenames, combosPerVideo: combos.count)
@@ -561,8 +562,8 @@ struct PreviewCombinationTests {
         var allResults: [PreviewComboResult] = []
         allResults.reserveCapacity(combos.count * filenames.count)
 
-        for filename in filenames {
-            let video     = await VideoInput(url: url(for: filename))
+        for (filename, fileURL) in zip(filenames, urls) {
+            let video     = await VideoInput(url: fileURL)
             let generator = PreviewVideoGenerator()
 
             print(String(format: "\n  ▶  %@  %.0fs  %dx%d",
@@ -596,7 +597,7 @@ struct PreviewCombinationTests {
         let succeeded = allResults.filter(\.succeeded).count
         print("\n── Phase 2 complete: \(succeeded)/\(allResults.count) succeeded ──\n")
 
-        let summary = previewTimingSummary(results: allResults, label: "Phase 2 — DJI_0635.MP4 + DDSC-031.mp4")
+        let summary = previewTimingSummary(results: allResults, label: "Phase 2 — \(filenames.joined(separator: " + "))")
         let reportURL = outputDir.appendingPathComponent("phase2_report.txt")
         try summary.write(to: reportURL, atomically: true, encoding: .utf8)
         print(summary)
@@ -605,9 +606,9 @@ struct PreviewCombinationTests {
         #expect(succeeded > 0, "Phase 2: expected at least one successful preview generation")
     }
 
-    // MARK: - Phase 3 ── testA / TestB / TestC / DDSC-031, concurrent
+    // MARK: - Phase 3 ── LOCALVIDEO1…4, concurrent
 
-    @Test("Phase 3 – testA.mp4 / DJI_0635.MP4 / TestC.mp4 / DDSC-031.mp4 concurrent")
+    @Test("Phase 3 – LOCALVIDEO1…4 concurrent")
     func phase3_concurrentVideos() async throws {
         guard Self.isEnabled else { return }
 
@@ -615,15 +616,16 @@ struct PreviewCombinationTests {
 
         let combos    = Self.allCombos
         let outputDir = Self.runOutputDirectory
-        let filenames = ["testA.mp4", "DJI_0635.MP4", "TestC.mp4", "DDSC-031.mp4"]
+        guard let urls = requireVideos([1, 2, 3, 4]) else { return }
+        let filenames = urls.map(\.lastPathComponent)
         let reporter  = PreviewProgressReporter(total: combos.count * filenames.count)
 
         printHeader(phase: 3, videos: filenames, combosPerVideo: combos.count)
 
         // Load all four VideoInputs sequentially (metadata reads are fast)
         var videos: [(filename: String, input: VideoInput)] = []
-        for filename in filenames {
-            let input = await VideoInput(url: url(for: filename))
+        for (filename, fileURL) in zip(filenames, urls) {
+            let input = await VideoInput(url: fileURL)
             videos.append((filename, input))
             print(String(format: "  ↳ %@  %.0fs  %dx%d",
                          filename, input.duration ?? 0,

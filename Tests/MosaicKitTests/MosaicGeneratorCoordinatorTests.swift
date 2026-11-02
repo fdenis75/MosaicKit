@@ -11,12 +11,10 @@ struct MosaicGeneratorCoordinatorTests {
         MosaicKitWebP.register()
     }
 
-    // Set MOSAICKIT_TEST_VIDEOS_DIR env var to a folder of test videos to enable folder/batch tests
-    private static let defaultMediaFolderPath = "/tmp/mosaickit-test-videos"
-    private static let folderPathEnvKey = "MOSAICKIT_TEST_VIDEOS_DIR"
+    // Set MOSAICKIT_LOCALFOLDER to a folder of test videos to enable folder/batch tests
     private static let supportedExtensions: Set<String> = ["mp4", "mov", "m4v", "avi", "mkv"]
     
-    @Test("Coordinator single test using media from /Volumes/}/test/")
+    @Test("Coordinator single test using the first video of MOSAICKIT_LOCALFOLDER")
     func coordinatorSingleVideoFromFolder() async throws {
         guard currentMode() == .single else { return }
         
@@ -49,7 +47,7 @@ struct MosaicGeneratorCoordinatorTests {
         }
     }
     
-    @Test("Coordinator batch test using all videos in /Volumes/volname/test/")
+    @Test("Coordinator batch test using all videos of MOSAICKIT_LOCALFOLDER")
     func coordinatorBatchFromFolder() async throws {
         guard currentMode() == .folder else { return }
         
@@ -210,8 +208,7 @@ struct MosaicGeneratorCoordinatorTests {
     }
     
     private func mediaFolderURL() -> URL {
-        let path = ProcessInfo.processInfo.environment[Self.folderPathEnvKey] ?? Self.defaultMediaFolderPath
-        return URL(fileURLWithPath: path, isDirectory: true)
+        TestEnvironment.localFolder ?? URL(fileURLWithPath: "MOSAICKIT_LOCALFOLDER-not-set", isDirectory: true)
     }
     
     private func discoverVideoURLs(in folderURL: URL) throws -> [URL] {
@@ -361,7 +358,7 @@ private enum MediaAccessError: Error, CustomStringConvertible {
     var description: String {
         switch self {
         case .folderMissing(let path):
-            return "Media folder not found: \(path). Set MOSAICKIT_TEST_VIDEOS_DIR if needed."
+            return "Media folder not found: \(path). Set MOSAICKIT_LOCALFOLDER."
         case .scanFailed(let path):
             return "Unable to scan media folder: \(path). Check sandbox/filesystem permissions."
         case .noVideosFound(let path):

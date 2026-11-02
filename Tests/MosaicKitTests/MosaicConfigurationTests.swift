@@ -195,7 +195,7 @@ struct MosaicConfigurationTests {
         config.layout.aspectRatio = .vertical
         config.outputDirectoryTemplate = "{root}/{aspectRatio}"
         config.filenameTemplate = "{name}_{aspectRatio}"
-        let root = URL.homeDirectory.appendingPathComponent("mosaic-tests")
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("mosaic-tests")
 
         let directory = config.generateOutputDirectory(rootDirectory: root, videoInput: video)
         #expect(directory.lastPathComponent == "9-16")

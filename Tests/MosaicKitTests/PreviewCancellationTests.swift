@@ -11,26 +11,17 @@ import Testing
 /// in-flight long enough to reliably exercise cancellation/concurrency
 /// changes mid-run.
 ///
-/// Set `PREVIEW_CANCELLATION_TEST_DIR` (or `MOSAICKIT_TEST_VIDEOS_DIR`) to a
+/// Set `MOSAICKIT_LOCALFOLDER` to a
 /// folder containing video files to run them. They are skipped (not failed)
 /// when no folder is available, or when `MOSAICKIT_SUITE_MODE=none` (the CI
 /// default for extended suites).
 @Suite("Preview batch cancellation and concurrency control")
 struct PreviewCancellationTests {
 
-    private static let previewFolderEnvKey = "PREVIEW_CANCELLATION_TEST_DIR"
-    private static let sharedFolderEnvKey = "MOSAICKIT_TEST_VIDEOS_DIR"
-    private static let defaultMediaFolderPath = "/tmp/mosaickit-test-videos"
 
-    private var isCIMode: Bool {
-        ProcessInfo.processInfo.environment["MOSAICKIT_SUITE_MODE"] == "none"
-    }
+    private var isCIMode: Bool { TestEnvironment.isCIMode }
 
-    private var folderURL: URL {
-        let env = ProcessInfo.processInfo.environment
-        let path = env[Self.previewFolderEnvKey] ?? env[Self.sharedFolderEnvKey] ?? Self.defaultMediaFolderPath
-        return URL(fileURLWithPath: path, isDirectory: true)
-    }
+    private var folderURL: URL? { TestEnvironment.localFolder }
 
     // MARK: - Tests
 
@@ -280,8 +271,8 @@ struct PreviewCancellationTests {
     /// same files with fresh IDs) up to `count` entries. Returns `nil` (after
     /// printing a skip message) when the folder has no usable videos.
     private func loadVideos(count: Int) async throws -> [VideoInput]? {
-        guard FileManager.default.fileExists(atPath: folderURL.path) else {
-            print("⏭️  Skipped: set \(Self.previewFolderEnvKey) or \(Self.sharedFolderEnvKey) to a directory containing video files (looked at \(folderURL.path))")
+        guard let folderURL else {
+            print("⏭️  Skipped: set MOSAICKIT_LOCALFOLDER to a directory containing video files")
             return nil
         }
 

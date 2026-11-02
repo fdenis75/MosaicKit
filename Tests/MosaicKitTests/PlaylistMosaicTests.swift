@@ -9,13 +9,13 @@ import Testing
 /// The parser tests always run and never touch the network. The end-to-end test is opt-in:
 ///
 /// ```
-/// MOSAICKIT_PLAYLIST=/path/to/list.m3u8 swift test --filter PlaylistMosaicTests
+/// MOSAICKIT_LOCALPLAYLIST=/path/to/list.m3u8 swift test --filter PlaylistMosaicTests
 /// ```
 ///
 /// | Variable | Default | Meaning |
 /// |---|---|---|
-/// | `MOSAICKIT_PLAYLIST` | — (end-to-end test disabled) | A local `.m3u8` / `.m3u` playlist |
-/// | `MOSAICKIT_PLAYLIST_OUTPUT` | `<playlist folder>/<playlist name>-mosaics` | Folder that receives the mosaics |
+/// | `MOSAICKIT_LOCALPLAYLIST` | — (end-to-end test disabled) | A local `.m3u8` / `.m3u` playlist |
+/// | `MOSAICKIT_OUTPUTFOLDER` | temporary directory | Parent of the `<playlist name>-mosaics` folder that receives the mosaics |
 ///
 /// Every entry gets one mosaic: 1900 px wide, `XXL` density, 16:9, saved directly in the output
 /// folder (no configuration-hash subfolder). An entry that cannot be opened is reported and
@@ -84,21 +84,16 @@ struct PlaylistMosaicTests {
 
     // MARK: - End to end (opt-in)
 
-    @Test("One 1900 px XXL 16:9 mosaic per entry of MOSAICKIT_PLAYLIST")
-       //   .enabled(if: ProcessInfo.processInfo.environment["MOSAICKIT_PLAYLIST"] != nil,
-      //             "Set MOSAICKIT_PLAYLIST=/path/to/list.m3u8 to run"))
+    @Test("One 1900 px XXL 16:9 mosaic per entry of MOSAICKIT_LOCALPLAYLIST",
+          .enabled(if: TestEnvironment.localPlaylist != nil,
+                   "Set MOSAICKIT_LOCALPLAYLIST=/path/to/list.m3u8 to run"))
     func generatesMosaicsForPlaylist() async throws {
-        let env = ProcessInfo.processInfo.environment
-        let playlistURL = URL(fileURLWithPath: "/Users/francois/Dev26/pik/playlist.m3u8").standardizedFileURL
-        try #require(FileManager.default.fileExists(atPath: playlistURL.path), "No playlist at \(playlistURL.path)")
+        let playlistURL = try #require(TestEnvironment.localPlaylist, "Set MOSAICKIT_LOCALPLAYLIST to an existing .m3u8 file").standardizedFileURL
 
         let entries = try M3U8Playlist.parse(contentsOf: playlistURL)
         try #require(!entries.isEmpty, "No media entries in \(playlistURL.lastPathComponent)")
 
-        let outputDir = env["MOSAICKIT_PLAYLIST_OUTPUT"].map { URL(fileURLWithPath: $0, isDirectory: true) }
-            ?? playlistURL.deletingLastPathComponent()
-                .appendingPathComponent(playlistURL.deletingPathExtension().lastPathComponent + "-mosaics", isDirectory: true)
-        try FileManager.default.createDirectory(at: outputDir, withIntermediateDirectories: true)
+        let outputDir = try TestEnvironment.outputFolder(named: playlistURL.deletingPathExtension().lastPathComponent + "-mosaics")
 
         // Inspect every entry first (remote metadata needs the network). A dead link fails the
         // test but does not stop the others.

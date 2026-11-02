@@ -9,29 +9,24 @@ import Testing
 ///
 /// | Variable            | Description                                           |
 /// |---------------------|-------------------------------------------------------|
-/// | `PREVIEW_FOLDER`    | Absolute path to a directory containing video files   |
+/// | `MOSAICKIT_LOCALFOLDER` | Absolute path to a directory containing video files |
 ///
 /// ## Optional environment variables
 ///
 /// | Variable            | Description                                           |
 /// |---------------------|-------------------------------------------------------|
-/// | `FFMPEG_PATH`       | Absolute path to the `ffmpeg` binary (falls back to  |
+/// | `MOSAICKIT_FFMPEG_PATH` | Absolute path to the `ffmpeg` binary (falls back to  |
 /// |                     | Homebrew default locations when not set)              |
-/// | `PREVIEW_RECURSIVE` | Set to `"1"` to scan subdirectories recursively      |
+/// | `MOSAICKIT_PREVIEW_RECURSIVE` | Set to `"1"` to scan subdirectories recursively      |
 ///
-/// The test is automatically skipped when `PREVIEW_FOLDER` is not set or when
+/// The test is automatically skipped when `MOSAICKIT_LOCALFOLDER` is not set or when
 /// `MOSAICKIT_SUITE_MODE=none` (CI environment).
 @Suite("PreviewCoordinator integration tests")
 struct PreviewCoordinatorTests {
 
     // MARK: - Environment helpers
 
-    private var folderURL: URL? {
-      //  guard let path = ProcessInfo.processInfo.environment["PREVIEW_FOLDER"],
-            //  !path.isEmpty else { return nil }
-        let path = "/Volumes/Ext-Photos5/TestPreviews/lal"
-        return URL(fileURLWithPath: path, isDirectory: true)
-    }
+    private var folderURL: URL? { TestEnvironment.localFolder }
     private static let runTimestamp: String = {
         let f = DateFormatter()
         f.locale = Locale(identifier: "en_US_POSIX")
@@ -42,22 +37,14 @@ struct PreviewCoordinatorTests {
   //  private static let runOutputDirectory: URL =
 //        folderURL.appendingPathComponent(runTimestamp)
     
-    private var ffmpegBinaryPath: String? {
-        let fm = FileManager.default
-        if let env = ProcessInfo.processInfo.environment["FFMPEG_PATH"],
-           fm.isExecutableFile(atPath: env) { return env }
-        for path in ["/opt/homebrew/bin/ffmpeg", "/usr/local/bin/ffmpeg", "/usr/bin/ffmpeg"] {
-            if fm.isExecutableFile(atPath: path) { return path }
-        }
-        return nil
-    }
+    private var ffmpegBinaryPath: String? { TestEnvironment.ffmpegPath }
 
     private var isRecursive: Bool {
-        ProcessInfo.processInfo.environment["PREVIEW_RECURSIVE"] == "1"
+        TestEnvironment.flag("MOSAICKIT_PREVIEW_RECURSIVE")
     }
 
     private var isCIMode: Bool {
-        ProcessInfo.processInfo.environment["MOSAICKIT_SUITE_MODE"] == "none"
+        TestEnvironment.isCIMode
     }
 
     // MARK: - Tests
@@ -70,12 +57,12 @@ struct PreviewCoordinatorTests {
         }*/
 
         guard let folder = folderURL else {
-            print("⏭️  Skipped: set PREVIEW_FOLDER to a directory containing video files")
+            print("⏭️  Skipped: set MOSAICKIT_LOCALFOLDER to a directory containing video files")
             return
         }
 
         guard let ffmpegPath = ffmpegBinaryPath else {
-            print("⏭️  Skipped: ffmpeg binary not found; set FFMPEG_PATH or install via Homebrew")
+            print("⏭️  Skipped: ffmpeg binary not found; set MOSAICKIT_FFMPEG_PATH or install via Homebrew")
             return
         }
 
@@ -90,14 +77,15 @@ struct PreviewCoordinatorTests {
         print("📹 Found \(videos.count) video(s)")
         for v in videos { print("    • \(v.title)") }
 
-        // ── 2. Shared root output directory  {folder}/{yyyyMMdd_HHmmss} ───────
+        // ── 2. Shared root output directory  {output folder}/PreviewCoordinator/{yyyyMMdd_HHmmss} ───────
         let timestamp: String = {
             let fmt = DateFormatter()
             fmt.locale = Locale(identifier: "en_US_POSIX")
             fmt.dateFormat = "yyyyMMdd_HHmmss"
             return fmt.string(from: Date())
         }()
-        let rootOutputDirectory = folder.appendingPathComponent(timestamp, isDirectory: true)
+        let rootOutputDirectory = try TestEnvironment.outputFolder(named: "PreviewCoordinator")
+            .appendingPathComponent(timestamp, isDirectory: true)
         try FileManager.default.createDirectory(at: rootOutputDirectory, withIntermediateDirectories: true)
         print("📁 Root output directory: \(rootOutputDirectory.path)")
 

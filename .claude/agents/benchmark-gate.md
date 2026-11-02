@@ -10,7 +10,7 @@ You run the P-1 benchmark gate. Defaults (override if told): videos in `/Users/f
 Setup: `export DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer` (the system tools point at the Command Line Tools, which lack `metal`). Write outputs to the session scratchpad, never into the repo. Make sure the working tree is clean first and remember the starting branch.
 
 Procedure (run each leg in the background; a leg takes ~3-4 minutes):
-1. `git checkout main`, run A1: `MOSAICKIT_BENCHMARK=<dir> MOSAICKIT_BENCHMARK_JSON=<scratchpad>/A1.json swift test -c release --filter BenchmarkTests > A1.log 2>&1`.
+1. `git checkout main`, run A1: `MOSAICKIT_BENCHMARK=1 MOSAICKIT_LOCALFOLDER=<dir> MOSAICKIT_OUTPUTFOLDER=<scratchpad>/A1 swift test -c release --filter BenchmarkTests > A1.log 2>&1`.
 2. Checkout the branch, run B the same way.
 3. Checkout `main`, run A2.
 4. Return to the starting branch. Check each log's exit status and that it contains the results table; a build failure printed as `error:` means no data.

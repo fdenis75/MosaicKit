@@ -313,15 +313,36 @@ MOSAICKIT_SUITE_MODE=none swift test                    # CI mode: skip extended
 - **Throughput benchmark (plan P-1):** `BenchmarkTests` runs only when `MOSAICKIT_BENCHMARK`
   points at a folder of videos (or one file). Every change tagged ⚡ in the implementation plan
   needs a before/after run on the same machine, pasted into the PR:
-  `MOSAICKIT_BENCHMARK=/path/to/videos swift test -c release --filter BenchmarkTests`.
+  `MOSAICKIT_BENCHMARK=1 MOSAICKIT_LOCALFOLDER=/path/to/videos swift test -c release --filter BenchmarkTests`.
   Optional: `MOSAICKIT_BENCHMARK_RUNS` (default 3), `MOSAICKIT_BENCHMARK_CONCURRENCY`
-  (default `1,0`), `MOSAICKIT_BENCHMARK_JSON` (write results as JSON).
+  (default `1,0`), `MOSAICKIT_OUTPUTFOLDER` (also writes `Benchmark/benchmark.json`).
   The baseline and the noise guidance are in the plan's §8.1 (day-to-day variance reaches 14 %,
   so compare back-to-back runs from one session for hot-path changes).
 - **Export stress test (I-26):** `ExportStressTests` runs only when `MOSAICKIT_STRESS=<rounds>`
   is set. Preview exports stall under macOS background scheduling, so compare a plain run with
   one under `taskpolicy -b`. Tests that export video call `ProcessScheduling.leaveBackground()`
   first, as `PreviewExportSmokeTests` does.
+
+### Test environment variables
+
+Tests never hard-code a path to a local or remote file. Every external input is read through
+`Tests/MosaicKitTests/TestEnvironment.swift`, which holds the full table. A test whose input is
+unset skips itself.
+
+| Variable | Kind | Used by |
+|---|---|---|
+| `MOSAICKIT_LOCALVIDEO1` … `4` | video file | `CombinationTests` (1), `PreviewCombinationTests` (1–4), `BenchmarkTests` |
+| `MOSAICKIT_LOCALFOLDER` | folder of videos | coordinator, cancellation, preview-coordinator, stress and benchmark tests |
+| `MOSAICKIT_LOCALPLAYLIST` | `.m3u8` file | `PlaylistMosaicTests` |
+| `MOSAICKIT_FFMPEG_PATH` | executable | ffmpeg tests (default: Homebrew / system `ffmpeg`) |
+| `MOSAICKIT_OUTPUTFOLDER` | folder | outputs of the combination, playlist, preview and benchmark tests (default: temp dir) |
+| `MOSAICKIT_SUITE_MODE`, `MOSAICKIT_SKIP_ANIMATED` | run selection | `none` / `1` in CI |
+| `MOSAICKIT_BENCHMARK` (+ `_RUNS`, `_CONCURRENCY`, `_GRID`, `_UNEVEN`) | toggle + tuning | `BenchmarkTests` |
+| `MOSAICKIT_STRESS` (+ `_EXPORTS`, `_LOAD`, `_STALL`, `_LEAVE_BACKGROUND`) | toggle + tuning | `ExportStressTests` |
+| `MOSAICKIT_PREVIEW_COMBO_RUN`, `MOSAICKIT_PREVIEW_RECURSIVE`, `MOSAICKIT_COMBO_MAX_CONCURRENT` | toggle + tuning | preview/mosaic combination tests |
+
+No test fetches a remote file: the URLs in the tests are synthetic. Add a new external input to
+`TestEnvironment` and to this table, never as a literal path or a private `environment[...]` read.
 
 - **Location:** tests live in `Tests/MosaicKitTests/`. Fixtures in `embeddedAsset/` are loaded
   with `Bundle.module`:

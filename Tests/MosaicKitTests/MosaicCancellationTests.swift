@@ -9,23 +9,16 @@ import Testing
 /// in-flight long enough to reliably exercise cancellation and concurrency
 /// changes mid-run. They are integration tests, not unit tests:
 ///
-/// Set `MOSAICKIT_TEST_VIDEOS_DIR` to a folder containing video files to run
+/// Set `MOSAICKIT_LOCALFOLDER` to a folder containing video files to run
 /// them. They are skipped (not failed) when the folder is missing/empty, or
 /// when `MOSAICKIT_SUITE_MODE=none` (the CI default for extended suites).
 @Suite("Mosaic batch cancellation and concurrency control")
 struct MosaicCancellationTests {
 
-    private static let folderPathEnvKey = "MOSAICKIT_TEST_VIDEOS_DIR"
-    private static let defaultMediaFolderPath = "/tmp/mosaickit-test-videos"
 
-    private var isCIMode: Bool {
-        ProcessInfo.processInfo.environment["MOSAICKIT_SUITE_MODE"] == "none"
-    }
+    private var isCIMode: Bool { TestEnvironment.isCIMode }
 
-    private var folderURL: URL {
-        let path = ProcessInfo.processInfo.environment[Self.folderPathEnvKey] ?? Self.defaultMediaFolderPath
-        return URL(fileURLWithPath: path, isDirectory: true)
-    }
+    private var folderURL: URL? { TestEnvironment.localFolder }
 
     // MARK: - Tests
 
@@ -278,8 +271,8 @@ struct MosaicCancellationTests {
     /// same files with fresh IDs) up to `count` entries. Returns `nil` (after
     /// printing a skip message) when the folder has no usable videos.
     private func loadVideos(count: Int) async throws -> [VideoInput]? {
-        guard FileManager.default.fileExists(atPath: folderURL.path) else {
-            print("⏭️  Skipped: set \(Self.folderPathEnvKey) to a directory containing video files (looked at \(folderURL.path))")
+        guard let folderURL else {
+            print("⏭️  Skipped: set MOSAICKIT_LOCALFOLDER to a directory containing video files")
             return nil
         }
 
