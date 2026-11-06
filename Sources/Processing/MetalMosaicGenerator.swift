@@ -128,7 +128,7 @@ public actor MetalMosaicGenerator: MosaicGeneratorProtocol {
             if !config.overwrite {
                 if config.gifMode == .gifOnly {
                     let animURL = config.animatedOutputURL(for: video, referenceDate: referenceDate)
-                    if FileManager.default.fileExists(atPath: animURL.path) {
+                    if SecurityScopedAccess.withAccess(to: animURL.deletingLastPathComponent(), { FileManager.default.fileExists(atPath: animURL.path) }) {
                         logger.debug("⏭️ Animation already exists, skipping generation: \(animURL.path)")
                         return animURL
                     }
@@ -138,7 +138,7 @@ public actor MetalMosaicGenerator: MosaicGeneratorProtocol {
                     let originalFilename = video.outputBaseName
                     let filename = config.generateFilename(originalFilename: originalFilename, videoInput: video)
                     let mosaicURL = outputDir.appendingPathComponent(filename)
-                    if FileManager.default.fileExists(atPath: mosaicURL.path) {
+                    if SecurityScopedAccess.withAccess(to: outputDir, { FileManager.default.fileExists(atPath: mosaicURL.path) }) {
                         if config.gifMode == .withMosaic {
                             let animationURL = config.animatedOutputURL(for: video, referenceDate: referenceDate)
                             if !FileManager.default.fileExists(atPath: animationURL.path) {
@@ -170,11 +170,13 @@ public actor MetalMosaicGenerator: MosaicGeneratorProtocol {
             // Animation-only mode: skip mosaic entirely
             if plannedConfig.gifMode == .gifOnly {
                 let animURL = config.animatedOutputURL(for: video, referenceDate: referenceDate)
-                try FileManager.default.createDirectory(
-                    at: animURL.deletingLastPathComponent(),
-                    withIntermediateDirectories: true,
-                    attributes: nil
-                )
+                try SecurityScopedAccess.withAccess(to: animURL.deletingLastPathComponent()) {
+                    try FileManager.default.createDirectory(
+                        at: animURL.deletingLastPathComponent(),
+                        withIntermediateDirectories: true,
+                        attributes: nil
+                    )
+                }
                 try await exportAnimation(for: video, asset: asset, layout: layout, config: plannedConfig, to: animURL)
                 logger.debug("💾 Animation-only saved to: \(animURL.path)")
                 return animURL
@@ -748,12 +750,9 @@ public actor MetalMosaicGenerator: MosaicGeneratorProtocol {
         // Generate structured path: {root}/{service}/{creator}/{configHash}/
         baseOutputDirectory = config.generateOutputDirectory(rootDirectory: rootFolder, videoInput: video, referenceDate: referenceDate)
 
-        let didStartAccessingBaseDirectory = baseOutputDirectory.startAccessingSecurityScopedResource()
-        defer {
-            if didStartAccessingBaseDirectory {
-                baseOutputDirectory.stopAccessingSecurityScopedResource()
-            }
-        }
+        // The structured directory doesn't exist yet: the grant comes from its nearest existing ancestor.
+        let baseAccess = SecurityScopedAccess.begin(for: baseOutputDirectory)
+        defer { baseAccess.stop() }
 
         try FileManager.default.createDirectory(at: baseOutputDirectory,
                                                 withIntermediateDirectories: true,
@@ -769,18 +768,6 @@ public actor MetalMosaicGenerator: MosaicGeneratorProtocol {
         defer { transaction.discard() }
         try Task.checkCancellation()
         
-        // Use security scoped resource for WebP and HEIF
-        var didStartAccessingDirectory = false
-        if config.format == .webp || config.format == .heif {
-            let directory = mosaicURL.deletingLastPathComponent()
-            didStartAccessingDirectory = directory.startAccessingSecurityScopedResource()
-        }
-        defer {
-            if didStartAccessingDirectory {
-                mosaicURL.deletingLastPathComponent().stopAccessingSecurityScopedResource()
-            }
-        }
-
         try ImageFileWriter.write(mosaic, format: config.format, compressionQuality: config.compressionQuality,
                                   to: transaction.stagingURL, reportedURL: mosaicURL)
 

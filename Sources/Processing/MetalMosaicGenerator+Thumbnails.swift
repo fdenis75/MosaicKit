@@ -109,8 +109,9 @@ extension MetalMosaicGenerator {
         let directory = requestedDirectory ?? fileManager.temporaryDirectory
             .appendingPathComponent("MosaicKitThumbnails", isDirectory: true)
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
-        let didStartAccessing = directory.startAccessingSecurityScopedResource()
-        defer { if didStartAccessing { directory.stopAccessingSecurityScopedResource() } }
+        // The directory may not exist yet; the grant comes from its nearest existing ancestor.
+        let access = SecurityScopedAccess.begin(for: directory)
+        defer { access.stop() }
         try fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
 
         let baseName = video.outputBaseName

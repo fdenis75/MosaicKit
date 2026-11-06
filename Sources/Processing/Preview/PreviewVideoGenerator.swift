@@ -105,7 +105,7 @@ public actor PreviewVideoGenerator {
             let outputDir = config.generateOutputDirectory(for: video)
             let filename = config.generateFilename(for: video)
             let existingURL = outputDir.appendingPathComponent(filename)
-            if FileManager.default.fileExists(atPath: existingURL.path) {
+            if SecurityScopedAccess.withAccess(to: outputDir, { FileManager.default.fileExists(atPath: existingURL.path) }) {
                 logger.info("Preview already exists, skipping generation: \(existingURL.path)")
                 handler?(PreviewGenerationProgress(video: video, progress: 1, status: .completed, outputURL: existingURL))
                 return existingURL
@@ -1137,13 +1137,6 @@ struct PreviewGenerationLogic {
         defer { transaction.discard() }
         let outputURL = transaction.stagingURL
         
-        let didStartAccessing = outputURL.startAccessingSecurityScopedResource()
-        defer {
-            if didStartAccessing {
-                outputURL.stopAccessingSecurityScopedResource()
-            }
-        }
-        
         // Remove existing file if present
         if FileManager.default.fileExists(atPath: outputURL.path) {
             try? FileManager.default.removeItem(at: outputURL)
@@ -1303,13 +1296,10 @@ struct PreviewGenerationLogic {
         static func prepareOutputURL(config: PreviewConfiguration, video: VideoInput) throws -> URL {
             let outputDirectory = config.generateOutputDirectory(for: video)
             
-            let didStartAccessingDir = outputDirectory.startAccessingSecurityScopedResource()
-            defer {
-                if didStartAccessingDir {
-                    outputDirectory.stopAccessingSecurityScopedResource()
-                }
-            }
-            
+            // The directory may not exist yet; the grant comes from its nearest existing ancestor.
+            let access = SecurityScopedAccess.begin(for: outputDirectory)
+            defer { access.stop() }
+
             do {
                 try FileManager.default.createDirectory(
                     at: outputDirectory,
@@ -1369,13 +1359,6 @@ struct PreviewGenerationLogic {
         let transaction = try OutputTransaction(finalURL: finalURL, overwrite: config.overwrite)
         defer { transaction.discard() }
         let outputURL = transaction.stagingURL
-
-        let didStartAccessingFile = outputURL.startAccessingSecurityScopedResource()
-        defer {
-            if didStartAccessingFile {
-                outputURL.stopAccessingSecurityScopedResource()
-            }
-        }
 
         // Remove existing file if present
         if FileManager.default.fileExists(atPath: outputURL.path) {
