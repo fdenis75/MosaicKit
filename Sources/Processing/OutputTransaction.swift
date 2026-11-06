@@ -6,20 +6,33 @@ internal struct OutputTransaction: Sendable {
     internal let finalURL: URL
     internal let stagingURL: URL
     private let overwrite: Bool
+    /// Security-scoped grant for the output location, held from creation until `discard()`/`commit()`
+    /// so the directory creation, the encoder's writes and the publish all run inside it.
+    private let access: SecurityScopedAccess
 
     internal init(finalURL: URL, overwrite: Bool = true) throws {
         self.finalURL = finalURL
         self.overwrite = overwrite
         let directory = finalURL.deletingLastPathComponent()
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        // The directory usually doesn't exist yet, so the grant comes from its nearest existing ancestor.
+        let access = SecurityScopedAccess.begin(for: directory)
+        self.access = access
+        do {
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        } catch {
+            access.stop()
+            throw error
+        }
         self.stagingURL = directory.appendingPathComponent(".mosaickit-\(UUID().uuidString).\(finalURL.pathExtension)")
     }
 
     internal func discard() {
         try? FileManager.default.removeItem(at: stagingURL)
+        access.stop()
     }
 
     internal func commit() throws {
+        // Publication happens inside the grant; `discard()` (always deferred by callers) releases it.
         try Task.checkCancellation()
         let attributes = try FileManager.default.attributesOfItem(atPath: stagingURL.path)
         guard let size = attributes[.size] as? NSNumber, size.int64Value > 0 else {

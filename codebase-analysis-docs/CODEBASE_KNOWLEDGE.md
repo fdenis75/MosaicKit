@@ -461,7 +461,7 @@ register:
 2. **Mosaic output-dimension limit.** `MetalMosaicGenerator` rejects `config.width > 16_384`
    inside generation (not in `validate()`) and videos shorter than 5 s, both as
    `MosaicError.invalidVideo`.
-   [[F:Sources/Processing/MetalMosaicGenerator.swift#321-324#612360ab]]
+   [[F:Sources/Processing/MetalMosaicGenerator.swift#323-326#b20024b4]]
 3. **Preview skip-if-exists never matches in default naming mode.** With `fullPathInName ==
    false` and no `filenameTemplate`, `PreviewConfiguration.generateFilename` embeds a
    run-time timestamp (`yyyy-MM-dd_HH-mm-ss`). As a result, `overwrite == false` never finds an
@@ -639,9 +639,9 @@ Full sequence including the coordinator: `codebase-analysis-docs/assets/mosaic-s
 #### Stage-by-stage table
 
 The stage body is `MetalMosaicGenerator.generate`
-[[F:Sources/Processing/MetalMosaicGenerator.swift#100-236#612360ab]]. Since S-2, stages 2–5 run in
+[[F:Sources/Processing/MetalMosaicGenerator.swift#100-238#b20024b4]]. Since S-2, stages 2–5 run in
 `planMosaic`, stages 6–12 in `composeMosaic` and stage 14 in `exportAnimation`
-[[F:Sources/Processing/MetalMosaicGenerator.swift#299-624#612360ab]]. `generateMosaicImage` calls
+[[F:Sources/Processing/MetalMosaicGenerator.swift#301-626#b20024b4]]. `generateMosaicImage` calls
 the same `planMosaic` + `composeMosaic`, so both entry points compose the same image.
 
 | # | Stage | Code | Runs on | Key facts |
@@ -659,7 +659,7 @@ the same `planMosaic` + `composeMosaic`, so both entry points compose the same i
 | 10 | Compositing | `generateMosaicStream` [[F:Sources/Processing/MetalImageProcessor.swift#864-998#04cfcb88]], `processBatch` @L1000, `renderFrame` @L1077 | nonisolated async | One setup command buffer (fill + header), awaited. Frames are then rendered in **20-frame command buffers**, committed without waiting. Each frame: `createTexture(from: CGImage)`, `scaleTexture` if the size differs, `compositeTexture`, optional `addBorder`. The shadow path draws a CPU `CGContext` shadow and composites that. Duplicate or out-of-range indices throw. **All** positions must be filled, or it throws "Missing mosaic frames". |
 | 11 | GPU sync + readback | `synchronizeGPU` @L1058, `createCGImage(from:)` | nonisolated | An empty barrier command buffer is committed last and awaited. GPU errors from completion handlers are collected in `CommandBufferErrorState` and rethrown as `MetalProcessorError.commandBufferExecutionFailed`. |
 | 12 | Have the macOS stall retry wait until the app is active again, as iOS waits for foreground, and document background exporting for apps. Done: mechanism reproduced (background scheduling, background QoS cap; #46), CI attributed to the runner VM (known issue there, #47) | I-26 | A stalled export fails after 120 s and retries while still throttled | S |
-| 13 | Encode + commit | `saveMosaic` [[F:Sources/Processing/MetalMosaicGenerator.swift#730-789#612360ab]] | generator actor (synchronous CPU) | Output path = `generateOutputDirectory` + `generateFilename`. Encodes through `ImageFileWriter.write` (shared with thumbnail export): `CGImageDestination` (HEIF embeds a thumbnail, `HasAlpha = false`), or the injected WebP encoder, into the staging file. Then `OutputTransaction.commit()`. |
+| 13 | Encode + commit | `saveMosaic` [[F:Sources/Processing/MetalMosaicGenerator.swift#732-776#b20024b4]] | generator actor (synchronous CPU) | Output path = `generateOutputDirectory` + `generateFilename`. Encodes through `ImageFileWriter.write` (shared with thumbnail export): `CGImageDestination` (HEIF embeds a thumbnail, `HasAlpha = false`), or the injected WebP encoder, into the staging file. Then `OutputTransaction.commit()`. |
 | 14 | Animation | `exportAnimation` (`extractFramesForGif` + `AnimatedGifGenerator.save`), shared by the `.gifOnly`, `.withMosaic` and skip-if-exists backfill sites | generator actor → global | This is a **second, full decode pass** with a separate generator (`ThumbnailProcessor.forEachFrame`, shared with the public thumbnail extraction): `.large` caps at 1280×720, `.small` at 960×540. Any failed frame throws. `frameDelay = 1 / gifFps`. |
 
 **Progress reported to handlers** (`MosaicGenerationProgress.progress`):
@@ -699,7 +699,7 @@ Full sequence including the coordinator retry: `codebase-analysis-docs/assets/pr
 #### Stage-by-stage table
 
 The body is `PreviewGenerationLogic.generate`
-[[F:Sources/Processing/Preview/PreviewVideoGenerator.swift#261-396#ed9140ae]].
+[[F:Sources/Processing/Preview/PreviewVideoGenerator.swift#261-396#0b1af0d3]].
 
 | # | Stage | Code | Key facts |
 |---|---|---|---|
@@ -709,10 +709,10 @@ The body is `PreviewGenerationLogic.generate`
 | 3 | Parameters | `PreviewConfiguration.extractCount(forVideoDuration:)` / `calculateExtractParameters` | `count = base(density) + k·ln(duration)`, with k = 8 if duration > 30 min, else 4. Base counts: XXL 4, XL 8, L 12, **M 16**, S 24, XS 32, XXS 48; custom = 16 × factor. `extractDuration = targetDuration / count`. If `minimumExtractDuration` is set and not met, playback speeds up (capped by `maximumPlaybackSpeed`). |
 | 4 | Timestamps | `calculateExtractTimestamps` | Same 20/60/20 weighting over 5–95 % as mosaics. Starts are clamped so each extract fits. Near-duplicates (< 10 ms apart) are removed, so the actual count can be **lower** than planned. |
 | 5 | ffmpeg preflight | `FFmpegEncoder.validate(binaryPath:)` | Resolves symlinks, then checks the file exists and is executable. Runs **before** composition. |
-| 6 | Compose | `composeVideoSegments` [[F:Sources/Processing/Preview/PreviewVideoGenerator.swift#605-772#ed9140ae]] | One composition video track (source `preferredTransform` copied) plus an optional audio track. For each segment: insert video, then audio, then `composition.scaleTimeRange` if speed ≠ 1. Segments are validated. Audio mix uses `.timeDomain` pitch correction only when speed ≠ 1. Overlay cues (first ≤ 1 s of each extract) are collected. |
-| 7 | Video composition | `buildVideoComposition` [[F:Sources/Processing/Preview/PreviewVideoGenerator.swift#774-861#ed9140ae]] | Target size = the preset's forced size (native) or the ffmpeg `maxResolution`; otherwise the `exportMaxResolution` cap, swapped for portrait. Only downscales. Returns **`nil`** when no scaling and no overlays are needed, so no render pass happens. Always uses the legacy `AVMutableVideoComposition` path on purpose (the code comment explains that the new Configuration API drops the scale transform). |
-| 8a | Export `.native` | `exportWithNativeSession` [[F:Sources/Processing/Preview/PreviewVideoGenerator.swift#1426-1545#ed9140ae]] — **`@MainActor`** | `AVAssetExportSession(preset: effectiveExportPreset)`, `allowsParallelizedExport` (macOS), `shouldOptimizeForNetworkUse`. Progress comes from `states(updateInterval: 5)`. The export itself runs in `Task.detached(priority: .userInitiated)`. |
-| 8b | Export `.sjs` | `exportWithSJSSession` [[F:Sources/Processing/Preview/PreviewVideoGenerator.swift#1116-1299#ed9140ae]] | `SJSAssetExportSession.ExportSession`. The codec comes from the `SjSExportPreset` or, when it is `nil`, from `PreviewQualityTier(quality:)` (`videoSettings(for:presetname:renderSize:)`); the audio bitrate is a fixed 128 kbps. The render size is capped by `exportMaxResolution`. Runs as a **stored** detached task so it can be cancelled (SJS has no `cancelExport`). |
+| 6 | Compose | `composeVideoSegments` [[F:Sources/Processing/Preview/PreviewVideoGenerator.swift#605-772#0b1af0d3]] | One composition video track (source `preferredTransform` copied) plus an optional audio track. For each segment: insert video, then audio, then `composition.scaleTimeRange` if speed ≠ 1. Segments are validated. Audio mix uses `.timeDomain` pitch correction only when speed ≠ 1. Overlay cues (first ≤ 1 s of each extract) are collected. |
+| 7 | Video composition | `buildVideoComposition` [[F:Sources/Processing/Preview/PreviewVideoGenerator.swift#774-861#0b1af0d3]] | Target size = the preset's forced size (native) or the ffmpeg `maxResolution`; otherwise the `exportMaxResolution` cap, swapped for portrait. Only downscales. Returns **`nil`** when no scaling and no overlays are needed, so no render pass happens. Always uses the legacy `AVMutableVideoComposition` path on purpose (the code comment explains that the new Configuration API drops the scale transform). |
+| 8a | Export `.native` | `exportWithNativeSession` [[F:Sources/Processing/Preview/PreviewVideoGenerator.swift#1409-1545#0b1af0d3]] — **`@MainActor`** | `AVAssetExportSession(preset: effectiveExportPreset)`, `allowsParallelizedExport` (macOS), `shouldOptimizeForNetworkUse`. Progress comes from `states(updateInterval: 5)`. The export itself runs in `Task.detached(priority: .userInitiated)`. |
+| 8b | Export `.sjs` | `exportWithSJSSession` [[F:Sources/Processing/Preview/PreviewVideoGenerator.swift#1116-1292#0b1af0d3]] | `SJSAssetExportSession.ExportSession`. The codec comes from the `SjSExportPreset` or, when it is `nil`, from `PreviewQualityTier(quality:)` (`videoSettings(for:presetname:renderSize:)`); the audio bitrate is a fixed 128 kbps. The render size is capped by `exportMaxResolution`. Runs as a **stored** detached task so it can be cancelled (SJS has no `cancelExport`). |
 | 8c | Export `.ffmpeg` | `FFmpegEncoder.encode` (`@MainActor`) → `exportPassthrough` → `runFFmpeg` | Temp dir: `ffmpegTempFolder`, or `$TMPDIR/MosaicKitFFmpeg/<UUID>/` (auto-deleted). Requires **≥ 500 MB** free on the temp volume. Stage 1 exports a `.mov` (Passthrough preset, or **HighestQuality when an audio mix exists**; the `videoComposition` is intentionally not applied). Stage 2 runs `Process` with the arguments from `FFmpegEncodingOptions.buildArguments` (no shell). Progress is parsed from `time=` in stderr; the last 8 KB of stderr is kept for errors. |
 | 9 | Commit | `OutputTransaction` (all three exporters) | Staging file sits next to the final file (same volume, so the rename is atomic). |
 
@@ -912,9 +912,13 @@ graph LR
 
 **File system, sandboxing, security**
 
-- *Security-scoped URLs:* `startAccessingSecurityScopedResource()` brackets appear at 10 sites
-  (input discovery/inspection, output directories, staging files). Each is balanced with `defer`.
-- *Atomic output:* `OutputTransaction` [[F:Sources/Processing/OutputTransaction.swift#1-62#e5da241b]].
+- *Security-scoped URLs:* input sites (discovery, inspection, thumbnails) bracket
+  `startAccessingSecurityScopedResource()` directly with `defer`. Output sites go through
+  `SecurityScopedAccess.begin(for:)` (`Sources/Processing/SecurityScopedAccess.swift`), which walks up to the
+  nearest existing ancestor, because the call returns `false` for a directory or file that doesn't exist yet
+  (I-31). `OutputTransaction` holds the grant from `init` until `discard()`, so directory creation, encoder
+  writes and publication run inside it.
+- *Atomic output:* `OutputTransaction` [[F:Sources/Processing/OutputTransaction.swift#1-75#871a1c23]].
   - Staging name: `.mosaickit-<UUID>.<ext>` in the destination directory.
   - Commit rejects empty files.
   - `overwrite == true`: `rename(2)`, which atomically replaces.
@@ -1907,6 +1911,7 @@ robustness, performance, or cosmetic.
 | I-28 | F2/F5 | **Per-item progress jumps and runs backwards.** `.creatingMosaic` was mapped as `0.7 + 0.299 × p` with p starting at 0.15, so the bar went 0 → ~0.745, climbed to ~0.999, then fell to 0.9 when `.savingMosaic` reported. | **Fixed.** `composeMosaic` maps the stream onto 0.02 → 0.9 (`0.02 + 0.88 × s`), so `.savingMosaic` (0.9, 0.999) continues it. Tessera also keeps a per-item high-water mark in `ProgressUpdatePump`. | Low | `MetalMosaicGenerator.composeMosaic`, §2.3 | Done. |
 | I-29 | F5 | **Header `.filePath` always prints the full path.** A batch shares one `MosaicConfiguration`, so a caller could not show only the file name (a per-video `.custom` field is impossible). | **Fixed.** New `HeaderConfig.filePathShowsFileNameOnly` (default `false`, `decodeIfPresent`); `ThumbnailProcessor.formatHeaderField` prints `lastPathComponent` when set. | Low | `OverlayConfigurationTests`, §3 F5 | Done. |
 | I-30 | F2/F12 | **Remote download links fail.** An `https` URL with no file extension served as `application/octet-stream` (e.g. `https://host/download/?fid=…`) could not be opened ("Cannot Open"), its outputs went next to the URL (not a folder), every such link was named `download`, so skip-if-exists returned another video's mosaic, and file size and bitrate were empty. | **Fixed.** `RemoteVideoSupport.makeAsset` adds `AVURLAssetOverrideMIMETypeKey: "video/mp4"` for remote URLs without a known video extension (every asset site); `VideoInput.outputBaseName` names those outputs from the supplied `title` (reduced to one path component: separators → `_`, leading dots dropped, so a title can't escape the output directory) or `<stem>-<sha8>`; `validateOutputLocation(for:)` (mosaic and preview) throws before any I/O when the output folder would be remote; the size comes from a one-byte range request. Local files and extension-bearing remote URLs keep their names. **Tests:** `RemoteVideoSourceTests`. | Medium | Server response `Content-Type: application/octet-stream`, no `Content-Disposition`; file starts with `ftyp mp42` | Done. A non-MP4/QuickTime container behind an extensionless link still fails (the override says MP4). |
+| I-31 | F2/F12 | **Sandboxed output fails when the output directory doesn't exist yet.** `startAccessingSecurityScopedResource()` returns `false` for a path that doesn't exist, so `prepareOutputURL` (preview), `saveMosaic`, the thumbnail writer and the staging-file brackets got no grant, and `prepareOutputURL` released its grant before the encoder wrote. | **Fixed** | High (sandboxed apps) | Sandbox on macOS, user-picked root, `{root}/{service}/{hash}/` not yet created | `SecurityScopedAccess.begin(for:)` on the nearest existing ancestor; `OutputTransaction` owns the grant until `discard()` |
 
 ### 4.3 Performance: hotspots & budgets
 
