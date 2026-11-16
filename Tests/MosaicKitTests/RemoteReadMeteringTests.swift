@@ -21,11 +21,10 @@ struct RemoteReadMeteringTests {
     }
 
     @Test func localOperationsAreNotRecorded() async throws {
-        let before = RemoteReadLedger.shared.records.count
-        let url = FileManager.default.temporaryDirectory.appendingPathComponent("x.mp4")
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("local-\(UUID().uuidString).mp4")
         let value = try await RemoteReadMeter.measure(url: url, operation: "test") { 42 }
         #expect(value == 42)
-        #expect(RemoteReadLedger.shared.records.count == before)
+        #expect(!RemoteReadLedger.shared.records.contains { $0.fileName == url.lastPathComponent })
     }
 
     @Test func counterDeltaIsMonotonic() {
