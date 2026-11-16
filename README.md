@@ -23,6 +23,12 @@ A high-performance Swift package for generating video mosaics with Metal-acceler
 
 - Nothing yet. Add a line here for every change; output-naming and location changes (📁) also get a **Behavior changes** note.
 
+## New in 1.16.0
+
+Minor release on top of 1.15.2: remote read metering. Nothing is removed or renamed, and output names do not change. Upgrading from 1.15.x? [MIGRATING-TO-1.16.md](MIGRATING-TO-1.16.md) lists what can affect an app.
+
+- **Remote read metering (#92).** When a source is remote (an `http(s)` URL, or a file on an SMB/NFS/AFP/WebDAV volume), MosaicKit logs the bytes received while it was processed, per operation and file and as a batch total, in the `com.mosaicKit` / `remote-io` OSLog category. New public API: `RemoteSourceInfo`, `RemoteReadRecord`, `RemoteReadFileTotal` and `RemoteReadLedger.shared`. The figures come from system counters (see [Remote read metering](#remote-read-metering) for what is exact and what is estimated). `MOSAICKIT_REMOTE_IO=0` disables it.
+
 ## New in 1.15.1
 
 Patch release on top of 1.15.0: test-suite housekeeping only. No library code, public API, configuration or output name changes, so there is no migration note.
