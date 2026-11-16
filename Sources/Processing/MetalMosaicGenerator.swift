@@ -98,6 +98,12 @@ public actor MetalMosaicGenerator: MosaicGeneratorProtocol {
     ///   - config: The configuration for mosaic generation
     /// - Returns: The URL of the generated mosaic image
     public func generate(for video: VideoInput, config: MosaicConfiguration, forIphone: Bool = false) async throws -> URL {
+        try await RemoteReadMeter.measure(url: video.url, operation: "mosaic") {
+            try await generateUnmetered(for: video, config: config, forIphone: forIphone)
+        }
+    }
+
+    private func generateUnmetered(for video: VideoInput, config: MosaicConfiguration, forIphone: Bool) async throws -> URL {
         signposter.emitEvent("generate")
         let intervalState = signposter.beginInterval("generate")
         defer { signposter.endInterval("generate", intervalState) }
@@ -244,6 +250,12 @@ public actor MetalMosaicGenerator: MosaicGeneratorProtocol {
     ///   - forIphone: Whether to use iPhone-optimized layout
     /// - Returns: The generated mosaic as a CGImage
     public func generateMosaicImage(for video: VideoInput, config: MosaicConfiguration, forIphone: Bool = false) async throws -> CGImage {
+        try await RemoteReadMeter.measure(url: video.url, operation: "mosaic-image") {
+            try await generateMosaicImageUnmetered(for: video, config: config, forIphone: forIphone)
+        }
+    }
+
+    private func generateMosaicImageUnmetered(for video: VideoInput, config: MosaicConfiguration, forIphone: Bool) async throws -> CGImage {
         signposter.emitEvent("generateMosaicImage")
         let intervalState = signposter.beginInterval("generateMosaicImage")
         defer { signposter.endInterval("generateMosaicImage", intervalState) }

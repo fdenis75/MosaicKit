@@ -264,6 +264,17 @@ struct PreviewGenerationLogic {
         progressHandler: @escaping @Sendable (Double, PreviewGenerationStatus, URL?, String?) -> Void,
         cancellationCheck: @escaping @Sendable () -> Bool
     ) async throws -> URL {
+        try await RemoteReadMeter.measure(url: video.url, operation: "preview") {
+            try await generateUnmetered(for: video, config: config, progressHandler: progressHandler, cancellationCheck: cancellationCheck)
+        }
+    }
+
+    private static func generateUnmetered(
+        for video: VideoInput,
+        config: PreviewConfiguration,
+        progressHandler: @escaping @Sendable (Double, PreviewGenerationStatus, URL?, String?) -> Void,
+        cancellationCheck: @escaping @Sendable () -> Bool
+    ) async throws -> URL {
         logger.info("Starting preview generation logic for \(video.title)")
 
         // On macOS, the system throttles or briefly suspends background processes,

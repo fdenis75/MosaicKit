@@ -1260,3 +1260,14 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 ## Support
 
 For issues, questions, or feature requests, please open an issue on GitHub.
+
+## Remote read metering
+
+When a source is remote (an `http(s)` URL, or a file on an SMB/NFS/AFP/WebDAV volume, detected with
+`URLResourceValues.volumeIsLocal` and `statfs`), MosaicKit logs the bytes received while it was
+processed, per file and per batch, in the `com.mosaicKit` / `remote-io` OSLog category (plus a
+signpost event). `RemoteReadLedger.shared.records` and `.fileTotals` expose the same data. The figures
+come from system counters, not from AVFoundation: network bytes are the 64-bit interface counters
+(include protocol overhead and other apps' traffic, split equally between overlapping files; the
+batch total is exact for the interface). Process disk reads do not include SMB/NFS reads. Set
+`MOSAICKIT_REMOTE_IO=0` to disable.
