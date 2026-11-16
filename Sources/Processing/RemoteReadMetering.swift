@@ -77,6 +77,7 @@ struct IOCounterSnapshot: Sendable {
                           processDiskBytesRead: lhs.processDiskBytesRead &- rhs.processDiskBytesRead)
     }
 
+    #if os(macOS)
     /// `sysctl(NET_RT_IFLIST2)` returns `if_data64`, whose byte counters don't wrap at 4 GiB the
     /// way the 32-bit counters of `getifaddrs` do.
     private static func readNetworkBytesIn() -> UInt64 {
@@ -113,6 +114,29 @@ struct IOCounterSnapshot: Sendable {
         }
         return status == 0 ? usage.ri_diskio_bytesread : 0
     }
+    #else
+    /// iOS and Mac Catalyst have neither `NET_RT_IFLIST2` nor `libproc`: sum the 32-bit
+    /// `getifaddrs` counters (they wrap at 4 GiB, so a very long operation can under-report)
+    /// and report no process disk reads.
+    private static func readNetworkBytesIn() -> UInt64 {
+        var list: UnsafeMutablePointer<ifaddrs>?
+        guard getifaddrs(&list) == 0, let first = list else { return 0 }
+        defer { freeifaddrs(list) }
+        var total: UInt64 = 0
+        var cursor: UnsafeMutablePointer<ifaddrs>? = first
+        while let entry = cursor {
+            let info = entry.pointee
+            if let address = info.ifa_addr, address.pointee.sa_family == UInt8(AF_LINK),
+               (info.ifa_flags & UInt32(IFF_LOOPBACK)) == 0, let data = info.ifa_data {
+                total &+= UInt64(data.assumingMemoryBound(to: if_data.self).pointee.ifi_ibytes)
+            }
+            cursor = info.ifa_next
+        }
+        return total
+    }
+
+    private static func readProcessDiskBytes() -> UInt64 { 0 }
+    #endif
 }
 
 // MARK: - Records

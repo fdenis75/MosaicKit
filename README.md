@@ -23,6 +23,10 @@ A high-performance Swift package for generating video mosaics with Metal-acceler
 
 - Nothing yet. Add a line here for every change; output-naming and location changes (📁) also get a **Behavior changes** note.
 
+## New in 1.16.1
+
+Patch release: fixes the iOS build of 1.16.0, which failed because `NET_RT_IFLIST2` and `proc_pid_rusage` do not exist in the iOS SDK. Remote read metering now uses those on macOS only; on iOS and Mac Catalyst it sums the 32-bit `getifaddrs` counters (they wrap at 4 GiB) and reports no process disk reads. **Use 1.16.1 instead of 1.16.0 on iOS.** No API change, no migration note.
+
 ## New in 1.16.0
 
 Minor release on top of 1.15.2: remote read metering. Nothing is removed or renamed, and output names do not change. Upgrading from 1.15.x? [MIGRATING-TO-1.16.md](MIGRATING-TO-1.16.md) lists what can affect an app.
@@ -343,7 +347,7 @@ Add MosaicKit to your `Package.swift`:
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/fdenis75/MosaicKit.git", from: "1.15.1")
+    .package(url: "https://github.com/fdenis75/MosaicKit.git", from: "1.16.1")
 ]
 ```
 
