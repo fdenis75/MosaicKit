@@ -25,7 +25,9 @@ public struct VideoSource: Codable, Hashable, Sendable {
         }
         let scoped = url.startAccessingSecurityScopedResource()
         defer { if scoped { url.stopAccessingSecurityScopedResource() } }
-        let values = try await VideoMetadataExtractor().extractMetadataValues(from: url)
+        let values = try await RemoteReadMeter.measure(url: url, operation: "inspect") {
+            try await VideoMetadataExtractor().extractMetadataValues(from: url)
+        }
         try Task.checkCancellation()
         let input = VideoInput(
             canonicalID: supplied.id, url: url, title: supplied.title,
