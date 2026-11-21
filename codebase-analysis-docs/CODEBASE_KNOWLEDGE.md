@@ -432,6 +432,8 @@ Default values worth knowing:
 | `MIGRATING-TO-1.13.md` | High | Upgrade guide from 1.12.x to 1.13.0 (additive: `HeaderConfig.filePathShowsFileNameOnly`; `.creatingMosaic` progress now 0.02 → 0.9 and monotonic) |
 | `MIGRATING-TO-1.14.md` | High | Upgrade guide from 1.13.x to 1.14.0 (additive: thumbnail extraction on `MetalMosaicGenerator`, `ThumbnailExtractionOptions`; no behavior change for mosaics) |
 | `MIGRATING-TO-1.15.md` | High | Upgrade guide from 1.14.x to 1.15.0 (remote download links, I-30: MIME override, `VideoInput.outputBaseName`, `validateOutputLocation(for:)`; 📁 names change only for extensionless remote URLs) |
+| `MIGRATING-TO-1.16.md` | High | Upgrade guide from 1.15.x to 1.16.0 (remote read metering: `RemoteReadLedger`, `RemoteSourceInfo`; additive) |
+| `MIGRATING-TO-1.17.md` | High | Upgrade guide from 1.16.x to 1.17.0 (opt-in `reduceSourceReads`, I-33: range loader + keyframe snapping, invalid with `useAccurateTimestamps`; `minimal()`; no output name change) |
 | `CLAUDE.md` / `AGENTS.md` | High (rewritten 2026-09-26) | Both files are identical except for the title and first paragraph, and point agents to this document first. Earlier errors (swift-log, "no Makefile", `swift run` examples, nonexistent workflows, `Models/AspectRatio.swift`, Core Graphics/vImage, `VideoFormat` as the mosaic format) are corrected. Keep the two files in sync. |
 | `MosaicKit-DeepDive.md` | **Stale — do not trust architecture sections** | Describes the removed dual engine (`CoreGraphicsMosaicGenerator`, `MosaicGeneratorFactory`, vImage buffer pool) and a `.gif` still format. The coordinator concurrency formula it gives is for previews only, and the cap of 8 it quotes is really 2. |
 | `spec.md` | **Design intent, only partly implemented** | Describes a `GenerationRequest/Plan`, `JobHandle/BatchHandle`, checkpoint ledger, and a single processing-service actor. None of these exist. What does exist: `VideoSource`, `OutputTransaction`, validation, `GenerationJobController` (the spec's `MosaicFrameSource` shipped in 1.7.0, was reverted, and was removed in S-1, #38). |
@@ -2593,6 +2595,15 @@ let export = try await MetalMosaicGenerator().exportThumbnails(for: video, optio
 let remote = try await VideoSource(url: downloadLink, title: "Holiday").inspect()  // title names the outputs
 cfg.outputdirectory = outDir                                // required: a remote URL has no folder
 _ = try await MetalMosaicGenerator().generate(for: remote, config: cfg)  // → outDir/<hash>/Holiday_<hash>.heic
+
+// 12) Download less from a remote source (I-33): range loader + nearest-keyframe frames
+var lowData = cfg
+lowData.reduceSourceReads = true            // invalid with useAccurateTimestamps; server must honor Range
+lowData.useAccurateTimestamps = false
+_ = try await MetalMosaicGenerator().generate(for: remote, config: lowData)  // same output path as cfg
+
+// 13) Output with nothing drawn from metadata (no header, solid background, no ColorDNA)
+_ = try await MetalMosaicGenerator().generate(for: remote, config: cfg.minimal())
 ```
 
 ```swift
