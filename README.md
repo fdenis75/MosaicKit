@@ -21,7 +21,13 @@ A high-performance Swift package for generating video mosaics with Metal-acceler
 
 ## Unreleased
 
-- **Fix: `.ffmpeg` preview export no longer hangs when run from a terminal (I-32).** ffmpeg inherited the terminal as stdin and was stopped by job control at startup, so CLI runs froze at about 30 % until the stall watchdog failed them. MosaicKit now gives ffmpeg `/dev/null` as stdin and passes `-nostdin`. No API change.
+- Nothing yet. Add a line here for every change; output-naming and location changes (📁) also get a **Behavior changes** note.
+
+## New in 1.16.2
+
+Patch release: fixes `.ffmpeg` preview export from a terminal. No public API, configuration or output name changes, so there is no migration note.
+
+- **`.ffmpeg` preview export no longer hangs when run from a terminal (I-32).** ffmpeg inherited the terminal as stdin and was stopped by job control at startup, so CLI runs froze at about 30 % until the stall watchdog failed them. MosaicKit now gives ffmpeg `/dev/null` as stdin and passes `-nostdin`. No API change.
 
 ## New in 1.16.1
 
@@ -347,7 +353,7 @@ Add MosaicKit to your `Package.swift`:
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/fdenis75/MosaicKit.git", from: "1.16.1")
+    .package(url: "https://github.com/fdenis75/MosaicKit.git", from: "1.16.2")
 ]
 ```
 
