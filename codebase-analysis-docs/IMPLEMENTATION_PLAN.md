@@ -164,6 +164,7 @@ Every PR updates its row here (status) and the matching §4.2 / §6.1 entries in
 | U-3 | uneven tiles: per-size frame extraction ⚡ | done; A/B/A gate in §8.1 | |
 | U-4 | uneven tiles: options (optional) | planned | |
 | U-5 | uneven tiles: hero emphasis and fallback variant (optional) | planned | |
+| R-1 | low-data reads: `reduceSourceReads` (range loader + keyframe snapping), I-33 ⚡ | done; A/B/A gate passed 2026-11-21 (flag off: every median within ±4 % of the closer `main` run; §8.1); byte measurements in KB §F2 | |
 
 ### 8.1 Benchmark baseline
 
@@ -443,3 +444,23 @@ PR title.
 | A-37 | 2026-10-15 | U-1 | `UnevenTilePacker` defines the seed-score terms the spec leaves open: quota miss = missed larger tiles / requested; thirds deviation = max \|share − 1/3\| over the column and row thirds of larger-tile cells; imbalance = (\|left − right\| + \|top − bottom\|) / (2 × larger-tile cells); adjacent pairs = larger-tile pairs sharing an edge / larger tiles. When the 120 px unit floor binds, the packer aims at the cells of the widest allowed lattice (the count falls, the aspect is kept); when the height limit binds it keeps the count and the aspect misses. Both set `Plan.capped`. It reproduces the spec's §4.2 M example and §8 case 4 (22 × 7, 106 tiles) tile for tile; four golden layouts are pinned. Release build on the maintainer's Mac: 0.06 ms at N = 107, 0.43 ms at N = 800, 0.85 ms at N = 5000 | Two-way until released (then frozen, Q-U7) | The spec's measurements came from a prototype that had no caps; aiming at reachable cells keeps the canvas aspect when columns are capped |
 | A-38 | 2026-10-16 | U-2 | `calculateLayout` names every `LayoutType` case except the deprecated `.dynamic`, which stays in a `default:` (naming it would add a deprecation warning; `resolved(_:logger:)` maps it to `.custom` before the switch). The largest span is read from the density *factor* (< 0.625 → 2, < 1.5 → 3, < 3.5 → 4, else 5), so custom densities get the nearest level. The reserve passed to `.uneven` is `fixedGridReservedHeight`, extended to cover a fixed header taller than its 0.10·W + 32 estimate instead of a new `validate()` rule (spec §8 case 13); for `.fixedGrid` this only changes plans that previously exceeded the texture limit and threw | Two-way | Keeps the switch warning-free while no other case can fall through to `.custom`; reserving the real header height accepts configurations a validation rule would reject |
 | A-39 | 2026-10-16 | U-3 | Per-size extraction only splits a layout whose largest cell is more than 2.05× the smallest (in practice only `.uneven`); `.custom` (ratio ≤ 2.0), `.classic`, `.iphone`, `.auto` and `.fixedGrid` keep exactly one generator, so their pixels and their hot path do not change (the spec allowed applying it to `.custom` too). Groups decode in parallel, one feeder task each with its own 8-frame labeling window (decoding them one after the other missed the 1.15× gate at 5120-M); frames still carry their global index | Two-way | A 2× shrink is what `.custom` already ships; leaving the shared path untouched for existing layouts makes their ⚡ gate a no-op by construction |
+
+#### R-1 A/B/A (2026-11-21, `reduceSourceReads` off)
+
+Same machine, one session, the ten `*_medium.mp4` benchmark videos (459 MB), 3 timed runs.
+Medians in seconds; A1 and A2 are `main@3b44ad5`, B is `feat/low-data-reads`.
+
+| Scenario | Conc. | A1 | B | A2 |
+|---|---|---:|---:|---:|
+| mosaic-5120-M | 1 | 14.24 | 13.09 | 13.25 |
+| mosaic-5120-M | auto | 8.31 | 7.82 | 7.82 |
+| mosaic-10000-XS | 1 | 36.41 | 33.74 | 35.13 |
+| mosaic-10000-XS | auto | 25.94 | 24.54 | 25.49 |
+| anim-gif-small | 1 | 22.03 | 17.55 | 17.59 |
+| anim-gif-small | auto | 11.58 | 11.35 | 11.24 |
+| anim-webp-small | 1 | 35.09 | 31.88 | 31.75 |
+| anim-webp-small | auto | 36.15 | 25.56 | 25.86 |
+
+A1 was the cold first run (outliers of 930 s and 362 s in the WebP rows); B and A2 agree within
+4 %. In all three runs `382582_medium` failed `mosaic-10000-XS` with "Frame extraction failed"
+(I-37).

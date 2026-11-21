@@ -168,6 +168,16 @@ let mosaicURL = try await MetalMosaicGenerator().generate(for: input, config: co
 Frames are fetched over the network as the mosaic is built, so a local copy is faster for large
 files or slow links.
 
+To download less, turn on ``MosaicConfiguration/reduceSourceReads``. MosaicKit then reads the
+source with small byte-range requests made only when a frame needs them, and takes every frame
+from the nearest keyframe. A mosaic of a 10-minute 1080p source drops from about 35 MB to
+17 MB. Neighboring tiles can show the same frame when keyframes are far apart, and the option
+can't be combined with `useAccurateTimestamps`. The server must support byte-range requests.
+
+```swift
+config.reduceSourceReads = true
+```
+
 ### Cancellation, pause, and retry
 
 Coordinator methods support cancelling one video (`cancelGeneration(for:)`) or an entire batch

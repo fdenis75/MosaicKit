@@ -27,6 +27,10 @@ extension MosaicConfiguration {
         guard gifFps.isFinite, gifFps > 0, gifFps <= 240 else {
             throw MosaicError.invalidConfiguration("Animation frame rate must be between zero (exclusive) and 240")
         }
+        guard !(reduceSourceReads && useAccurateTimestamps) else {
+            throw MosaicError.invalidConfiguration(
+                "reduceSourceReads takes every frame from the nearest keyframe, so it can't be combined with useAccurateTimestamps")
+        }
         guard layout.spacing.isFinite, layout.spacing >= 0,
               layout.visual.borderWidth.isFinite, layout.visual.borderWidth >= 0 else {
             throw MosaicError.invalidConfiguration("Spacing and border width must be finite and nonnegative")

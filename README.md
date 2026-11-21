@@ -21,7 +21,8 @@ A high-performance Swift package for generating video mosaics with Metal-acceler
 
 ## Unreleased
 
-- Nothing yet. Add a line here for every change; output-naming and location changes (📁) also get a **Behavior changes** note.
+- **Low-data reads (opt-in).** `MosaicConfiguration.reduceSourceReads` (default `false`) reads as little of the source as possible: an `http`/`https` source is read with small on-demand byte-range requests instead of AVFoundation's loader, which reads about 0.5 MB ahead on every seek, and every frame (mosaic, animation, palette swatches) comes from the nearest keyframe. Measured at 25 Mbit/s: a 10-minute 1080p source goes from 35 MB to 17 MB per mosaic, a 4K source with 4 s keyframe spacing from 215 MB to 20 MB. Tiles can repeat when keyframes are farther apart than the sampled frames. It can't be combined with `useAccurateTimestamps`, isn't part of `configurationHash` (no output names change), and doesn't apply to previews. The server must support byte-range requests. See [MIGRATING-TO-1.17.md](MIGRATING-TO-1.17.md).
+- **`MosaicConfiguration.minimal()`** returns a copy with no metadata header, a solid background and no ColorDNA strip.
 
 ## New in 1.16.2
 
@@ -440,6 +441,7 @@ public struct MosaicConfiguration {
     var layout: LayoutConfiguration          // Layout settings
     var includeMetadata: Bool                // Add metadata header
     var useAccurateTimestamps: Bool          // Precise frame extraction
+    var reduceSourceReads: Bool              // Low-data reads: range loader + keyframe frames (default: false)
     var compressionQuality: Double           // 0.0 to 1.0 (default: 0.4)
     var outputdirectory: URL?                // Root output directory
     var overlay: OverlayConfiguration        // Per-frame labels, header, watermark, Color DNA

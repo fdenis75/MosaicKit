@@ -432,6 +432,8 @@ Default values worth knowing:
 | `MIGRATING-TO-1.13.md` | High | Upgrade guide from 1.12.x to 1.13.0 (additive: `HeaderConfig.filePathShowsFileNameOnly`; `.creatingMosaic` progress now 0.02 → 0.9 and monotonic) |
 | `MIGRATING-TO-1.14.md` | High | Upgrade guide from 1.13.x to 1.14.0 (additive: thumbnail extraction on `MetalMosaicGenerator`, `ThumbnailExtractionOptions`; no behavior change for mosaics) |
 | `MIGRATING-TO-1.15.md` | High | Upgrade guide from 1.14.x to 1.15.0 (remote download links, I-30: MIME override, `VideoInput.outputBaseName`, `validateOutputLocation(for:)`; 📁 names change only for extensionless remote URLs) |
+| `MIGRATING-TO-1.16.md` | High | Upgrade guide from 1.15.x to 1.16.0 (remote read metering: `RemoteReadLedger`, `RemoteSourceInfo`; additive) |
+| `MIGRATING-TO-1.17.md` | High | Upgrade guide from 1.16.x to 1.17.0 (opt-in `reduceSourceReads`, I-33: range loader + keyframe snapping, invalid with `useAccurateTimestamps`; `minimal()`; no output name change) |
 | `CLAUDE.md` / `AGENTS.md` | High (rewritten 2026-09-26) | Both files are identical except for the title and first paragraph, and point agents to this document first. Earlier errors (swift-log, "no Makefile", `swift run` examples, nonexistent workflows, `Models/AspectRatio.swift`, Core Graphics/vImage, `VideoFormat` as the mosaic format) are corrected. Keep the two files in sync. |
 | `MosaicKit-DeepDive.md` | **Stale — do not trust architecture sections** | Describes the removed dual engine (`CoreGraphicsMosaicGenerator`, `MosaicGeneratorFactory`, vImage buffer pool) and a `.gif` still format. The coordinator concurrency formula it gives is for previews only, and the cap of 8 it quotes is really 2. |
 | `spec.md` | **Design intent, only partly implemented** | Describes a `GenerationRequest/Plan`, `JobHandle/BatchHandle`, checkpoint ledger, and a single processing-service actor. None of these exist. What does exist: `VideoSource`, `OutputTransaction`, validation, `GenerationJobController` (the spec's `MosaicFrameSource` shipped in 1.7.0, was reverted, and was removed in S-1, #38). |
@@ -461,7 +463,7 @@ register:
 2. **Mosaic output-dimension limit.** `MetalMosaicGenerator` rejects `config.width > 16_384`
    inside generation (not in `validate()`) and videos shorter than 5 s, both as
    `MosaicError.invalidVideo`.
-   [[F:Sources/Processing/MetalMosaicGenerator.swift#335-338#89f6ecae]]
+   [[F:Sources/Processing/MetalMosaicGenerator.swift#336-339#5bb244a3]]
 3. **Preview skip-if-exists never matches in default naming mode.** With `fullPathInName ==
    false` and no `filenameTemplate`, `PreviewConfiguration.generateFilename` embeds a
    run-time timestamp (`yyyy-MM-dd_HH-mm-ss`). As a result, `overwrite == false` never finds an
@@ -639,27 +641,27 @@ Full sequence including the coordinator: `codebase-analysis-docs/assets/mosaic-s
 #### Stage-by-stage table
 
 The stage body is `MetalMosaicGenerator.generate`
-[[F:Sources/Processing/MetalMosaicGenerator.swift#100-244#89f6ecae]]. Since S-2, stages 2–5 run in
+[[F:Sources/Processing/MetalMosaicGenerator.swift#100-245#5bb244a3]]. Since S-2, stages 2–5 run in
 `planMosaic`, stages 6–12 in `composeMosaic` and stage 14 in `exportAnimation`
-[[F:Sources/Processing/MetalMosaicGenerator.swift#313-638#89f6ecae]]. `generateMosaicImage` calls
+[[F:Sources/Processing/MetalMosaicGenerator.swift#314-642#5bb244a3]]. `generateMosaicImage` calls
 the same `planMosaic` + `composeMosaic`, so both entry points compose the same image.
 
 | # | Stage | Code | Runs on | Key facts |
 |---|---|---|---|---|
-| 0 | Validate | `MosaicConfiguration.validate()` [[F:Sources/Models/ConfigurationValidation.swift#15-64#f54ca0f8]] | caller → actor | Checks geometry, quality, fps, colors, the fixedGrid rules (G-1), and whether WebP is registered. |
+| 0 | Validate | `MosaicConfiguration.validate()` [[F:Sources/Models/ConfigurationValidation.swift#15-68#a6511c63]] | caller → actor | Checks geometry, quality, fps, colors, `reduceSourceReads` vs `useAccurateTimestamps` (I-33), the fixedGrid rules (G-1), and whether WebP is registered. |
 | 1 | Skip-if-exists | inside `generate` | generator actor | Uses one `referenceDate` for both the check and the save, so `{time}` resolves identically. With `.withMosaic`, a missing animation is backfilled. |
 | 2 | Duration / AR | inside `generate` | generator actor | Uses `video.duration` if known, else loads it. Rejects `< 5 s`, `width > 16 384`, and non-finite dimensions. Aspect ratio = `video.width / video.height`, which are display dimensions since F-1 (`preferredTransform` is applied in the extractor). |
 | 3 | Thumbnail count | `LayoutProcessor.calculateThumbnailCount` [[F:Sources/Processing/LayoutProcessor.swift#545-581#0e830e57]] | generator actor | `count = clamp((width/200 + 10·ln(duration)) × density.factor, 4, 800)`. `.auto` uses the largest screen instead: `⌊screenW/160⌋ × ⌊screenH/(160/videoAR)⌋` (points, so the same in pixels; F-7), clamped to 4…800. `.fixedGrid` returns exactly `rows × columns`, before the short-video rule (G-2). |
 | 4 | Layout | `LayoutProcessor.calculateLayout` [[F:Sources/Processing/LayoutProcessor.swift#101-205#0e830e57]] | generator actor (under `NSRecursiveLock`) | Cache key: `aspectRatio-originalAR-count-width-density-layoutType`. `.auto` is never cached. `.dynamic` is mapped to `.custom` first (F-7). For `.fixedGrid` the key gains `-grid=<R>x<C>-<fit>-<tol>-<fill>-sp=<spacing>-rh=<reservedHeight>`; for `.uneven`, `-rh=<reservedHeight>`. Invalid input returns an **empty** layout, which later throws "Empty mosaic layout" (a grid is planned first by `makeLayout`, so it throws its own typed error instead). `.iphone` forces width 1200, 1 column, max height 8000. |
 | 5 | Aspect normalization | `planMosaic`: `adjustedConfig.updateAspectRatio(AspectRatio.findNearest(to: layout.mosaicSize))` | generator actor | The config passed down may carry a **different** `layout.aspectRatio` than the caller set. Path/filename generation still uses the caller's original `config`. |
 | 6 | Header | `ThumbnailProcessor.createMetadataHeader` | generator actor (synchronous CPU) | Only when `includeMetadata`. Height is added on top of the layout height. |
-| 7 | Frame extraction | `ThumbnailProcessor.processedFramesStream` [[F:Sources/Processing/ThumbnailProcessor.swift#204-289#9dfc47a5]] | producer `Task` on the global executor | One `AVAssetImageGenerator` with the batched `images(for:)` API. `maximumSize` = largest cell × `decodeQualityScale` (1). Exception (U-3): when the largest cell is more than 2.05× the smallest (`.uneven`), `extractionGroups` splits the indices by tile size and each group gets its own generator sized to its tile; groups decode in parallel (one feeder each, 8-frame labeling window each), each in time order. Tolerance ±1 s, or 0 when `useAccurateTimestamps`. Sampling: first 20 % of frames in the first 33 % of the 5–95 % window, 60 % in the middle, 20 % in the last third [[F:Sources/Processing/ThumbnailProcessor.swift#710-748#9dfc47a5]]. Any `.failure` throws: mosaics are strict (**no placeholder frames**). |
+| 7 | Frame extraction | `ThumbnailProcessor.processedFramesStream` [[F:Sources/Processing/ThumbnailProcessor.swift#201-288#cfb97d6f]] | producer `Task` on the global executor | One `AVAssetImageGenerator` with the batched `images(for:)` API. `maximumSize` = largest cell × `decodeQualityScale` (1). Exception (U-3): when the largest cell is more than 2.05× the smallest (`.uneven`), `extractionGroups` splits the indices by tile size and each group gets its own generator sized to its tile; groups decode in parallel (one feeder each, 8-frame labeling window each), each in time order. Tolerance ±1 s, 0 when `useAccurateTimestamps`, unbounded (nearest keyframe) when `reduceSourceReads` (I-33). Sampling: first 20 % of frames in the first 33 % of the 5–95 % window, 60 % in the middle, 20 % in the last third [[F:Sources/Processing/ThumbnailProcessor.swift#717-755#cfb97d6f]]. Any `.failure` throws: mosaics are strict (**no placeholder frames**). |
 | 8 | Labeling + color sampling | same | child tasks, **≤ 8 in flight** | Each frame is labeled (`addTimestampToImage`). If Color DNA is on, `OverlayProcessor.averageColor` goes into `FrameColorCollector`. Results are yielded **out of order**; the index travels with each frame. |
 | 9 | Background | `processImagesToMTLTexture` [[F:Sources/Processing/MetalImageProcessor.swift#580-700#04cfcb88]] | caller of `generateMosaicStream` (nonisolated) | Takes the first ≤ 5 frames. Up to 3 of them go to `DominantColors` (`.fair`, `.euclidean`, excluding black, white, and gray). The 3 lightest colors form a diagonal gradient, blurred with a CIGaussianBlur of radius 12. Falls back to gray 0.1 (or 0.5 inside the helper). When `useMovieColorsForBg == false`, uses a solid `backgroundColor`. |
 | 10 | Compositing | `generateMosaicStream` [[F:Sources/Processing/MetalImageProcessor.swift#864-998#04cfcb88]], `processBatch` @L1000, `renderFrame` @L1077 | nonisolated async | One setup command buffer (fill + header), awaited. Frames are then rendered in **20-frame command buffers**, committed without waiting. Each frame: `createTexture(from: CGImage)`, `scaleTexture` if the size differs, `compositeTexture`, optional `addBorder`. The shadow path draws a CPU `CGContext` shadow and composites that. Duplicate or out-of-range indices throw. **All** positions must be filled, or it throws "Missing mosaic frames". |
 | 11 | GPU sync + readback | `synchronizeGPU` @L1058, `createCGImage(from:)` | nonisolated | An empty barrier command buffer is committed last and awaited. GPU errors from completion handlers are collected in `CommandBufferErrorState` and rethrown as `MetalProcessorError.commandBufferExecutionFailed`. |
 | 12 | Have the macOS stall retry wait until the app is active again, as iOS waits for foreground, and document background exporting for apps. Done: mechanism reproduced (background scheduling, background QoS cap; #46), CI attributed to the runner VM (known issue there, #47) | I-26 | A stalled export fails after 120 s and retries while still throttled | S |
-| 13 | Encode + commit | `saveMosaic` [[F:Sources/Processing/MetalMosaicGenerator.swift#744-788#89f6ecae]] | generator actor (synchronous CPU) | Output path = `generateOutputDirectory` + `generateFilename`. Encodes through `ImageFileWriter.write` (shared with thumbnail export): `CGImageDestination` (HEIF embeds a thumbnail, `HasAlpha = false`), or the injected WebP encoder, into the staging file. Then `OutputTransaction.commit()`. |
+| 13 | Encode + commit | `saveMosaic` [[F:Sources/Processing/MetalMosaicGenerator.swift#748-792#5bb244a3]] | generator actor (synchronous CPU) | Output path = `generateOutputDirectory` + `generateFilename`. Encodes through `ImageFileWriter.write` (shared with thumbnail export): `CGImageDestination` (HEIF embeds a thumbnail, `HasAlpha = false`), or the injected WebP encoder, into the staging file. Then `OutputTransaction.commit()`. |
 | 14 | Animation | `exportAnimation` (`extractFramesForGif` + `AnimatedGifGenerator.save`), shared by the `.gifOnly`, `.withMosaic` and skip-if-exists backfill sites | generator actor → global | This is a **second, full decode pass** with a separate generator (`ThumbnailProcessor.forEachFrame`, shared with the public thumbnail extraction): `.large` caps at 1280×720, `.small` at 960×540. Any failed frame throws. `frameDelay = 1 / gifFps`. |
 
 **Progress reported to handlers** (`MosaicGenerationProgress.progress`):
@@ -1156,6 +1158,38 @@ backbone. Read `LayoutProcessor` algorithms, `ThumbnailProcessor` header/label r
   Open". Output names use `VideoInput.outputBaseName` (F12), and generation requires a local
   output directory (`validateOutputLocation(for:)`, F13). Tests: `RemoteVideoSourceTests` (no
   network).
+- **Low-data reads (I-33, opt-in `MosaicConfiguration.reduceSourceReads`):** AVFoundation's own
+  HTTP loader answers every seek with an open-ended `Range: bytes=N-` request and cancels it after
+  ~0.5 MB, about 3× a 1080p keyframe. With the flag on, `RemoteVideoSupport.makeAsset(url:options:reduceReads:)`
+  gives an `http(s)` source (not an `.m3u8`/`.m3u` playlist) a `RangeRequestLoader`
+  (`AVAssetResourceLoaderDelegate` on a private `mosaickit-http(s)` scheme): 192 KB first, then
+  64 KB range fetches made only while AVFoundation still waits, server size and type cached.
+  - **Every loading request is capped at 1 MB**, bounded ones too: AVFoundation asks for large
+    ranges and doesn't cancel all of them (a released palette asset kept one streaming toward the
+    end of the file; capping only open-ended requests let it come back). A capped request is
+    reopened when more is needed; frame extraction handles that (tested up to 2.9 MB 4K
+    keyframes), a preview export does not.
+  - **Range support is required.** The first fetch streams the response and refuses anything but
+    206 before reading the body, so a server that ignores `Range` never sends the whole file;
+    later fetches are buffered and still refused unless 206 (`MosaicError.processingFailed`).
+  - The fetch task holds the loader weakly; the asset retains the loader (associated object).
+  - The flag also snaps every frame (mosaic, animation, palette swatches) to the nearest keyframe
+    (`ThumbnailProcessor.applyTimeTolerance`, `.positiveInfinity`): tiles can repeat when keyframes
+    are sparser than the samples, labels show the keyframe time, and a fixed grid loses its equal
+    time steps. Not in `configurationHash`; rejected with `useAccurateTimestamps`. Local files keep
+    AVFoundation's loader (only snapping applies). Previews don't use it (§4.2 I-36).
+  - **Measured** with a local Range-capable HTTP server that counts the body bytes it sends,
+    throttled to 25 Mbit/s, optionally with 40 ms added per request (60-frame default mosaic):
+
+    | Source | Off | On | On, +40 ms/request |
+    |---|---|---|---|
+    | 10 min 1080p 6 Mbit/s, 2 s GOP | 35.2 MB, 63 req, 14.5 s | 16.7 MB, ~170 req, 8.9 s | 15.4 MB, 12.7 s (off: 17.3 s) |
+    | 90 s 4K 40 Mbit/s, 4 s GOP | 215 MB | 20.4 MB | — |
+    | `test_video.mp4`, 8.3 s GOP | 10.3 MB | 2.0 MB | — |
+
+    The exact keyframe bytes the 1080p mosaic needs are 10.4 MB (+0.5 MB moov), the floor an
+    `AVSampleCursor`-based fetch could reach. Tests: `ReduceSourceReadsTests` (`URLProtocol`
+    stub, no network).
 - **Interactions:** `VideoInput` is the unit of work for F3, F8, and F10.
   - Its `id` is the key for progress handlers and cancellation in the generators and in the
     mosaic coordinator.
@@ -1913,6 +1947,11 @@ robustness, performance, or cosmetic.
 | I-30 | F2/F12 | **Remote download links fail.** An `https` URL with no file extension served as `application/octet-stream` (e.g. `https://host/download/?fid=…`) could not be opened ("Cannot Open"), its outputs went next to the URL (not a folder), every such link was named `download`, so skip-if-exists returned another video's mosaic, and file size and bitrate were empty. | **Fixed.** `RemoteVideoSupport.makeAsset` adds `AVURLAssetOverrideMIMETypeKey: "video/mp4"` for remote URLs without a known video extension (every asset site); `VideoInput.outputBaseName` names those outputs from the supplied `title` (reduced to one path component: separators → `_`, leading dots dropped, so a title can't escape the output directory) or `<stem>-<sha8>`; `validateOutputLocation(for:)` (mosaic and preview) throws before any I/O when the output folder would be remote; the size comes from a one-byte range request. Local files and extension-bearing remote URLs keep their names. **Tests:** `RemoteVideoSourceTests`. | Medium | Server response `Content-Type: application/octet-stream`, no `Content-Disposition`; file starts with `ftyp mp42` | Done. A non-MP4/QuickTime container behind an extensionless link still fails (the override says MP4). |
 | I-31 | F2/F12 | **Sandboxed output fails when the output directory doesn't exist yet.** `startAccessingSecurityScopedResource()` returns `false` for a path that doesn't exist, so `prepareOutputURL` (preview), `saveMosaic`, the thumbnail writer and the staging-file brackets got no grant, and `prepareOutputURL` released its grant before the encoder wrote. | **Fixed** | High (sandboxed apps) | Sandbox on macOS, user-picked root, `{root}/{service}/{hash}/` not yet created | `SecurityScopedAccess.begin(for:)` on the nearest existing ancestor; `OutputTransaction` owns the grant until `discard()` |
 | I-32 | F8 | **`.ffmpeg` preview export hangs at ~30 % when the host runs in an interactive terminal** (CLI / TTY contexts). `runFFmpeg` left `standardInput` unset, so ffmpeg inherited the terminal; `Process` starts it in its own process group, making it a background job there, and ffmpeg's startup check of stdin for keyboard commands got it stopped by job control (SIGTTIN/SIGTTOU, state `T`). Progress froze and the 120 s stall watchdog failed every video. Running with `< /dev/null` avoided it. | **Fixed**: `process.standardInput = FileHandle.nullDevice` and `-nostdin` first in `FFmpegEncodingOptions.buildArguments` | Medium (CLI) | Reported from the Tessera CLI (MPGen2); a 20 s preview finished in ~5 s with stdin redirected | **Test:** `FFmpegArgumentsTests.noStdinFirst`. |
+| I-33 | F2/F3 | **Remote mosaics download ~3× the frame data they decode.** AVFoundation's HTTP loader reads ~0.5 MB ahead per seek (open-ended `Range` request cancelled late), for ~0.17 MB keyframes; on long-GOP sources the ±1 s tolerance also decodes deep into GOPs (4K, 4 s GOP: 215 MB of a 451 MB file for one mosaic). | **Fixed, opt-in**: `MosaicConfiguration.reduceSourceReads` (`RangeRequestLoader` + keyframe snapping; §F2 "Low-data reads") | Medium | Server-side byte counts, 25 Mbit/s throttle (see §F2) | Default stays AVFoundation's loader. Exact-range fetching (`AVSampleCursor` storage range → VideoToolbox) would reach ~11 MB vs ~17 MB; not done. |
+| I-34 | F3 | **Palette swatches open a second asset**: `paletteSwatchColors` makes its own `AVURLAsset`, so a `.colorPalette` header re-reads the moov and its frames (+4 MB, +10 requests on a 10-min 1080p remote source). | Open | Low | `ThumbnailProcessor.paletteSwatchColors` | Pass the plan's asset (needs a `Sendable` hand-off) or sample swatches from the decoded mosaic frames. |
+| I-35 | F10 | **A failed batch item is inspected twice**: `MosaicGeneratorCoordinator.generateMosaicsForFiles` builds the error result with `await VideoInput(url:)`, which inspects the (possibly remote, unreachable) source again. URL batches also can't take already-inspected inputs. | Open | Low | `MosaicGeneratorCoordinator.swift` (`runBatch` job closure) | Build the failure result with the no-I/O `VideoInput(canonicalID:url:)`; offer a batch entry that takes `[VideoInput]`. |
+| I-36 | F8 | **Remote previews make ~550 range requests** for a 60 s preview of a 10-min source (94 MB); `AVURLAssetPreferPreciseDurationAndTimingKey` and the composition re-load the duration and tracks even when `VideoInput` has them. The I-33 loader saves only 14 % here, doubles the requests, and its 1 MB per-request cap makes the export fail (-12705). | Open | Low | Step-0 measurements (§F2) | Trust supplied metadata; investigate request coalescing for composition reads. |
+| I-37 | F3 | **A short high-resolution clip fails at XS density**: `382582_medium.mp4` (12.2 s, 2560×1440 H.264, ~30 fps, ~366 frames) fails `mosaic-10000-XS` with "Frame extraction failed" on `main@3b44ad5` and on `feat/low-data-reads`, in every benchmark run. | Open | Low | `BenchmarkTests` A/B/A of 2026-11-21 (plan §8.1, R-1) | Not investigated. Likely cause: the frame count requested at XS × 10000 px exceeds or crowds the distinct frames of a short clip, so one `images(for:)` request fails. Check `distinctFrameBudget` for non-grid layouts, or skip a failed time. |
 
 ### 4.3 Performance: hotspots & budgets
 
@@ -1986,7 +2025,7 @@ budgets, because throughput depends on the hardware.
 | Maximum mosaic width / texture side | 16,384 px | generator guard; `validateTextureSize`; `LayoutProcessor` guards |
 | Mosaic frame count | `clamp((w/200 + 10·ln d) × factor, 4, 800)`; 4 if d < 5 s | `LayoutProcessor.calculateThumbnailCount` |
 | Frame sampling window & weights | 5 %–95 % of duration; 20 % / 60 % / 20 % over thirds | `ThumbnailProcessor.calculateExtractionTimes` (+ preview copy) |
-| Decode tolerance | ±1 s (0 with `useAccurateTimestamps`) | `configureGenerator`, `extractFramesForGif` |
+| Decode tolerance | ±1 s (0 with `useAccurateTimestamps`, nearest keyframe with `reduceSourceReads`) | `ThumbnailProcessor.applyTimeTolerance` (generators, animation, palette swatches) |
 | Frame labeling parallelism / GPU batch | 8 / 20 frames per command buffer | `processedFramesStream` / `generateMosaicStream` |
 | Background sampling | first ≤ 5 frames, ≤ 3 analyzed, 5 colors each, top 3 lightest, blur radius 12 | `processImagesToMTLTexture` |
 | Label font | `clamp(0.08 × max(cellW, cellH), 10, 24) × 1.5` pt | `overlayFontSize` |
@@ -2244,6 +2283,7 @@ def dynamic(n,W,ar):
 | `layout` | `LayoutConfiguration` | `.default` (16:9, spacing 4, `.custom`, border off, shadow on) | |
 | `includeMetadata` | `Bool` | `true` | header on/off |
 | `useAccurateTimestamps` | `Bool` | `false` | 0 vs ±1 s decode tolerance |
+| `reduceSourceReads` | `Bool` | `false` | Opt-in low-data reads (I-33): on-demand range loader for `http(s)` sources, keyframe-snapped frames. Not in `configurationHash`; invalid with `useAccurateTimestamps`. `minimal()` is a separate helper (no header, solid background, no ColorDNA) and doesn't reduce reads |
 | `compressionQuality` | `Double` | 0.4 | 0…1; JPEG/HEIF/WebP still |
 | `outputdirectory` | `URL?` | `nil` → video's folder | |
 | `fullPathInName` | `Bool` | `false` | |
@@ -2555,6 +2595,15 @@ let export = try await MetalMosaicGenerator().exportThumbnails(for: video, optio
 let remote = try await VideoSource(url: downloadLink, title: "Holiday").inspect()  // title names the outputs
 cfg.outputdirectory = outDir                                // required: a remote URL has no folder
 _ = try await MetalMosaicGenerator().generate(for: remote, config: cfg)  // → outDir/<hash>/Holiday_<hash>.heic
+
+// 12) Download less from a remote source (I-33): range loader + nearest-keyframe frames
+var lowData = cfg
+lowData.reduceSourceReads = true            // invalid with useAccurateTimestamps; server must honor Range
+lowData.useAccurateTimestamps = false
+_ = try await MetalMosaicGenerator().generate(for: remote, config: lowData)  // same output path as cfg
+
+// 13) Output with nothing drawn from metadata (no header, solid background, no ColorDNA)
+_ = try await MetalMosaicGenerator().generate(for: remote, config: cfg.minimal())
 ```
 
 ```swift
@@ -2641,6 +2690,7 @@ with the code.
 | 15 | ~~Monotonic per-item progress; header `.filePath` as file name only~~ **Done** (`composeMosaic` maps `.creatingMosaic` onto 0.02 → 0.9; `HeaderConfig.filePathShowsFileNameOnly`) | I-28, I-29 | Tessera's iOS progress view and header needed both | S |
 | 16 | ~~Remote download links (no extension, `application/octet-stream`): MIME override, distinct output names, local output folder required, remote file size~~ **Done** | I-30 | Tessera users start mosaics from cloud-drive links | S |
 | 17 | ~~`.ffmpeg` export hangs in terminal (CLI) runs: give ffmpeg `/dev/null` stdin and `-nostdin`~~ **Done** | I-32 | The Tessera CLI froze every `.ffmpeg` preview at ~30 % | done |
+| 18 | Opt-in **low-data reads** for remote sources: on-demand range loader + keyframe snapping (`reduceSourceReads`) **Done**; next: palette swatches on the plan asset (I-34), no re-inspection on batch failure (I-35), preview request count (I-36) | I-33, I-34, I-35, I-36 | Tessera reads cloud-drive and NAS-over-HTTP sources; a mosaic downloaded ~3× what it decodes | done / S / S / M |
 
 ### 6.2 Open questions (still unresolved)
 

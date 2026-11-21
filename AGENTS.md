@@ -177,6 +177,9 @@ knowledge base §5.2–§5.3.
   - Animation: `gifMode` (`.disabled` / `.withMosaic` / `.gifOnly`), `gifSize`,
     `animatedFormat` (`.gif` / `.heic` / `.webp`; the **default `.webp` needs
     `MosaicKitWebP.register()`**), `gifFps` (default `10`).
+  - Low-data reads: `reduceSourceReads` (default `false`): `http(s)` sources go through
+    `RangeRequestLoader` (on-demand range requests), frames snap to keyframes; invalid with
+    `useAccurateTimestamps`; not in `configurationHash`.
 - **`DensityConfig`** (7 levels): `XXL` 0.25× → `XL` 0.5× → `L` 0.75× → **`M` 1.0× (default)** →
   `S` 2.0× → `XS` 3.0× → `XXS` 4.0×.
 - **`LayoutType`:**
