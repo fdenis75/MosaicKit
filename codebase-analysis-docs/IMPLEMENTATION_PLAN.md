@@ -164,6 +164,7 @@ Every PR updates its row here (status) and the matching §4.2 / §6.1 entries in
 | U-3 | uneven tiles: per-size frame extraction ⚡ | done; A/B/A gate in §8.1 | |
 | U-4 | uneven tiles: options (optional) | planned | |
 | U-5 | uneven tiles: hero emphasis and fallback variant (optional) | planned | |
+| R-1 | low-data reads: `reduceSourceReads` (range loader + keyframe snapping), I-33 ⚡ | done; default path unchanged (flag off keeps AVFoundation's loader and ±1 s); byte measurements in KB §F2 | |
 
 ### 8.1 Benchmark baseline
 

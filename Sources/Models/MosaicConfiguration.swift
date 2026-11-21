@@ -110,6 +110,22 @@ public struct MosaicConfiguration: Codable, Sendable {
     /// is ignored in that case.
     public var createOutputSubdirectory: Bool = true
 
+    /// Whether to read as little of the source as possible. Off by default.
+    ///
+    /// When `true`:
+    /// - An `http`/`https` source is read with small byte-range requests made only on demand,
+    ///   instead of AVFoundation's own loader, which reads about 0.5 MB ahead on every seek. On a
+    ///   10-minute 1080p source this roughly halves the bytes a mosaic downloads, for more (smaller)
+    ///   requests. The server must support byte-range requests. A local file is read as before.
+    /// - Every frame of the mosaic, the animation and the header's palette swatches is taken from
+    ///   the nearest keyframe, so nothing past a keyframe is decoded. Frames can move from their
+    ///   sampled time by up to half the keyframe interval, and when keyframes are farther apart
+    ///   than the sampled frames, neighboring tiles show the same frame.
+    ///
+    /// It can't be combined with `useAccurateTimestamps`. It isn't part of
+    /// ``configurationHash``, like `useAccurateTimestamps`: switching it doesn't move outputs.
+    public var reduceSourceReads: Bool = false
+
     /// Optional token-based template controlling the output directory layout.
     ///
     /// When `nil` (default), the legacy `{root}/{configHash}/` layout is used.
@@ -134,7 +150,8 @@ public struct MosaicConfiguration: Codable, Sendable {
     /// Values for keys that configurations saved by older versions don't have (I-24). They
     /// match the designated initializer's defaults. Every key added after 1.0 falls back to
     /// one of these: `overlay` (1.1.0); `gifMode`, `gifSize`, `animatedFormat` (1.1.11);
-    /// `overwrite` (1.1.16); `gifFps` (1.4.0); `createOutputSubdirectory` (1.6.0).
+    /// `overwrite` (1.1.16); `gifFps` (1.4.0); `createOutputSubdirectory` (1.6.0);
+    /// `reduceSourceReads` (1.17.0).
     /// Add new keys here, never as a required `decode`.
     private enum MissingKeyDefault {
         static let overlay = OverlayConfiguration.default
@@ -144,13 +161,15 @@ public struct MosaicConfiguration: Codable, Sendable {
         static let gifFps: Double = 10
         static let overwrite = false
         static let createOutputSubdirectory = true
+        static let reduceSourceReads = false
     }
 
     private enum CodingKeys: String, CodingKey {
         case width, density, format, layout, includeMetadata, useAccurateTimestamps,
              compressionQuality, outputdirectory, fullPathInName, useMovieColorsForBg,
              backgroundColor, overlay, gifMode, gifSize, animatedFormat, gifFps,
-             overwrite, createOutputSubdirectory, outputDirectoryTemplate, filenameTemplate
+             overwrite, createOutputSubdirectory, outputDirectoryTemplate, filenameTemplate,
+             reduceSourceReads
     }
 
     public init(from decoder: Decoder) throws {
@@ -178,6 +197,8 @@ public struct MosaicConfiguration: Codable, Sendable {
             ?? MissingKeyDefault.createOutputSubdirectory
         outputDirectoryTemplate = try container.decodeIfPresent(String.self, forKey: .outputDirectoryTemplate)
         filenameTemplate = try container.decodeIfPresent(String.self, forKey: .filenameTemplate)
+        reduceSourceReads = try container.decodeIfPresent(Bool.self, forKey: .reduceSourceReads)
+            ?? MissingKeyDefault.reduceSourceReads
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -202,6 +223,7 @@ public struct MosaicConfiguration: Codable, Sendable {
         try container.encode(createOutputSubdirectory, forKey: .createOutputSubdirectory)
         try container.encodeIfPresent(outputDirectoryTemplate, forKey: .outputDirectoryTemplate)
         try container.encodeIfPresent(filenameTemplate, forKey: .filenameTemplate)
+        try container.encode(reduceSourceReads, forKey: .reduceSourceReads)
     }
 
     // MARK: - Initialization
@@ -694,5 +716,22 @@ public enum OutputFormat: String, Codable, Sendable {
         case .heif: return "heic"
         case .webp: return "webp"
         }
+    }
+}
+
+extension MosaicConfiguration {
+    /// A copy that draws nothing derived from the source's metadata: no metadata header, a solid
+    /// background instead of movie-derived colors, and no ColorDNA strip.
+    ///
+    /// It saves drawing work, and the header's palette-swatch pass when the header has one, but
+    /// it doesn't otherwise change how much of the source is read: the background and ColorDNA
+    /// colors come from frames that are decoded anyway. Use ``reduceSourceReads`` to read less.
+    /// It is a runtime transformation, not a stored setting, so it never appears in saved templates.
+    public func minimal() -> MosaicConfiguration {
+        var copy = self
+        copy.includeMetadata = false
+        copy.useMovieColorsForBg = false
+        copy.overlay.colorDNA.show = false
+        return copy
     }
 }

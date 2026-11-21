@@ -148,8 +148,9 @@ public actor MetalMosaicGenerator: MosaicGeneratorProtocol {
                         if config.gifMode == .withMosaic {
                             let animationURL = config.animatedOutputURL(for: video, referenceDate: referenceDate)
                             if !FileManager.default.fileExists(atPath: animationURL.path) {
-                                let asset = RemoteVideoSupport.makeAsset(url: video.url)
-                                let duration = try await asset.load(.duration).seconds
+                                let asset = RemoteVideoSupport.makeAsset(url: video.url, reduceReads: config.reduceSourceReads)
+                                let duration: Double
+                                if let known = video.duration { duration = known } else { duration = try await asset.load(.duration).seconds }
                                 guard duration.isFinite, duration > 0 else { throw MosaicError.invalidVideo("Invalid duration") }
                                 // The same layout `planMosaic` computes (P2): one shared helper.
                                 let (_, layout) = try makeLayout(for: video, duration: duration, config: config,
@@ -329,7 +330,7 @@ public actor MetalMosaicGenerator: MosaicGeneratorProtocol {
         forIphone: Bool,
         progressHandler: (@Sendable (MosaicGenerationProgress) -> Void)?
     ) async throws -> MosaicPlan {
-        let asset = RemoteVideoSupport.makeAsset(url: video.url)
+        let asset = RemoteVideoSupport.makeAsset(url: video.url, reduceReads: config.reduceSourceReads)
         let duration: Double
         if let known = video.duration { duration = known } else { duration = try await asset.load(.duration).seconds }
         guard duration.isFinite, duration > 0, config.width > 0, config.width <= 16_384, (video.width ?? 1).isFinite, (video.height ?? 1).isFinite, (video.width ?? 1) > 0, (video.height ?? 1) > 0 else { throw MosaicError.invalidVideo("Invalid duration or dimensions") }
@@ -506,7 +507,8 @@ public actor MetalMosaicGenerator: MosaicGeneratorProtocol {
         if let swatchCount = headerConfig.paletteSwatchCount {
             do {
                 swatchColors = try await thumbnailProcessor.paletteSwatchColors(
-                    url: video.url, duration: video.duration, count: swatchCount
+                    url: video.url, duration: video.duration, count: swatchCount,
+                    reduceReads: config.reduceSourceReads
                 )
             } catch is CancellationError {
                 throw CancellationError()
@@ -564,6 +566,7 @@ public actor MetalMosaicGenerator: MosaicGeneratorProtocol {
         let processedStream = thumbnailProcessor.processedFramesStream(
             from: video.url, layout: layout, asset: plan.asset,
             accurate: config.useAccurateTimestamps,
+            snapToKeyframes: config.reduceSourceReads,
             labelConfig: overlayConfig.frameLabel,
             sampling: Self.samplingPolicy(for: config),
             crop: Self.frameCrop(for: video, layout: layout, config: config),
@@ -631,6 +634,7 @@ public actor MetalMosaicGenerator: MosaicGeneratorProtocol {
             count: layout.thumbCount,
             gifSize: config.gifSize,
             accurate: config.useAccurateTimestamps,
+            snapToKeyframes: config.reduceSourceReads,
             policy: Self.samplingPolicy(for: config)
         )
         try AnimatedGifGenerator.save(frames: frames, to: url, format: config.animatedFormat,

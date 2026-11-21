@@ -91,6 +91,7 @@ public final class ThumbnailProcessor: Sendable {
         count: Int,
         gifSize: GifSize,
         accurate: Bool,
+        snapToKeyframes: Bool = false,
         policy: FrameSamplingPolicy
     ) async throws -> [CGImage] {
         signposter.emitEvent("extractFramesForGif")
@@ -102,7 +103,7 @@ public final class ThumbnailProcessor: Sendable {
         case .small: CGSize(width: 960, height: 540)
         }
         let frames = try await extractFrames(from: asset, count: count, maximumSize: maximumSize,
-                                             accurate: accurate, policy: policy)
+                                             accurate: accurate, snapToKeyframes: snapToKeyframes, policy: policy)
         return frames.map(\.image)
     }
 
@@ -114,13 +115,15 @@ public final class ThumbnailProcessor: Sendable {
         count: Int,
         maximumSize: CGSize?,
         accurate: Bool,
+        snapToKeyframes: Bool = false,
         policy: FrameSamplingPolicy,
         duration knownDuration: Double? = nil
     ) async throws -> [(image: CGImage, time: CMTime)] {
         var frames: [(image: CGImage, time: CMTime)] = []
         frames.reserveCapacity(count)
         try await forEachFrame(from: asset, count: count, maximumSize: maximumSize, accurate: accurate,
-                               policy: policy, duration: knownDuration) { _, image, time in
+                               snapToKeyframes: snapToKeyframes, policy: policy,
+                               duration: knownDuration) { _, image, time in
             frames.append((image, time))
         }
         return frames
@@ -133,6 +136,7 @@ public final class ThumbnailProcessor: Sendable {
         count: Int,
         maximumSize: CGSize?,
         accurate: Bool,
+        snapToKeyframes: Bool = false,
         policy: FrameSamplingPolicy,
         duration knownDuration: Double? = nil,
         _ body: (Int, CGImage, CMTime) async throws -> Void
@@ -143,14 +147,7 @@ public final class ThumbnailProcessor: Sendable {
         try Task.checkCancellation()
         let generator = AVAssetImageGenerator(asset: asset)
         generator.appliesPreferredTrackTransform = true
-
-        if accurate {
-            generator.requestedTimeToleranceBefore = .zero
-            generator.requestedTimeToleranceAfter = .zero
-        } else {
-            generator.requestedTimeToleranceBefore = CMTime(seconds: 1.0, preferredTimescale: 600)
-            generator.requestedTimeToleranceAfter = CMTime(seconds: 1.0, preferredTimescale: 600)
-        }
+        Self.applyTimeTolerance(to: generator, accurate: accurate, snapToKeyframes: snapToKeyframes)
         if let maximumSize {
             generator.maximumSize = maximumSize
         }
@@ -203,6 +200,7 @@ public final class ThumbnailProcessor: Sendable {
 
     internal func processedFramesStream(
         from file: URL, layout: MosaicLayout, asset: AVAsset, accurate: Bool,
+        snapToKeyframes: Bool = false,
         labelConfig: FrameLabelConfig,
         sampling: FrameSamplingPolicy = .weighted,
         crop: FrameCrop? = nil,
@@ -219,7 +217,8 @@ public final class ThumbnailProcessor: Sendable {
         // other layout keeps a single generator, as before.
         let groups = Self.extractionGroups(for: sizes)
         let generators = groups.map { group in
-            configureGenerator(for: asset, accurate: accurate, preview: false, layout: layout, crop: crop,
+            configureGenerator(for: asset, accurate: accurate, snapToKeyframes: snapToKeyframes,
+                               preview: false, layout: layout, crop: crop,
                                cellIndices: groups.count > 1 ? group : nil)
         }
         let cancellation = ImageGeneratorCancellation(generators)
@@ -570,7 +569,8 @@ public final class ThumbnailProcessor: Sendable {
     /// Only called when the header asks for a palette, so the default pipeline pays nothing. The
     /// frames are decoded at thumbnail size with a loose time tolerance; a frame that can't be
     /// read is skipped, and an empty result simply leaves the swatch row out.
-    func paletteSwatchColors(url: URL, duration knownDuration: Double?, count: Int) async throws -> [CGColor] {
+    func paletteSwatchColors(url: URL, duration knownDuration: Double?, count: Int,
+                             reduceReads: Bool = false) async throws -> [CGColor] {
         signposter.emitEvent("paletteSwatchColors")
         let intervalState = signposter.beginInterval("paletteSwatchColors")
         defer { signposter.endInterval("paletteSwatchColors", intervalState) }
@@ -579,7 +579,7 @@ public final class ThumbnailProcessor: Sendable {
         try Task.checkCancellation()
         // Takes the URL, not an `AVAsset`: assets are not Sendable, and this runs off the
         // generator's actor.
-        let asset = RemoteVideoSupport.makeAsset(url: url)
+        let asset = RemoteVideoSupport.makeAsset(url: url, reduceReads: reduceReads)
         let duration: Double
         if let knownDuration {
             duration = knownDuration
@@ -589,8 +589,7 @@ public final class ThumbnailProcessor: Sendable {
         guard duration.isFinite, duration > 0 else { return [] }
         let generator = AVAssetImageGenerator(asset: asset)
         generator.appliesPreferredTrackTransform = true
-        generator.requestedTimeToleranceBefore = CMTime(seconds: 1.0, preferredTimescale: 600)
-        generator.requestedTimeToleranceAfter = CMTime(seconds: 1.0, preferredTimescale: 600)
+        Self.applyTimeTolerance(to: generator, accurate: false, snapToKeyframes: reduceReads)
         generator.maximumSize = CGSize(width: 64, height: 64)
         let start = duration * 0.05
         let span = duration * 0.90
@@ -609,9 +608,26 @@ public final class ThumbnailProcessor: Sendable {
     /// Upper bound for `MetadataField.colorPalette(swatchCount:)`; more swatches would not fit the header.
     static let maximumPaletteSwatches = 32
 
+    /// How far a decoded frame may be from its requested time: exact, ±1 s (the default), or the
+    /// nearest keyframe (``MosaicConfiguration/reduceSourceReads``), which decodes nothing past it.
+    static func applyTimeTolerance(to generator: AVAssetImageGenerator, accurate: Bool, snapToKeyframes: Bool) {
+        let tolerance: CMTime = if snapToKeyframes {
+            .positiveInfinity
+        } else if accurate {
+            .zero
+        } else {
+            // 1 s keeps frames close to their sampled time while maintaining performance
+            // (10 s, used before, could select incorrect frames).
+            CMTime(seconds: 1.0, preferredTimescale: 600)
+        }
+        generator.requestedTimeToleranceBefore = tolerance
+        generator.requestedTimeToleranceAfter = tolerance
+    }
+
     private func configureGenerator(
         for asset: AVAsset,
         accurate: Bool,
+        snapToKeyframes: Bool = false,
         preview: Bool,
         layout: MosaicLayout,
         crop: FrameCrop? = nil,
@@ -622,16 +638,7 @@ public final class ThumbnailProcessor: Sendable {
         defer { signposter.endInterval("configureGenerator", intervalState) }
         let generator = AVAssetImageGenerator(asset: asset)
         generator.appliesPreferredTrackTransform = true
-        
-        if accurate {
-            generator.requestedTimeToleranceBefore = .zero
-            generator.requestedTimeToleranceAfter = .zero
-        } else {
-            // Use 1 second tolerance for better frame accuracy while maintaining performance
-            // Previously was 10 seconds which could select incorrect frames
-            generator.requestedTimeToleranceBefore = CMTime(seconds: 1.0, preferredTimescale: 600)
-            generator.requestedTimeToleranceAfter = CMTime(seconds: 1.0, preferredTimescale: 600)
-        }
+        Self.applyTimeTolerance(to: generator, accurate: accurate, snapToKeyframes: snapToKeyframes)
         
         if !preview {
             // The largest cell this generator decodes for: all cells, or only `cellIndices`.

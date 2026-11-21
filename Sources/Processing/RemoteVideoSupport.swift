@@ -27,7 +27,14 @@ enum RemoteVideoSupport {
     }
 
     /// Creates the asset every reader of `url` uses, adding the MIME override when needed.
-    static func makeAsset(url: URL, options: [String: Any] = [:]) -> AVURLAsset {
+    ///
+    /// With `reduceReads`, an `http`/`https` source is read through a ``RangeRequestLoader``
+    /// (small on-demand range requests) instead of AVFoundation's own loader. It changes nothing
+    /// for a local file.
+    static func makeAsset(url: URL, options: [String: Any] = [:], reduceReads: Bool = false) -> AVURLAsset {
+        if reduceReads, RangeRequestLoader.supports(url) {
+            return RangeRequestLoader.makeAsset(url: url, options: options)
+        }
         var options = options
         if let mimeType = overrideMIMEType(for: url) {
             options[AVURLAssetOverrideMIMETypeKey] = mimeType
