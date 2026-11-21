@@ -124,6 +124,11 @@ flowchart LR
 - **1.14.0** (2026-10-24): public thumbnail extraction on `MetalMosaicGenerator` (`extractThumbnails`, `extractThumbnailImages`, `exportThumbnails`, `ThumbnailExtractionOptions`; #83); additive API, no output-naming change.
 - **1.15.0** (2026-10-25): remote download links as sources (I-30, #85): MIME override for extensionless remote URLs, `VideoInput.outputBaseName`, `validateOutputLocation(for:)`, remote file size; 📁 names change only for extensionless remote URLs.
 - **1.15.1** (2026-11-02): test-only patch (#88): all test file/folder/ffmpeg inputs read through `TestEnvironment` (`MOSAICKIT_LOCALVIDEO1…4`, `LOCALFOLDER`, `LOCALPLAYLIST`, `OUTPUTFOLDER`, `FFMPEG_PATH`); no library change.
+- **1.15.2** (2026-11-07): sandboxed output when the output directory doesn't exist yet (I-31, #91), plus the #88 test clean-up (#90); no API change.
+- **1.16.0** (2026-11-16): remote read metering (`RemoteReadLedger`, `RemoteSourceInfo`; #92, notes #93); additive API.
+- **1.16.1** (2026-11-16): iOS build fix for the remote read metering (#94).
+- **1.16.2** (2026-11-21): `.ffmpeg` export no longer hangs when run from a terminal (I-32, #95).
+- **1.17.0** (2026-11-21): opt-in low-data reads, `MosaicConfiguration.reduceSourceReads` (R-1, I-33, #96), and `MosaicConfiguration.minimal()`; additive API, no output name change.
 - **2.0.0** removes everything deprecated in S-6.
 
 ## 8. Tracking
@@ -164,7 +169,7 @@ Every PR updates its row here (status) and the matching §4.2 / §6.1 entries in
 | U-3 | uneven tiles: per-size frame extraction ⚡ | done; A/B/A gate in §8.1 | |
 | U-4 | uneven tiles: options (optional) | planned | |
 | U-5 | uneven tiles: hero emphasis and fallback variant (optional) | planned | |
-| R-1 | low-data reads: `reduceSourceReads` (range loader + keyframe snapping), I-33 ⚡ | done; A/B/A gate passed 2026-11-21 (flag off: every median within ±4 % of the closer `main` run; §8.1); byte measurements in KB §F2 | |
+| R-1 | low-data reads: `reduceSourceReads` (range loader + keyframe snapping), I-33 ⚡ | done (#96, released in 1.17.0); A/B/A gate passed 2026-11-21 (flag off: every median within ±4 % of the closer `main` run; §8.1); byte measurements in KB §F2 | |
 
 ### 8.1 Benchmark baseline
 
