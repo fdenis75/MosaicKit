@@ -23,6 +23,12 @@ A high-performance Swift package for generating video mosaics with Metal-acceler
 
 - Nothing yet. Add a line here for every change; output-naming and location changes (📁) also get a **Behavior changes** note.
 
+## New in 1.16.2
+
+Patch release: fixes `.ffmpeg` preview export from a terminal. No public API, configuration or output name changes, so there is no migration note.
+
+- **`.ffmpeg` preview export no longer hangs when run from a terminal (I-32).** ffmpeg inherited the terminal as stdin and was stopped by job control at startup, so CLI runs froze at about 30 % until the stall watchdog failed them. MosaicKit now gives ffmpeg `/dev/null` as stdin and passes `-nostdin`. No API change.
+
 ## New in 1.16.1
 
 Patch release: fixes the iOS build of 1.16.0, which failed because `NET_RT_IFLIST2` and `proc_pid_rusage` do not exist in the iOS SDK. Remote read metering now uses those on macOS only; on iOS and Mac Catalyst it sums the 32-bit `getifaddrs` counters (they wrap at 4 GiB) and reports no process disk reads. **Use 1.16.1 instead of 1.16.0 on iOS.** No API change, no migration note.
@@ -347,7 +353,7 @@ Add MosaicKit to your `Package.swift`:
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/fdenis75/MosaicKit.git", from: "1.16.1")
+    .package(url: "https://github.com/fdenis75/MosaicKit.git", from: "1.16.2")
 ]
 ```
 

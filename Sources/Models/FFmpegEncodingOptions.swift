@@ -249,6 +249,7 @@ public struct FFmpegEncodingOptions: Codable, Sendable, Hashable {
     /// Passthrough input is assumed to already be at the correct container format.
     func buildArguments(inputURL: URL, outputURL: URL, includeAudio: Bool) -> [String] {
         var args: [String] = [
+            "-nostdin",  // never read the terminal: see I-32 (job-control stop in CLI/TTY runs)
             "-i", inputURL.path,
             "-y"  // overwrite output without prompting
         ]

@@ -270,8 +270,11 @@ enum FFmpegEncoder {
         process.executableURL = URL(fileURLWithPath: binaryPath)
         process.arguments = arguments
 
-        // Pipe stderr for progress parsing; discard stdout
+        // Pipe stderr for progress parsing; discard stdout. stdin is /dev/null (I-32): an inherited
+        // terminal stdin makes ffmpeg, a background job in its own process group, stop on SIGTTIN
+        // when it checks for keyboard commands, so a CLI run in a terminal hung until the watchdog.
         let stderrPipe = Pipe()
+        process.standardInput = FileHandle.nullDevice
         process.standardOutput = FileHandle.nullDevice
         process.standardError = stderrPipe
 

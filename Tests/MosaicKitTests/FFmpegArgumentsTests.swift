@@ -69,6 +69,13 @@ struct FFmpegArgumentsTests {
         #expect(value(of: "-i", in: args) == input.path)
     }
 
+    @Test("ffmpeg never reads stdin: -nostdin comes first (I-32)")
+    func noStdinFirst() {
+        let args = FFmpegEncodingOptions(videoCodec: .h264)
+            .buildArguments(inputURL: input, outputURL: output, includeAudio: false)
+        #expect(args.first == "-nostdin")
+    }
+
     // MARK: - Real ffmpeg (macOS, when a binary is installed)
 
     #if os(macOS)
