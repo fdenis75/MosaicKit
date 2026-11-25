@@ -464,7 +464,7 @@ register:
 2. **Mosaic output-dimension limit.** `MetalMosaicGenerator` rejects `config.width > 16_384`
    inside generation (not in `validate()`) and videos shorter than 5 s, both as
    `MosaicError.invalidVideo`.
-   [[F:Sources/Processing/MetalMosaicGenerator.swift#337-340#c74a7b18]]
+   [[F:Sources/Processing/MetalMosaicGenerator.swift#337-340#15bfaeca]]
 3. **Preview skip-if-exists never matches in default naming mode.** With `fullPathInName ==
    false` and no `filenameTemplate`, `PreviewConfiguration.generateFilename` embeds a
    run-time timestamp (`yyyy-MM-dd_HH-mm-ss`). As a result, `overwrite == false` never finds an
@@ -642,9 +642,9 @@ Full sequence including the coordinator: `codebase-analysis-docs/assets/mosaic-s
 #### Stage-by-stage table
 
 The stage body is `MetalMosaicGenerator.generate`
-[[F:Sources/Processing/MetalMosaicGenerator.swift#100-245#c74a7b18]]. Since S-2, stages 2–5 run in
+[[F:Sources/Processing/MetalMosaicGenerator.swift#100-245#15bfaeca]]. Since S-2, stages 2–5 run in
 `planMosaic`, stages 6–12 in `composeMosaic` and stage 14 in `exportAnimation`
-[[F:Sources/Processing/MetalMosaicGenerator.swift#314-660#c74a7b18]]. `generateMosaicImage` calls
+[[F:Sources/Processing/MetalMosaicGenerator.swift#314-659#15bfaeca]]. `generateMosaicImage` calls
 the same `planMosaic` + `composeMosaic`, so both entry points compose the same image.
 
 | # | Stage | Code | Runs on | Key facts |
@@ -662,7 +662,7 @@ the same `planMosaic` + `composeMosaic`, so both entry points compose the same i
 | 10 | Compositing | `generateMosaicStream` [[F:Sources/Processing/MetalImageProcessor.swift#864-998#04cfcb88]], `processBatch` @L1000, `renderFrame` @L1077 | nonisolated async | One setup command buffer (fill + header), awaited. Frames are then rendered in **20-frame command buffers**, committed without waiting. Each frame: `createTexture(from: CGImage)`, `scaleTexture` if the size differs, `compositeTexture`, optional `addBorder`. The shadow path draws a CPU `CGContext` shadow and composites that. Duplicate or out-of-range indices throw. **All** positions must be filled, or it throws "Missing mosaic frames". |
 | 11 | GPU sync + readback | `synchronizeGPU` @L1058, `createCGImage(from:)` | nonisolated | An empty barrier command buffer is committed last and awaited. GPU errors from completion handlers are collected in `CommandBufferErrorState` and rethrown as `MetalProcessorError.commandBufferExecutionFailed`. |
 | 12 | Have the macOS stall retry wait until the app is active again, as iOS waits for foreground, and document background exporting for apps. Done: mechanism reproduced (background scheduling, background QoS cap; #46), CI attributed to the runner VM (known issue there, #47) | I-26 | A stalled export fails after 120 s and retries while still throttled | S |
-| 13 | Encode + commit | `saveMosaic` [[F:Sources/Processing/MetalMosaicGenerator.swift#766-810#c74a7b18]] | generator actor (synchronous CPU) | Output path = `generateOutputDirectory` + `generateFilename`. Encodes through `ImageFileWriter.write` (shared with thumbnail export): `CGImageDestination` (HEIF embeds a thumbnail, `HasAlpha = false`), or the injected WebP encoder, into the staging file. Then `OutputTransaction.commit()`. |
+| 13 | Encode + commit | `saveMosaic` [[F:Sources/Processing/MetalMosaicGenerator.swift#765-809#15bfaeca]] | generator actor (synchronous CPU) | Output path = `generateOutputDirectory` + `generateFilename`. Encodes through `ImageFileWriter.write` (shared with thumbnail export): `CGImageDestination` (HEIF embeds a thumbnail, `HasAlpha = false`), or the injected WebP encoder, into the staging file. Then `OutputTransaction.commit()`. |
 | 14 | Animation | `exportAnimation` (`extractFramesForGif` + `AnimatedGifGenerator.save`), shared by the `.gifOnly`, `.withMosaic` and skip-if-exists backfill sites | generator actor → global | This is a **second, full decode pass** with a separate generator (`ThumbnailProcessor.forEachFrame`, shared with the public thumbnail extraction): `.large` caps at 1280×720, `.small` at 960×540. Any failed frame throws. `frameDelay = 1 / gifFps`. |
 
 **Progress reported to handlers** (`MosaicGenerationProgress.progress`):
@@ -1161,7 +1161,7 @@ backbone. Read `LayoutProcessor` algorithms, `ThumbnailProcessor` header/label r
   network).
 - **Container sniffing (I-38):** a source (remote *or local*) without a known extension is
   identified from its first 1 KB by `ContainerSniffer` (one `bytes=0-1023` request, or a file
-  read; cached per URL, at most 1024 entries): `0x47` at every 188-byte (TS) or 192-byte
+  read; successful reads cached per URL, at most 1024 entries): `0x47` at every 188-byte (TS) or 192-byte
   offset-4 (M2TS) packet start → `video/mp2t`; an ISO box type at offset 4 (`ftyp`, `moov`,
   `mdat`, …) → `video/mp4`; otherwise remote → `video/mp4` (I-30 default), local → no override.
   `RemoteVideoSupport.makeAsset` is `async` for this; a source with a known extension is never
@@ -1172,7 +1172,9 @@ backbone. Read `LayoutProcessor` algorithms, `ThumbnailProcessor` header/label r
   source (sniffed or `.ts`/`.m2ts`/`.mts`) those failures become
   `VideoError.unsupportedCodec(url, "an MPEG transport stream whose video isn't H.264 or MPEG-2 …")`,
   thrown by `VideoMetadataExtractor` and, for a caller-supplied `VideoInput`, by
-  `MetalMosaicGenerator.planMosaic` (which loads the video tracks of TS sources only). Reading
+  `MetalMosaicGenerator.planMosaic` (which loads the video tracks of TS sources only); only
+  AVFoundation media errors (`isUnreadableMediaError`) are mapped, cancellation and network
+  errors keep their own. Reading
   such codecs would need ffmpeg (remux or decode); not implemented. Tests:
   `TransportStreamSourceTests`, `ReduceSourceReadsTests.loaderReadsTransportStream`; fixtures
   `test_stream.ts` (H.264) and `hevc_stream.ts` (HEVC), 6 s 320×180.

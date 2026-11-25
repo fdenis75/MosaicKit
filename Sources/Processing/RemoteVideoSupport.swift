@@ -61,6 +61,18 @@ enum RemoteVideoSupport {
         return AVURLAsset(url: url, options: options)
     }
 
+    /// AVFoundation error codes meaning "this media can't be read" (not a cancel or network
+    /// error): format not recognized, failed to parse, media cannot be used (-11869, HEVC/AV1 in
+    /// TS), decoder not found, decode failed.
+    static let unreadableMediaErrorCodes: Set<Int> = [-11828, -11829, -11869, -11833, -11821]
+
+    /// Whether `error` is AVFoundation refusing the media itself, so it may be reported as
+    /// ``unreadableTransportStreamError(for:)``. Cancellation and network errors are not.
+    static func isUnreadableMediaError(_ error: any Error) -> Bool {
+        let error = error as NSError
+        return error.domain == AVFoundationErrorDomain && unreadableMediaErrorCodes.contains(error.code)
+    }
+
     /// Path extensions of MPEG transport streams.
     static let transportStreamExtensions: Set<String> = ["ts", "m2ts", "mts"]
 

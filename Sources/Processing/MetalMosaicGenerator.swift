@@ -357,10 +357,9 @@ public actor MetalMosaicGenerator: MosaicGeneratorProtocol {
         let videoTracks: [AVAssetTrack]
         do {
             videoTracks = try await asset.loadTracks(withMediaType: .video)
-        } catch is CancellationError {
-            throw CancellationError()
         } catch {
-            throw unreadable
+            // Only AVFoundation refusing the media; cancellation and network errors pass through.
+            throw RemoteVideoSupport.isUnreadableMediaError(error) ? unreadable : error
         }
         if videoTracks.isEmpty { throw unreadable }
     }

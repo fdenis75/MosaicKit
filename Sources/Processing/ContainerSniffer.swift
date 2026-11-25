@@ -76,9 +76,11 @@ enum ContainerSniffer {
     ///
     /// Reads ``byteCount`` bytes: from the file, or with one range request for `http`/`https`.
     /// Returns ``Container/unknown`` when the bytes can't be read; the caller keeps its default.
+    /// Only a successful read is cached, so a cancelled or failed sniff is retried next time.
     static func container(of url: URL, session: URLSession = .shared) async -> Container {
         if let known = cache.withLock({ $0[url] }) { return known }
-        let container = await leadingBytes(of: url, session: session).map { Self.container(of: $0) } ?? .unknown
+        guard let bytes = await leadingBytes(of: url, session: session) else { return .unknown }
+        let container = Self.container(of: bytes)
         cache.withLock { cache in
             if cache.count >= cacheLimit { cache.removeAll() }
             cache[url] = container

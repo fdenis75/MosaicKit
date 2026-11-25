@@ -37,8 +37,10 @@ actor VideoMetadataExtractor {
         do {
             (tracks, duration) = try await asset.load(.tracks, .duration)
         } catch {
-            // HEVC or AV1 in an MPEG transport stream: "Cannot Open" (I-38).
-            if let unreadable = await RemoteVideoSupport.unreadableTransportStreamError(for: url) { throw unreadable }
+            // HEVC or AV1 in an MPEG transport stream: "Cannot Open" (I-38). Cancellation and
+            // network errors keep their own error.
+            if RemoteVideoSupport.isUnreadableMediaError(error),
+               let unreadable = await RemoteVideoSupport.unreadableTransportStreamError(for: url) { throw unreadable }
             throw error
         }
         try Task.checkCancellation()
