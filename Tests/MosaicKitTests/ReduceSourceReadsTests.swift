@@ -148,7 +148,8 @@ struct ReduceSourceReadsTests {
                                        container: .transportStream) == "com.apple.quicktime-movie")
     }
 
-    @Test("An extensionless transport stream reads through the range loader (I-38)")
+    @Test("An extensionless transport stream reads through the range loader (I-38)",
+          .enabled(if: transportStreamDecodes, "AVFoundation on iOS doesn't read transport streams"))
     func loaderReadsTransportStream() async throws {
         let session = FixtureRangeURLProtocol.session()
         let url = URL(string: "https://ts.test/download/?fid=1")!

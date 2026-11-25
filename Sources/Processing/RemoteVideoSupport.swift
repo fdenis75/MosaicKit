@@ -76,16 +76,27 @@ enum RemoteVideoSupport {
     /// Path extensions of MPEG transport streams.
     static let transportStreamExtensions: Set<String> = ["ts", "m2ts", "mts"]
 
+    /// What AVFoundation can't read from an MPEG transport stream on this platform (I-38): on
+    /// macOS its TS demuxer reads H.264 and MPEG-2 video only; on iOS (measured on the iOS
+    /// Simulator in CI) it opens no standalone transport stream at all.
+    #if os(macOS)
+    static let unreadableTransportStreamDescription =
+        "an MPEG transport stream whose video isn't H.264 or MPEG-2 (HEVC and AV1 in TS can't be read)"
+    #else
+    static let unreadableTransportStreamDescription =
+        "an MPEG transport stream (.ts), a container this platform can't read"
+    #endif
+
     /// The error for a source AVFoundation opened but can't read video from, when that source
-    /// is an MPEG transport stream: AVFoundation's TS demuxer reads H.264 and MPEG-2 video only,
-    /// so HEVC or AV1 in TS gives no video track or "Cannot Open" (I-38). `nil` for other sources,
-    /// whose original error is kept.
+    /// is an MPEG transport stream: on macOS HEVC or AV1 in TS gives "Cannot Open" and MPEG-4
+    /// Part 2 no video track; on iOS every TS fails (I-38). `nil` for other sources, whose
+    /// original error is kept.
     static func unreadableTransportStreamError(for url: URL) async -> VideoError? {
         let isTransportStream = transportStreamExtensions.contains(url.pathExtension.lowercased())
         if !isTransportStream {
             guard await sourceContainer(for: url) == .transportStream else { return nil }
         }
-        return .unsupportedCodec(url, "an MPEG transport stream whose video isn't H.264 or MPEG-2 (HEVC and AV1 in TS can't be read)")
+        return .unsupportedCodec(url, unreadableTransportStreamDescription)
     }
 
     /// Whether `url`'s path ends in an extension from ``recognizedExtensions``.

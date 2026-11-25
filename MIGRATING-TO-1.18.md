@@ -22,6 +22,7 @@ as `https://host/download/?fid=…` or a local file named `download`, is identif
 
 - An MPEG transport stream (188-byte TS or 192-byte M2TS packets) is opened as `video/mp2t`. In
   1.15–1.17 every such remote URL was forced to `video/mp4`, so a TS link failed with "Cannot Open".
+  On macOS, H.264 and MPEG-2 transport streams now make mosaics.
 - An MP4/QuickTime file is opened as `video/mp4`, as before.
 - Anything else: a remote URL keeps the `video/mp4` default; a local file is left to AVFoundation,
   as before.
@@ -30,14 +31,15 @@ For a remote source this is one `Range: bytes=0-1023` request, made once per URL
 result is cached). It also applies with `reduceSourceReads`. A source with a known extension is
 never read for this.
 
-### 2.2 Unsupported TS codecs
+### 2.2 Unsupported transport streams
 
-AVFoundation's transport-stream demuxer reads H.264 and MPEG-2 video only. A TS source with HEVC,
-AV1 or MPEG-4 Part 2 video (sniffed, or named `.ts`, `.m2ts` or `.mts`) now fails with:
+On macOS, AVFoundation's transport-stream demuxer reads H.264 and MPEG-2 video only. On iOS
+(measured on the iOS Simulator) it reads no standalone transport stream, whatever the codec. A TS
+source AVFoundation can't read (sniffed, or named `.ts`, `.m2ts` or `.mts`) now fails with
+`VideoError.unsupportedCodec(url, description)`, where `description` is:
 
-```swift
-VideoError.unsupportedCodec(url, "an MPEG transport stream whose video isn't H.264 or MPEG-2 (HEVC and AV1 in TS can't be read)")
-```
+- macOS: "an MPEG transport stream whose video isn't H.264 or MPEG-2 (HEVC and AV1 in TS can't be read)"
+- iOS: "an MPEG transport stream (.ts), a container this platform can't read"
 
 The case existed before (H.264 High 10 on iOS), so no new `switch` case is needed. The error comes
 from `VideoInput(from:)` and, if you build a `VideoInput` with known metadata yourself, from
@@ -51,5 +53,6 @@ Reading HEVC-in-TS (for example through ffmpeg on macOS) isn't supported yet.
 - Bump MosaicKit to `1.18.0` in `project.yml`.
 - No code change is required. Optionally show `VideoError.unsupportedCodec` as "This video's
   format isn't supported" rather than a generic failure.
-- Download links to H.264/MPEG-2 `.ts` files now make mosaics; HEVC `.ts` links fail with the
-  error above.
+- macOS (app and CLI): download links to H.264/MPEG-2 `.ts` files now make mosaics; HEVC `.ts`
+  links fail with the error above.
+- iOS: every `.ts` source fails with the error above (it failed with "Cannot Open" before).

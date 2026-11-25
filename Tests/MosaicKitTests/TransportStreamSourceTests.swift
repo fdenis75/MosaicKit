@@ -5,6 +5,13 @@ import Testing
 /// I-38: MPEG transport streams, with and without a file extension.
 /// `test_stream.ts` is 6 s of 320×180 H.264 (8-bit 4:2:0) in TS; `hevc_stream.ts` is the same in
 /// HEVC, which AVFoundation's TS demuxer can't read. No network I/O.
+/// AVFoundation decodes H.264 TS on macOS only; on iOS every transport stream gives the error.
+#if os(macOS)
+let transportStreamDecodes = true
+#else
+let transportStreamDecodes = false
+#endif
+
 @Suite("MPEG-TS sources")
 struct TransportStreamSourceTests {
     private static func fixture(_ name: String) throws -> URL {
@@ -57,7 +64,8 @@ struct TransportStreamSourceTests {
 
     // MARK: End to end
 
-    @Test("A mosaic is made from an H.264 transport stream, with and without its extension")
+    @Test("A mosaic is made from an H.264 transport stream, with and without its extension",
+          .enabled(if: transportStreamDecodes, "AVFoundation on iOS doesn't read transport streams"))
     func mosaicFromTransportStream() async throws {
         let source = try Self.fixture("test_stream")
         let copy = try Self.extensionlessCopy(of: source)
@@ -69,6 +77,15 @@ struct TransportStreamSourceTests {
             #expect(video.width == 320 && video.height == 180)
             let image = try await MetalMosaicGenerator().generateMosaicImage(for: video, config: config)
             #expect(image.width == 640, "\(url.lastPathComponent): \(image.width) x \(image.height)")
+        }
+    }
+
+    @Test("H.264 in a transport stream fails with the same error where TS can't be read",
+          .enabled(if: !transportStreamDecodes, "macOS reads H.264 TS"))
+    func h264TransportStreamErrorOnIOS() async throws {
+        let url = try Self.fixture("test_stream")
+        await #expect(throws: VideoError.unsupportedCodec(url, RemoteVideoSupport.unreadableTransportStreamDescription)) {
+            _ = try await VideoInput(from: url)
         }
     }
 
@@ -86,7 +103,7 @@ struct TransportStreamSourceTests {
                     Issue.record("Unexpected error \(error)"); continue
                 }
                 #expect(failing == url)
-                #expect(codec.contains("MPEG transport stream"))
+                #expect(codec == RemoteVideoSupport.unreadableTransportStreamDescription)
             }
         }
     }

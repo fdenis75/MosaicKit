@@ -27,8 +27,8 @@ A high-performance Swift package for generating video mosaics with Metal-acceler
 
 Minor release on top of 1.17.0: MPEG transport streams (`.ts`) behind download links. No public API or configuration changes, defaults are unchanged, and output names do not change. Upgrading from 1.17.x? [MIGRATING-TO-1.18.md](MIGRATING-TO-1.18.md) lists what can change for your app.
 
-- **MPEG-TS sources without a `.ts` extension.** A source whose path has no known video extension, such as `https://host/download/?fid=…` served as `binary/octet-stream`, or a local file without an extension, is now identified from its first 1 KB (one small range request, cached per URL). A transport stream is opened as `video/mp2t` instead of being forced to MP4, so H.264 and MPEG-2 TS links make mosaics, also with `reduceSourceReads`. Sources with a known extension aren't read for this.
-- **Clear error for TS codecs AVFoundation can't read.** AVFoundation reads H.264 and MPEG-2 video from a transport stream, but not HEVC, AV1 or MPEG-4 Part 2. Such a source (sniffed, or named `.ts`/`.m2ts`/`.mts`) now fails with `VideoError.unsupportedCodec` naming the transport stream, instead of "Cannot Open" or "Source contains no video track".
+- **MPEG-TS sources without a `.ts` extension.** A source whose path has no known video extension, such as `https://host/download/?fid=…` served as `binary/octet-stream`, or a local file without an extension, is now identified from its first 1 KB (one small range request, cached per URL). A transport stream is opened as `video/mp2t` instead of being forced to MP4, so on macOS H.264 and MPEG-2 TS links make mosaics, also with `reduceSourceReads`. Sources with a known extension aren't read for this.
+- **Clear error for transport streams AVFoundation can't read.** On macOS, AVFoundation reads H.264 and MPEG-2 video from a transport stream, but not HEVC, AV1 or MPEG-4 Part 2; on iOS it reads no standalone transport stream at all. Such a source (sniffed, or named `.ts`/`.m2ts`/`.mts`) now fails with `VideoError.unsupportedCodec` naming the transport stream, instead of "Cannot Open" or "Source contains no video track".
 
 ## New in 1.17.0
 
