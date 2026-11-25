@@ -21,6 +21,12 @@ A high-performance Swift package for generating video mosaics with Metal-acceler
 
 ## Unreleased
 
+- Nothing yet. Add a line here for every change; output-naming and location changes (📁) also get a **Behavior changes** note.
+
+## New in 1.19.0
+
+Minor release on top of 1.18.0: HEVC transport streams on macOS through an opt-in ffmpeg remux. Additive API (`TransportStreamRemuxer`); defaults are unchanged and output names do not change. Upgrading from 1.18.x? [MIGRATING-TO-1.19.md](MIGRATING-TO-1.19.md) lists what can change for your app.
+
 - **HEVC (and AV1, MPEG-4 Part 2) in MPEG-TS on macOS, opt-in.** Call `TransportStreamRemuxer.enable(ffmpegBinaryPath:)` once at startup. A transport stream AVFoundation can't read is then copied into MP4 by ffmpeg (`-c copy`, no re-encode) in a cache folder, and inspection, mosaics, animations, previews and thumbnails read that file. Output names don't change. A remote source is downloaded in full, once; the cache is reused across runs and capped at 20 GB by default (`clearCache()` empties it). H.264/MPEG-2 TS is never remuxed. Not available on iOS or Mac Catalyst. See [MIGRATING-TO-1.19.md](MIGRATING-TO-1.19.md).
 
 ## New in 1.18.0
@@ -367,7 +373,7 @@ Add MosaicKit to your `Package.swift`:
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/fdenis75/MosaicKit.git", from: "1.18.0")
+    .package(url: "https://github.com/fdenis75/MosaicKit.git", from: "1.19.0")
 ]
 ```
 
