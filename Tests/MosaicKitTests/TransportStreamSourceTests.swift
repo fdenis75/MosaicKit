@@ -1,4 +1,5 @@
 import Foundation
+import Synchronization
 import Testing
 @testable import MosaicKit
 
@@ -12,7 +13,9 @@ let transportStreamDecodes = true
 let transportStreamDecodes = false
 #endif
 
-@Suite("MPEG-TS sources")
+/// Serialized: the remux tests turn ``TransportStreamRemuxer`` on for the process, which would
+/// change what the error tests see.
+@Suite("MPEG-TS sources", .serialized)
 struct TransportStreamSourceTests {
     private static func fixture(_ name: String) throws -> URL {
         try #require(Bundle.module.url(forResource: name, withExtension: "ts"))
@@ -120,5 +123,150 @@ struct TransportStreamSourceTests {
         guard case .unsupportedCodec = error else {
             Issue.record("Unexpected error \(String(describing: error))"); return
         }
+    }
+
+    // MARK: Remuxing through ffmpeg (macOS)
+
+    private static var ffmpegPath: String? { TestEnvironment.ffmpegPath }
+
+    /// Runs `body` with remuxing enabled into a new cache folder, then disables it.
+    private static func withRemuxer(_ body: (URL) async throws -> Void) async throws {
+        let cache = FileManager.default.temporaryDirectory
+            .appendingPathComponent("MosaicKitRemuxTest-\(UUID().uuidString)", isDirectory: true)
+        try TransportStreamRemuxer.enable(ffmpegBinaryPath: try #require(ffmpegPath), cacheDirectory: cache)
+        defer {
+            TransportStreamRemuxer.disable()
+            try? FileManager.default.removeItem(at: cache)
+        }
+        try await body(cache)
+    }
+
+    private static func cachedMP4s(_ cache: URL) throws -> [URL] {
+        try FileManager.default.contentsOfDirectory(at: cache, includingPropertiesForKeys: nil)
+            .filter { $0.pathExtension == "mp4" }
+    }
+
+    @Test("With the remuxer, an HEVC transport stream makes a mosaic, remuxed once",
+          .enabled(if: TransportStreamRemuxer.isSupported && ffmpegPath != nil, "needs macOS and an ffmpeg binary"))
+    func remuxHEVC() async throws {
+        let source = try Self.fixture("hevc_stream")
+        let copy = try Self.extensionlessCopy(of: source)
+        defer { try? FileManager.default.removeItem(at: copy.deletingLastPathComponent()) }
+        try await Self.withRemuxer { cache in
+            var config = MosaicConfiguration(width: 640, density: .xxl, format: .jpeg, includeMetadata: false)
+            config.overlay.colorDNA = ColorDNAConfig(show: false)
+            for url in [source, copy] {
+                let video = try await VideoInput(from: url)
+                #expect(video.url == url)
+                #expect(video.width == 320 && video.height == 180)
+                let duration = try #require(video.duration)
+                #expect(abs(duration - 5.9) < 0.3, "duration \(duration)")
+                let image = try await MetalMosaicGenerator().generateMosaicImage(for: video, config: config)
+                #expect(image.width == 640)
+            }
+            // One file per source URL; a second inspection reuses it.
+            #expect(try Self.cachedMP4s(cache).count == 2)
+            let file = TransportStreamRemuxer.cacheFile(for: source, in: cache)
+            let before = try FileManager.default.attributesOfItem(atPath: file.path)[.systemFileNumber] as? Int
+            _ = try await VideoInput(from: source)
+            let after = try FileManager.default.attributesOfItem(atPath: file.path)[.systemFileNumber] as? Int
+            #expect(before == after)
+
+            try TransportStreamRemuxer.clearCache()
+            #expect(try Self.cachedMP4s(cache).isEmpty)
+        }
+    }
+
+    @Test("A transport stream AVFoundation reads itself is not remuxed",
+          .enabled(if: TransportStreamRemuxer.isSupported && ffmpegPath != nil, "needs macOS and an ffmpeg binary"))
+    func noRemuxForH264() async throws {
+        try await Self.withRemuxer { cache in
+            let video = try await VideoInput(from: Self.fixture("test_stream"))
+            #expect(video.width == 320)
+            #expect(try Self.cachedMP4s(cache).isEmpty)
+        }
+    }
+
+    @Test("Concurrent readers of one source share a single remux",
+          .enabled(if: TransportStreamRemuxer.isSupported && ffmpegPath != nil, "needs macOS and an ffmpeg binary"))
+    func concurrentRemux() async throws {
+        let source = try Self.fixture("hevc_stream")
+        try await Self.withRemuxer { cache in
+            let files = try await withThrowingTaskGroup(of: URL.self) { group in
+                for _ in 0..<4 { group.addTask { try await TransportStreamRemuxer.remux(source) } }
+                return try await group.reduce(into: Set<URL>()) { $0.insert($1) }
+            }
+            #expect(files.count == 1)
+            #expect(try Self.cachedMP4s(cache).count == 1)
+        }
+    }
+
+    @Test("Enabling needs an executable ffmpeg")
+    func enableValidates() {
+        #expect(throws: MosaicError.self) {
+            try TransportStreamRemuxer.enable(ffmpegBinaryPath: "/nonexistent/ffmpeg")
+        }
+        #expect(!TransportStreamRemuxer.isEnabled)
+    }
+
+    @Test("ffmpeg arguments: stream copy with hvc1 first, reconnects for remote sources")
+    func remuxArguments() throws {
+        #if os(macOS)
+        let output = URL(fileURLWithPath: "/tmp/out.part.mp4")
+        let local = TransportStreamRemuxer.arguments(source: URL(fileURLWithPath: "/v/a.ts"), output: output,
+                                                     attempt: TransportStreamRemuxer.attempts[0])
+        #expect(local == ["-nostdin", "-hide_banner", "-y", "-i", "/v/a.ts", "-map", "0:v:0", "-map", "0:a:0?",
+                          "-c", "copy", "-tag:v", "hvc1", "-f", "mp4", "/tmp/out.part.mp4"])
+        let remote = TransportStreamRemuxer.arguments(source: URL(string: "https://h/download/?fid=1&s=2")!,
+                                                      output: output, attempt: TransportStreamRemuxer.attempts[2])
+        #expect(remote.contains("-reconnect"))
+        #expect(remote.contains("https://h/download/?fid=1&s=2"))
+        #expect(remote.contains("-an") && !remote.contains("hvc1"))
+        #endif
+    }
+
+    @Test("The cache evicts least recently used files past its size limit")
+    func eviction() throws {
+        let folder = FileManager.default.temporaryDirectory
+            .appendingPathComponent("MosaicKitEvict-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        for (index, name) in ["old", "middle", "new"].enumerated() {
+            let file = folder.appendingPathComponent("\(name).mp4")
+            try Data(count: 100).write(to: file)
+            try FileManager.default.setAttributes([.modificationDate: Date(timeIntervalSinceNow: Double(index - 10))],
+                                                  ofItemAtPath: file.path)
+        }
+        // A remux in progress is never evicted.
+        try Data(count: 100).write(to: folder.appendingPathComponent("running.part.mp4"))
+        TransportStreamRemuxer.evict(in: folder, toFit: 150, maximumBytes: 300)
+        let left = try FileManager.default.contentsOfDirectory(atPath: folder.path).sorted()
+        #expect(left == ["new.mp4", "running.part.mp4"])
+    }
+
+    @Test("Cancelling one reader of a shared remux doesn't fail the others; the last cancel stops it")
+    func sharedRemuxCancellation() async throws {
+        let jobs = RemuxJobs()
+        let source = URL(fileURLWithPath: "/v/shared.ts")
+        let result = URL(fileURLWithPath: "/cache/shared.mp4")
+        let workCancelled = Mutex(false)
+        let work: @Sendable () async throws -> URL = {
+            do { try await Task.sleep(for: .milliseconds(500)) } catch { workCancelled.withLock { $0 = true }; throw error }
+            return result
+        }
+        let cancelled = Task { try await jobs.result(for: source, work) }
+        let kept = Task { try await jobs.result(for: source, work) }
+        try await Task.sleep(for: .milliseconds(50))
+        cancelled.cancel()
+        await #expect(throws: CancellationError.self) { try await cancelled.value }
+        #expect(try await kept.value == result)
+        #expect(!workCancelled.withLock { $0 })
+
+        let only = Task { try await jobs.result(for: source, work) }
+        try await Task.sleep(for: .milliseconds(50))
+        only.cancel()
+        await #expect(throws: CancellationError.self) { try await only.value }
+        try await Task.sleep(for: .milliseconds(50))
+        #expect(workCancelled.withLock { $0 })
     }
 }

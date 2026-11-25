@@ -29,7 +29,7 @@ actor VideoMetadataExtractor {
     /// Optimized for performance with parallel property loading
     func extractMetadataValues(from url: URL) async throws -> VideoMetadataValues {
         try Task.checkCancellation()
-        let asset = await RemoteVideoSupport.makeAsset(url: url)
+        let asset = try await RemoteVideoSupport.makeAsset(url: url)
 
         // Load multiple properties at once for better performance
         let tracks: [AVAssetTrack]
