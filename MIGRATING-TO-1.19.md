@@ -36,8 +36,8 @@ try TransportStreamRemuxer.enable(
   reader of the source then opens the cached MP4: inspection, mosaics, animations, previews and
   thumbnails. Output names, `VideoInput` metadata and the file size still come from the source URL.
 - **Remote sources.** ffmpeg downloads the whole file, once (a 211 MB link costs 211 MB). The MP4
-  is kept in the cache, keyed by the source URL, and reused by later calls and later runs. A
-  refreshed signed URL is a new key. `reduceSourceReads` doesn't apply to remuxed sources.
+  is kept in the cache, keyed by the source URL (plus size and modification date for a local file),
+  and reused by later calls and later runs. A refreshed signed URL is a new key. `reduceSourceReads` doesn't apply to remuxed sources.
 - **Cache.** When the cache grows past `maximumCacheBytes`, the least recently used files are
   deleted. Free space is checked against the source size plus 500 MB before a remux.
 - **Errors.**
@@ -45,8 +45,8 @@ try TransportStreamRemuxer.enable(
     iOS/Catalyst.
   - A failed remux throws `VideoError.processingFailed(url, underlying)`; the underlying error
     carries ffmpeg's output.
-  - A cancelled one throws `CancellationError`. Concurrent readers of one source share a single
-    ffmpeg run, so cancelling one of them stops it for all.
+  - A cancelled reader throws `CancellationError`. Concurrent readers of one source share a single
+    ffmpeg run, which stops only when every one of them has cancelled.
 - **ffmpeg must stay reachable.** The `.ffmpeg` preview mode already requires a binary path;
   sandboxed apps need the same entitlement or bundling.
 

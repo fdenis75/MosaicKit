@@ -1184,18 +1184,22 @@ backbone. Read `LayoutProcessor` algorithms, `ThumbnailProcessor` header/label r
 - **Transport-stream remux (I-38, macOS, opt-in `TransportStreamRemuxer`):** process-wide, because
   `VideoInput(from:)` has no configuration. After `enable(ffmpegBinaryPath:cacheDirectory:maximumCacheBytes:)`,
   `RemoteVideoSupport.makeAsset` (now `async throws`) checks every TS source (sniffed or by
-  extension): a cached remux (`<cache>/<sha256(url)[0..8]>.mp4`, mtime touched on use) is opened
+  extension): a cached remux (`<cache>/<sha256(url [+ size + mtime for files])[0..8]>.mp4`, mtime
+  touched on use) is opened
   directly; otherwise `readsNatively` probes `loadTracks(.video)` once per URL (verdict cached;
   only AVFoundation media errors count as unreadable) and, when AVFoundation can't read it,
   `TransportStreamRemuxer.remux` runs `ffmpeg -nostdin -i <src> -map 0:v:0 -map 0:a:0? -c copy
   -tag:v hvc1 -f mp4 <file>.part.mp4` (then without `hvc1`, which ffmpeg refuses for non-HEVC, then
-  video only), checks AVFoundation reads the result, and renames it. AVFoundation decodes HEVC in
+  video only; only an ffmpeg error exit is retried, a stall or time-out fails at once), checks
+  AVFoundation reads the result, and renames it. AVFoundation decodes HEVC in
   MP4 only with the `hvc1` tag (`hev1`, ffmpeg's default, gives "Cannot Open"; measured
   2026-11-25). Remote sources get `-reconnect` flags and are downloaded in full, once; the cache is
   reused across runs and evicts least recently used files past `maximumCacheBytes` (20 GB by
-  default); free space is checked against the source size + 500 MB. Concurrent readers share one
-  run (`RemuxJobs` actor); a cancel stops it and surfaces as `CancellationError`, a failure as
-  `VideoError.processingFailed(url, …)`. `runFFmpeg` now counts any `time=` advance as progress
+  default; `.part.mp4` files in progress are never evicted); free space is checked against the
+  source size + 500 MB. Concurrent readers share one run (`RemuxJobs` actor, one continuation per
+  waiter): a cancelled reader gets `CancellationError` at once, ffmpeg stops only when the last
+  waiter leaves; a failure is `VideoError.processingFailed(url, …)`. The readability probe uses the
+  caller's `reduceReads`. `runFFmpeg` now counts any `time=` advance as progress
   when the duration is unknown, so the 120 s stall watchdog doesn't kill a long download. Output
   names, metadata and file size still come from the source URL. Not available on iOS/Catalyst
   (`enable` throws `MosaicError.invalidConfiguration`). Measured: a remote extensionless 2-min

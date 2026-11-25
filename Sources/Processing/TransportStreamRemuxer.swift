@@ -117,9 +117,16 @@ public enum TransportStreamRemuxer {
 
     static var currentSettings: Settings? { settings.withLock { $0 } }
 
-    /// The cache file of `source`: the first 16 hex digits of the SHA-256 of its URL.
+    /// The cache file of `source`: the first 16 hex digits of the SHA-256 of its URL, plus, for a
+    /// local file, its size and modification date, so a file rewritten in place is remuxed again.
     static func cacheFile(for source: URL, in directory: URL) -> URL {
-        let digest = SHA256.hash(data: Data(source.absoluteString.utf8))
+        var key = source.absoluteString
+        if source.isFileURL, let attributes = try? FileManager.default.attributesOfItem(atPath: source.path) {
+            let size = (attributes[.size] as? Int64) ?? 0
+            let modified = (attributes[.modificationDate] as? Date)?.timeIntervalSince1970 ?? 0
+            key += "#\(size)#\(modified)"
+        }
+        let digest = SHA256.hash(data: Data(key.utf8))
         let name = digest.prefix(8).map { String(format: "%02x", $0) }.joined()
         return directory.appendingPathComponent("\(name).mp4")
     }
@@ -136,21 +143,16 @@ public enum TransportStreamRemuxer {
 
     /// Remuxes `source` into the cache, or waits for the remux already running for it.
     ///
-    /// - Throws: `CancellationError` when cancelled (a cancel also stops a remux shared with
-    ///   other callers), ``VideoError/processingFailed(_:_:)`` when ffmpeg fails.
+    /// - Throws: `CancellationError` when cancelled (ffmpeg stops once every caller waiting on
+    ///   it has cancelled), ``VideoError/processingFailed(_:_:)`` when ffmpeg fails.
     static func remux(_ source: URL) async throws -> URL {
         #if os(macOS)
         guard let settings = currentSettings else {
             throw MosaicError.invalidConfiguration("Transport-stream remuxing is not enabled")
         }
         if let existing = existingRemux(of: source) { return existing }
-        let task = await RemuxJobs.shared.task(for: source) {
+        return try await RemuxJobs.shared.result(for: source) {
             try await performRemux(source, settings: settings)
-        }
-        return try await withTaskCancellationHandler {
-            try await task.value
-        } onCancel: {
-            task.cancel()
         }
         #else
         throw MosaicError.invalidConfiguration("Transport-stream remuxing needs ffmpeg, which is only available on macOS")
@@ -218,13 +220,23 @@ public enum TransportStreamRemuxer {
                 throw CancellationError()
             } catch is CancellationError {
                 throw CancellationError()
-            } catch {
+            } catch let error as PreviewError {
+                // Only an ffmpeg error exit is worth another attempt (a refused `hvc1` tag fails
+                // at once, before any media is copied). A stall, the time limit or anything else
+                // would only download the source again.
+                guard case .ffmpegEncodingFailed = error else { throw VideoError.processingFailed(source, error) }
                 lastError = error
                 logger.notice("Remux attempt \(attempt.label, privacy: .public) failed: \(error.localizedDescription, privacy: .public)")
                 continue
+            } catch {
+                throw VideoError.processingFailed(source, error)
             }
             if try await hasReadableVideo(partial) {
-                try FileManager.default.moveItem(at: partial, to: destination)
+                do {
+                    try FileManager.default.moveItem(at: partial, to: destination)
+                } catch {
+                    throw VideoError.processingFailed(source, error)
+                }
                 logger.info("Remuxed \(host, privacy: .public) to \(destination.lastPathComponent, privacy: .public)")
                 return destination
             }
@@ -251,7 +263,8 @@ public enum TransportStreamRemuxer {
     static func cachedFiles(in directory: URL) throws -> [(url: URL, size: Int64, used: Date)] {
         let keys: [URLResourceKey] = [.fileSizeKey, .contentModificationDateKey]
         let files = try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: keys)
-        return files.filter { $0.pathExtension == "mp4" }.compactMap { url in
+        // `<hash>.part.mp4` is a remux in progress: never evicted or cleared.
+        return files.filter { $0.pathExtension == "mp4" && !$0.lastPathComponent.hasSuffix(".part.mp4") }.compactMap { url in
             guard let values = try? url.resourceValues(forKeys: Set(keys)) else { return nil }
             return (url, Int64(values.fileSize ?? 0), values.contentModificationDate ?? .distantPast)
         }.sorted { $0.used < $1.used }
@@ -271,19 +284,66 @@ public enum TransportStreamRemuxer {
 }
 
 /// The remux running for each source, so concurrent readers share one ffmpeg run.
+///
+/// Each reader is a waiter. A cancelled waiter stops waiting at once with `CancellationError`;
+/// ffmpeg is stopped only when the last waiter leaves, so cancelling one job (say a preview)
+/// doesn't fail another job reading the same source (a mosaic).
 actor RemuxJobs {
     static let shared = RemuxJobs()
-    private var running: [URL: Task<URL, any Error>] = [:]
 
-    func task(for source: URL, _ work: @escaping @Sendable () async throws -> URL) -> Task<URL, any Error> {
-        if let task = running[source] { return task }
-        // The task runs on this actor (it uses `self`), so it can't start, nor finish, before
-        // it is stored below.
-        let task = Task<URL, any Error> {
-            defer { self.running[source] = nil }
-            return try await work()
+    private struct Job {
+        let task: Task<Void, Never>
+        var waiters: [UUID: CheckedContinuation<URL, any Error>] = [:]
+    }
+    private var jobs: [URL: Job] = [:]
+    /// Waiters cancelled before they joined (the cancel handler can run first).
+    private var cancelledBeforeJoining: Set<UUID> = []
+
+    /// The remuxed file of `source`, from the running remux or a new one made by `work`.
+    nonisolated func result(for source: URL, _ work: @escaping @Sendable () async throws -> URL) async throws -> URL {
+        let id = UUID()
+        return try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { continuation in
+                Task { await self.join(source, id: id, continuation: continuation, work: work) }
+            }
+        } onCancel: {
+            Task { await self.leave(source, id: id) }
         }
-        running[source] = task
-        return task
+    }
+
+    private func join(_ source: URL, id: UUID, continuation: CheckedContinuation<URL, any Error>,
+                      work: @escaping @Sendable () async throws -> URL) {
+        if cancelledBeforeJoining.remove(id) != nil {
+            continuation.resume(throwing: CancellationError())
+            return
+        }
+        if jobs[source] == nil {
+            let task = Task {
+                let outcome: Result<URL, any Error>
+                do { outcome = .success(try await work()) } catch { outcome = .failure(error) }
+                self.complete(source, with: outcome)
+            }
+            jobs[source] = Job(task: task)
+        }
+        jobs[source]?.waiters[id] = continuation
+    }
+
+    private func leave(_ source: URL, id: UUID) {
+        guard var job = jobs[source], let continuation = job.waiters.removeValue(forKey: id) else {
+            cancelledBeforeJoining.insert(id)
+            return
+        }
+        continuation.resume(throwing: CancellationError())
+        if job.waiters.isEmpty {
+            job.task.cancel()
+            jobs[source] = nil   // a later reader starts a new remux instead of joining a cancelled one
+        } else {
+            jobs[source] = job
+        }
+    }
+
+    private func complete(_ source: URL, with outcome: Result<URL, any Error>) {
+        guard let job = jobs.removeValue(forKey: source) else { return }
+        for continuation in job.waiters.values { continuation.resume(with: outcome) }
     }
 }

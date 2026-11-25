@@ -1,4 +1,5 @@
 import Foundation
+import Synchronization
 import Testing
 @testable import MosaicKit
 
@@ -236,8 +237,36 @@ struct TransportStreamSourceTests {
             try FileManager.default.setAttributes([.modificationDate: Date(timeIntervalSinceNow: Double(index - 10))],
                                                   ofItemAtPath: file.path)
         }
+        // A remux in progress is never evicted.
+        try Data(count: 100).write(to: folder.appendingPathComponent("running.part.mp4"))
         TransportStreamRemuxer.evict(in: folder, toFit: 150, maximumBytes: 300)
         let left = try FileManager.default.contentsOfDirectory(atPath: folder.path).sorted()
-        #expect(left == ["new.mp4"])
+        #expect(left == ["new.mp4", "running.part.mp4"])
+    }
+
+    @Test("Cancelling one reader of a shared remux doesn't fail the others; the last cancel stops it")
+    func sharedRemuxCancellation() async throws {
+        let jobs = RemuxJobs()
+        let source = URL(fileURLWithPath: "/v/shared.ts")
+        let result = URL(fileURLWithPath: "/cache/shared.mp4")
+        let workCancelled = Mutex(false)
+        let work: @Sendable () async throws -> URL = {
+            do { try await Task.sleep(for: .milliseconds(500)) } catch { workCancelled.withLock { $0 = true }; throw error }
+            return result
+        }
+        let cancelled = Task { try await jobs.result(for: source, work) }
+        let kept = Task { try await jobs.result(for: source, work) }
+        try await Task.sleep(for: .milliseconds(50))
+        cancelled.cancel()
+        await #expect(throws: CancellationError.self) { try await cancelled.value }
+        #expect(try await kept.value == result)
+        #expect(!workCancelled.withLock { $0 })
+
+        let only = Task { try await jobs.result(for: source, work) }
+        try await Task.sleep(for: .milliseconds(50))
+        only.cancel()
+        await #expect(throws: CancellationError.self) { try await only.value }
+        try await Task.sleep(for: .milliseconds(50))
+        #expect(workCancelled.withLock { $0 })
     }
 }

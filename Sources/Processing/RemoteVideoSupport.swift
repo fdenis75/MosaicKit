@@ -58,7 +58,7 @@ enum RemoteVideoSupport {
             if let remuxed = TransportStreamRemuxer.existingRemux(of: url) {
                 return AVURLAsset(url: remuxed, options: options)
             }
-            if try await !readsNatively(url, container: container) {
+            if try await !readsNatively(url, container: container, reduceReads: reduceReads) {
                 return AVURLAsset(url: try await TransportStreamRemuxer.remux(url), options: options)
             }
         }
@@ -105,7 +105,7 @@ enum RemoteVideoSupport {
     /// probe runs once. Only consulted when ``TransportStreamRemuxer`` is enabled.
     private static let nativeReadability = Mutex<[URL: Bool]>([:])
 
-    /// Forgets every cached ``readsNatively(_:container:)`` verdict.
+    /// Forgets every cached ``readsNatively(_:container:reduceReads:)`` verdict.
     static func forgetNativeReadability() {
         nativeReadability.withLock { $0.removeAll() }
     }
@@ -114,9 +114,10 @@ enum RemoteVideoSupport {
     /// `false`; cancellation is rethrown, and any other error (network) means `true`, so the
     /// reader that follows reports it instead of a remux being started. Only a verdict reached
     /// without error is cached.
-    static func readsNatively(_ url: URL, container: ContainerSniffer.Container?) async throws -> Bool {
+    static func readsNatively(_ url: URL, container: ContainerSniffer.Container?,
+                              reduceReads: Bool = false) async throws -> Bool {
         if let known = nativeReadability.withLock({ $0[url] }) { return known }
-        let asset = nativeAsset(url: url, options: [:], reduceReads: false, container: container)
+        let asset = nativeAsset(url: url, options: [:], reduceReads: reduceReads, container: container)
         let readable: Bool
         do {
             readable = try await !asset.loadTracks(withMediaType: .video).isEmpty
