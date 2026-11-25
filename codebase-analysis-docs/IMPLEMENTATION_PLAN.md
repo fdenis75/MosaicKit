@@ -129,6 +129,7 @@ flowchart LR
 - **1.16.1** (2026-11-16): iOS build fix for the remote read metering (#94).
 - **1.16.2** (2026-11-21): `.ffmpeg` export no longer hangs when run from a terminal (I-32, #95).
 - **1.17.0** (2026-11-21): opt-in low-data reads, `MosaicConfiguration.reduceSourceReads` (R-1, I-33, #96), and `MosaicConfiguration.minimal()`; additive API, no output name change.
+- **1.18.0** (2026-11-25): MPEG-TS sources without a known extension: container sniffing and a clear `VideoError.unsupportedCodec` for HEVC/AV1/MPEG-4 Part 2 in TS (T-1, I-38, #98); no API or config change, no output name change.
 - **2.0.0** removes everything deprecated in S-6.
 
 ## 8. Tracking
@@ -170,7 +171,7 @@ Every PR updates its row here (status) and the matching §4.2 / §6.1 entries in
 | U-4 | uneven tiles: options (optional) | planned | |
 | U-5 | uneven tiles: hero emphasis and fallback variant (optional) | planned | |
 | R-1 | low-data reads: `reduceSourceReads` (range loader + keyframe snapping), I-33 ⚡ | done (#96, released in 1.17.0); A/B/A gate passed 2026-11-21 (flag off: every median within ±4 % of the closer `main` run; §8.1); byte measurements in KB §F2 | |
-| T-1 | MPEG-TS sources: container sniffing + clear unsupported-codec error, I-38 | done (released in 1.18.0); no hot-path change: sources with a known extension do no extra I/O | |
+| T-1 | MPEG-TS sources: container sniffing + clear unsupported-codec error, I-38 | done (#98, released in 1.18.0); no hot-path change: sources with a known extension do no extra I/O | |
 
 ### 8.1 Benchmark baseline
 
