@@ -145,6 +145,7 @@ MosaicKit/
 | `AnimatedGifGenerator` | `Processing/AnimatedGifGenerator.swift` | GIF / HEICS / WebP export |
 | `OutputTransaction` | `Processing/OutputTransaction.swift` | Staged output publication (shared by 6 features) |
 | `VideoMetadataExtractor` | `Processing/VideoMetadataExtractor.swift` | AVFoundation metadata |
+| `RemoteVideoSupport`, `ContainerSniffer` | `Processing/RemoteVideoSupport.swift`, `Processing/ContainerSniffer.swift` | Asset creation: MIME override for sources without a known extension, sniffed from their first 1 KB (I-30, I-38) |
 | `scanVideos(in:recursive:)` | `VideoInputScanner.swift` | Directory scan → `[VideoInput]` |
 | `PreviewVideoGenerator` | `Processing/Preview/PreviewVideoGenerator.swift` | Highlight-reel generation |
 | `PreviewGeneratorCoordinator` | `Processing/Preview/PreviewGeneratorCoordinator.swift` | Concurrent preview batches |

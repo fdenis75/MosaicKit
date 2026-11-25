@@ -29,16 +29,28 @@ actor VideoMetadataExtractor {
     /// Optimized for performance with parallel property loading
     func extractMetadataValues(from url: URL) async throws -> VideoMetadataValues {
         try Task.checkCancellation()
-        let asset = RemoteVideoSupport.makeAsset(url: url)
+        let asset = await RemoteVideoSupport.makeAsset(url: url)
 
         // Load multiple properties at once for better performance
-        let (tracks, duration) = try await asset.load(.tracks, .duration)
+        let tracks: [AVAssetTrack]
+        let duration: CMTime
+        do {
+            (tracks, duration) = try await asset.load(.tracks, .duration)
+        } catch {
+            // HEVC or AV1 in an MPEG transport stream: "Cannot Open" (I-38). Cancellation and
+            // network errors keep their own error.
+            if RemoteVideoSupport.isUnreadableMediaError(error),
+               let unreadable = await RemoteVideoSupport.unreadableTransportStreamError(for: url) { throw unreadable }
+            throw error
+        }
         try Task.checkCancellation()
+        guard tracks.contains(where: { $0.mediaType == .video }) else {
+            // MPEG-4 Part 2 in TS opens with no video track (I-38).
+            if let unreadable = await RemoteVideoSupport.unreadableTransportStreamError(for: url) { throw unreadable }
+            throw MosaicError.invalidVideo("Source contains no video track")
+        }
         guard duration.seconds.isFinite, duration.seconds > 0 else {
             throw MosaicError.invalidVideo("Video duration must be finite and positive")
-        }
-        guard tracks.contains(where: { $0.mediaType == .video }) else {
-            throw MosaicError.invalidVideo("Source contains no video track")
         }
        
         var resolution: String?

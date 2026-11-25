@@ -5,13 +5,19 @@ import Testing
 @testable import MosaicKit
 
 /// Serves the embedded `test_video.mp4` for any `https` URL, honoring `Range` headers, and counts
-/// the body bytes it returns. Host `norange.test` ignores ranges and always sends the whole file.
+/// the body bytes it returns. Host `norange.test` ignores ranges and always sends the whole file;
+/// host `ts.test` serves `test_stream.ts` (an MPEG transport stream) as `binary/octet-stream`.
 /// No network I/O: the URLs are synthetic and never leave the process.
 final class FixtureRangeURLProtocol: URLProtocol, @unchecked Sendable {
     static let servedBytes = Mutex<Int64>(0)
     static let requests = Mutex<Int>(0)
     static let fixture: Data = {
         guard let url = Bundle.module.url(forResource: "test_video", withExtension: "mp4"),
+              let data = try? Data(contentsOf: url) else { return Data() }
+        return data
+    }()
+    static let transportStream: Data = {
+        guard let url = Bundle.module.url(forResource: "test_stream", withExtension: "ts"),
               let data = try? Data(contentsOf: url) else { return Data() }
         return data
     }()
@@ -27,11 +33,12 @@ final class FixtureRangeURLProtocol: URLProtocol, @unchecked Sendable {
 
     override func startLoading() {
         guard let url = request.url else { return }
-        let data = Self.fixture
+        let isTransportStream = url.host() == "ts.test"
+        let data = isTransportStream ? Self.transportStream : Self.fixture
         let total = data.count
         var status = 200
         var body = data
-        var headers = ["Content-Type": "video/mp4", "Accept-Ranges": "bytes"]
+        var headers = ["Content-Type": isTransportStream ? "binary/octet-stream" : "video/mp4", "Accept-Ranges": "bytes"]
         if url.host() != "norange.test", let range = request.value(forHTTPHeaderField: "Range"),
            let match = range.firstMatch(of: /bytes=(\d+)-(\d*)/) {
             let start = Int(match.1) ?? 0
@@ -118,15 +125,15 @@ struct ReduceSourceReadsTests {
     // MARK: Loader
 
     @Test("Only http and https sources go through the range loader")
-    func loaderScope() throws {
+    func loaderScope() async throws {
         let local = try #require(Self.fixtureURL)
         #expect(RangeRequestLoader.supports(URL(string: "https://host/video.mp4")!))
         #expect(RangeRequestLoader.supports(URL(string: "http://host/video")!))
         #expect(!RangeRequestLoader.supports(local))
         #expect(!RangeRequestLoader.supports(URL(string: "https://host/live/index.m3u8")!))
-        #expect(RemoteVideoSupport.makeAsset(url: local, reduceReads: true).url == local)
-        let remote = RemoteVideoSupport.makeAsset(url: URL(string: "https://host/dl?fid=1")!, reduceReads: true)
-        #expect(remote.url.absoluteString == "mosaickit-https://host/dl?fid=1")
+        #expect(await RemoteVideoSupport.makeAsset(url: local, reduceReads: true).url == local)
+        let remote = await RemoteVideoSupport.makeAsset(url: URL(string: "https://host/dl.mp4?fid=1")!, reduceReads: true)
+        #expect(remote.url.absoluteString == "mosaickit-https://host/dl.mp4?fid=1")
     }
 
     @Test("The parser type comes from the extension, then the MIME type, else MPEG-4")
@@ -134,6 +141,25 @@ struct ReduceSourceReadsTests {
         #expect(RangeRequestLoader.uti(for: URL(string: "https://h/a.mov")!, mimeType: nil) == "com.apple.quicktime-movie")
         #expect(RangeRequestLoader.uti(for: URL(string: "https://h/dl")!, mimeType: "video/quicktime") == "com.apple.quicktime-movie")
         #expect(RangeRequestLoader.uti(for: URL(string: "https://h/dl")!, mimeType: "application/octet-stream") == "public.mpeg-4")
+        // I-38: a sniffed container wins over the server's MIME type, not over the extension.
+        #expect(RangeRequestLoader.uti(for: URL(string: "https://h/dl")!, mimeType: "application/octet-stream",
+                                       container: .transportStream) == "public.mpeg-2-transport-stream")
+        #expect(RangeRequestLoader.uti(for: URL(string: "https://h/a.mov")!, mimeType: nil,
+                                       container: .transportStream) == "com.apple.quicktime-movie")
+    }
+
+    @Test("An extensionless transport stream reads through the range loader (I-38)",
+          .enabled(if: transportStreamDecodes, "AVFoundation on iOS doesn't read transport streams"))
+    func loaderReadsTransportStream() async throws {
+        let session = FixtureRangeURLProtocol.session()
+        let url = URL(string: "https://ts.test/download/?fid=1")!
+        #expect(await ContainerSniffer.leadingBytes(of: url, session: session).map(ContainerSniffer.container(of:)) == .transportStream)
+        let asset = RangeRequestLoader.makeAsset(url: url, options: [AVURLAssetOverrideMIMETypeKey: "video/mp2t"],
+                                                 container: .transportStream, session: session)
+        let frames = try await ThumbnailProcessor(config: .default).extractFrames(
+            from: asset, count: 3, maximumSize: CGSize(width: 160, height: 90),
+            accurate: false, snapToKeyframes: true, policy: .uniform)
+        #expect(frames.count == 3)
     }
 
     @Test("Frames read through the range loader match the local file and read part of it")

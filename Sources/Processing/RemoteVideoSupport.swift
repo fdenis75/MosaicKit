@@ -10,6 +10,7 @@ private let logger = Logger(subsystem: "com.mosaicKit", category: "remote-video"
 /// AVFoundation picks the container parser of a network URL from its path extension or the
 /// server's `Content-Type`. A download link such as `https://host/download/?fid=…` served as
 /// `application/octet-stream` has neither, so a plain `AVURLAsset` fails with "Cannot Open".
+/// Such sources are identified from their first bytes by ``ContainerSniffer`` (I-38).
 enum RemoteVideoSupport {
     /// Path extensions AVFoundation recognizes on a network URL without a MIME override.
     static let recognizedExtensions: Set<String> = [
@@ -18,12 +19,27 @@ enum RemoteVideoSupport {
 
     /// The MIME type `AVURLAsset` is told to assume for a source, or `nil` to let it decide.
     ///
-    /// Local files are sniffed by AVFoundation, and a remote URL with a known video extension is
-    /// parsed from that extension, so both get `nil`. Any other remote URL is read as MPEG-4
-    /// (`video/mp4`), which the QuickTime parser also opens for `.mov` content.
-    static func overrideMIMEType(for url: URL) -> String? {
-        guard !url.isFileURL, !hasRecognizedExtension(url) else { return nil }
-        return "video/mp4"
+    /// A source with a known video extension is parsed from that extension, so it gets `nil` and
+    /// is never read here. Any other source is identified from its first bytes (I-38): an MPEG
+    /// transport stream gets `video/mp2t`, an MP4/QuickTime file `video/mp4`. When the bytes say
+    /// neither, a remote URL is read as MPEG-4 (`video/mp4`, which the QuickTime parser also opens
+    /// for `.mov` content, I-30) and a local file is left to AVFoundation, as before.
+    static func overrideMIMEType(for url: URL) async -> String? {
+        guard let container = await sourceContainer(for: url) else { return nil }
+        return overrideMIMEType(for: url, container: container)
+    }
+
+    /// ``overrideMIMEType(for:)`` once the container of a source without a known extension is known.
+    static func overrideMIMEType(for url: URL, container: ContainerSniffer.Container) -> String? {
+        guard !hasRecognizedExtension(url) else { return nil }
+        return container.mimeType ?? (url.isFileURL ? nil : "video/mp4")
+    }
+
+    /// The sniffed container of a source without a known video extension, or `nil` for one with
+    /// such an extension (which is never read). Cached per URL by ``ContainerSniffer``.
+    static func sourceContainer(for url: URL) async -> ContainerSniffer.Container? {
+        guard !hasRecognizedExtension(url) else { return nil }
+        return await ContainerSniffer.container(of: url)
     }
 
     /// Creates the asset every reader of `url` uses, adding the MIME override when needed.
@@ -31,15 +47,56 @@ enum RemoteVideoSupport {
     /// With `reduceReads`, an `http`/`https` source is read through a ``RangeRequestLoader``
     /// (small on-demand range requests) instead of AVFoundation's own loader. It changes nothing
     /// for a local file.
-    static func makeAsset(url: URL, options: [String: Any] = [:], reduceReads: Bool = false) -> AVURLAsset {
-        if reduceReads, RangeRequestLoader.supports(url) {
-            return RangeRequestLoader.makeAsset(url: url, options: options)
-        }
+    static func makeAsset(url: URL, options: [String: Any] = [:], reduceReads: Bool = false) async -> AVURLAsset {
+        let container = await sourceContainer(for: url)
         var options = options
-        if let mimeType = overrideMIMEType(for: url) {
+        // The range loader needs the override too: AVFoundation picks the parser of an
+        // extensionless URL before it asks the loader for the content type.
+        if let container, let mimeType = overrideMIMEType(for: url, container: container) {
             options[AVURLAssetOverrideMIMETypeKey] = mimeType
         }
+        if reduceReads, RangeRequestLoader.supports(url) {
+            return RangeRequestLoader.makeAsset(url: url, options: options, container: container)
+        }
         return AVURLAsset(url: url, options: options)
+    }
+
+    /// AVFoundation error codes meaning "this media can't be read" (not a cancel or network
+    /// error): format not recognized, failed to parse, media cannot be used (-11869, HEVC/AV1 in
+    /// TS), decoder not found, decode failed.
+    static let unreadableMediaErrorCodes: Set<Int> = [-11828, -11829, -11869, -11833, -11821]
+
+    /// Whether `error` is AVFoundation refusing the media itself, so it may be reported as
+    /// ``unreadableTransportStreamError(for:)``. Cancellation and network errors are not.
+    static func isUnreadableMediaError(_ error: any Error) -> Bool {
+        let error = error as NSError
+        return error.domain == AVFoundationErrorDomain && unreadableMediaErrorCodes.contains(error.code)
+    }
+
+    /// Path extensions of MPEG transport streams.
+    static let transportStreamExtensions: Set<String> = ["ts", "m2ts", "mts"]
+
+    /// What AVFoundation can't read from an MPEG transport stream on this platform (I-38): on
+    /// macOS its TS demuxer reads H.264 and MPEG-2 video only; on iOS (measured on the iOS
+    /// Simulator in CI) it opens no standalone transport stream at all.
+    #if os(macOS)
+    static let unreadableTransportStreamDescription =
+        "an MPEG transport stream whose video isn't H.264 or MPEG-2 (HEVC and AV1 in TS can't be read)"
+    #else
+    static let unreadableTransportStreamDescription =
+        "an MPEG transport stream (.ts), a container this platform can't read"
+    #endif
+
+    /// The error for a source AVFoundation opened but can't read video from, when that source
+    /// is an MPEG transport stream: on macOS HEVC or AV1 in TS gives "Cannot Open" and MPEG-4
+    /// Part 2 no video track; on iOS every TS fails (I-38). `nil` for other sources, whose
+    /// original error is kept.
+    static func unreadableTransportStreamError(for url: URL) async -> VideoError? {
+        let isTransportStream = transportStreamExtensions.contains(url.pathExtension.lowercased())
+        if !isTransportStream {
+            guard await sourceContainer(for: url) == .transportStream else { return nil }
+        }
+        return .unsupportedCodec(url, unreadableTransportStreamDescription)
     }
 
     /// Whether `url`'s path ends in an extension from ``recognizedExtensions``.
