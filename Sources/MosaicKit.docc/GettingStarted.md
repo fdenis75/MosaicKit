@@ -385,6 +385,24 @@ Available tokens for `PreviewConfiguration`: `{root}`, `{duration}`, `{density}`
 
 When either template is `nil` (the default), the existing naming logic is used unchanged.
 
+## MPEG-TS sources (macOS)
+
+AVFoundation reads H.264 and MPEG-2 video from a transport stream (`.ts`), but not HEVC, AV1 or
+MPEG-4 Part 2; on iOS it reads no standalone transport stream. Such sources fail with
+``VideoError/unsupportedCodec(_:_:)``. On macOS, with an `ffmpeg` binary, turn on
+``TransportStreamRemuxer`` once at startup: those streams are then copied into MP4 (no
+re-encode) in a cache folder and read from there.
+
+```swift
+#if os(macOS)
+try TransportStreamRemuxer.enable(ffmpegBinaryPath: "/opt/homebrew/bin/ffmpeg")
+#endif
+let input = try await VideoInput(from: hevcTransportStreamURL)  // remuxed here, once
+```
+
+A remote source is downloaded in full, once; the cache is reused across runs and capped at
+20 GB by default (``TransportStreamRemuxer/clearCache()`` empties it).
+
 ## Error Handling
 
 MosaicKit provides comprehensive error types:

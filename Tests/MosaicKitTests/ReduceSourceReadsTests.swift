@@ -131,8 +131,8 @@ struct ReduceSourceReadsTests {
         #expect(RangeRequestLoader.supports(URL(string: "http://host/video")!))
         #expect(!RangeRequestLoader.supports(local))
         #expect(!RangeRequestLoader.supports(URL(string: "https://host/live/index.m3u8")!))
-        #expect(await RemoteVideoSupport.makeAsset(url: local, reduceReads: true).url == local)
-        let remote = await RemoteVideoSupport.makeAsset(url: URL(string: "https://host/dl.mp4?fid=1")!, reduceReads: true)
+        #expect(try await RemoteVideoSupport.makeAsset(url: local, reduceReads: true).url == local)
+        let remote = try await RemoteVideoSupport.makeAsset(url: URL(string: "https://host/dl.mp4?fid=1")!, reduceReads: true)
         #expect(remote.url.absoluteString == "mosaickit-https://host/dl.mp4?fid=1")
     }
 

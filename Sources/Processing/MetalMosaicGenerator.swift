@@ -148,7 +148,7 @@ public actor MetalMosaicGenerator: MosaicGeneratorProtocol {
                         if config.gifMode == .withMosaic {
                             let animationURL = config.animatedOutputURL(for: video, referenceDate: referenceDate)
                             if !FileManager.default.fileExists(atPath: animationURL.path) {
-                                let asset = await RemoteVideoSupport.makeAsset(url: video.url, reduceReads: config.reduceSourceReads)
+                                let asset = try await RemoteVideoSupport.makeAsset(url: video.url, reduceReads: config.reduceSourceReads)
                                 let duration: Double
                                 if let known = video.duration { duration = known } else { duration = try await asset.load(.duration).seconds }
                                 guard duration.isFinite, duration > 0 else { throw MosaicError.invalidVideo("Invalid duration") }
@@ -330,7 +330,7 @@ public actor MetalMosaicGenerator: MosaicGeneratorProtocol {
         forIphone: Bool,
         progressHandler: (@Sendable (MosaicGenerationProgress) -> Void)?
     ) async throws -> MosaicPlan {
-        let asset = await RemoteVideoSupport.makeAsset(url: video.url, reduceReads: config.reduceSourceReads)
+        let asset = try await RemoteVideoSupport.makeAsset(url: video.url, reduceReads: config.reduceSourceReads)
         try await Self.checkTransportStreamReadable(asset, url: video.url)
         let duration: Double
         if let known = video.duration { duration = known } else { duration = try await asset.load(.duration).seconds }

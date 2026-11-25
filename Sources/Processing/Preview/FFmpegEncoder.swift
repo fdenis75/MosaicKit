@@ -310,8 +310,6 @@ enum FFmpegEncoder {
                 buffer = String((buffer + chunk).suffix(8192))
                 return buffer
             }
-            guard totalDuration.isFinite, totalDuration > 0 else { return }
-
             // Parse every "time=HH:MM:SS.ss" token; keep only the last value.
             // Operate on a snapshot to avoid index-invalidation if the buffer is trimmed below.
             var latestElapsed: Double?
@@ -326,11 +324,16 @@ enum FFmpegEncoder {
                 latestElapsed = h * 3600 + m * 60 + s + cs / 100
                 searchStart = match.range.upperBound
             }
-            if let elapsed = latestElapsed {
-                let fraction = min(elapsed / totalDuration, 1.0)
-                progressTracker.recordProgress(fraction)
-                progressHandler(fraction, "FFmpeg: \(Int(fraction * 100))%")
+            guard let elapsed = latestElapsed else { return }
+            guard totalDuration.isFinite, totalDuration > 0 else {
+                // Unknown length (a transport-stream remux, I-38): any advance of the media time
+                // still counts as progress for the stall watchdog.
+                progressTracker.recordProgress(elapsed)
+                return
             }
+            let fraction = min(elapsed / totalDuration, 1.0)
+            progressTracker.recordProgress(fraction)
+            progressHandler(fraction, "FFmpeg: \(Int(fraction * 100))%")
 
         }
 

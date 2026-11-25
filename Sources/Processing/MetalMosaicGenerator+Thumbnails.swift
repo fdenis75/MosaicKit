@@ -86,7 +86,7 @@ extension MetalMosaicGenerator {
         // whole decode so a user-selected file stays readable in a sandboxed app.
         let didStartAccessingSource = video.url.startAccessingSecurityScopedResource()
         defer { if didStartAccessingSource { video.url.stopAccessingSecurityScopedResource() } }
-        let asset = await RemoteVideoSupport.makeAsset(url: video.url)
+        let asset = try await RemoteVideoSupport.makeAsset(url: video.url)
         let duration: Double
         if let known = video.duration { duration = known } else { duration = try await asset.load(.duration).seconds }
         guard duration.isFinite, duration > 0 else { throw MosaicError.invalidVideo("Invalid duration") }

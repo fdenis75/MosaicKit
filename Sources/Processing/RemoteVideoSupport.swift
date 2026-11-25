@@ -2,6 +2,7 @@ import AVFoundation
 import CryptoKit
 import Foundation
 import OSLog
+import Synchronization
 
 private let logger = Logger(subsystem: "com.mosaicKit", category: "remote-video")
 
@@ -47,8 +48,27 @@ enum RemoteVideoSupport {
     /// With `reduceReads`, an `http`/`https` source is read through a ``RangeRequestLoader``
     /// (small on-demand range requests) instead of AVFoundation's own loader. It changes nothing
     /// for a local file.
-    static func makeAsset(url: URL, options: [String: Any] = [:], reduceReads: Bool = false) async -> AVURLAsset {
+    ///
+    /// With ``TransportStreamRemuxer`` enabled (macOS), a transport stream AVFoundation can't read
+    /// video from is remuxed to MP4 first, and the asset opens that local file (I-38).
+    static func makeAsset(url: URL, options: [String: Any] = [:], reduceReads: Bool = false) async throws -> AVURLAsset {
         let container = await sourceContainer(for: url)
+        #if os(macOS)
+        if TransportStreamRemuxer.isEnabled, isTransportStream(url, container: container) {
+            if let remuxed = TransportStreamRemuxer.existingRemux(of: url) {
+                return AVURLAsset(url: remuxed, options: options)
+            }
+            if try await !readsNatively(url, container: container) {
+                return AVURLAsset(url: try await TransportStreamRemuxer.remux(url), options: options)
+            }
+        }
+        #endif
+        return nativeAsset(url: url, options: options, reduceReads: reduceReads, container: container)
+    }
+
+    /// The asset AVFoundation reads `url` with by itself (no remux).
+    private static func nativeAsset(url: URL, options: [String: Any], reduceReads: Bool,
+                                    container: ContainerSniffer.Container?) -> AVURLAsset {
         var options = options
         // The range loader needs the override too: AVFoundation picks the parser of an
         // extensionless URL before it asks the loader for the content type.
@@ -76,6 +96,43 @@ enum RemoteVideoSupport {
     /// Path extensions of MPEG transport streams.
     static let transportStreamExtensions: Set<String> = ["ts", "m2ts", "mts"]
 
+    /// Whether `url` is a transport stream: by extension, or by its sniffed `container`.
+    static func isTransportStream(_ url: URL, container: ContainerSniffer.Container?) -> Bool {
+        transportStreamExtensions.contains(url.pathExtension.lowercased()) || container == .transportStream
+    }
+
+    /// Whether AVFoundation reads a video track from each transport stream, cached per URL so the
+    /// probe runs once. Only consulted when ``TransportStreamRemuxer`` is enabled.
+    private static let nativeReadability = Mutex<[URL: Bool]>([:])
+
+    /// Forgets every cached ``readsNatively(_:container:)`` verdict.
+    static func forgetNativeReadability() {
+        nativeReadability.withLock { $0.removeAll() }
+    }
+
+    /// Whether AVFoundation reads video from `url` without help. Unreadable-media errors mean
+    /// `false`; cancellation is rethrown, and any other error (network) means `true`, so the
+    /// reader that follows reports it instead of a remux being started. Only a verdict reached
+    /// without error is cached.
+    static func readsNatively(_ url: URL, container: ContainerSniffer.Container?) async throws -> Bool {
+        if let known = nativeReadability.withLock({ $0[url] }) { return known }
+        let asset = nativeAsset(url: url, options: [:], reduceReads: false, container: container)
+        let readable: Bool
+        do {
+            readable = try await !asset.loadTracks(withMediaType: .video).isEmpty
+        } catch is CancellationError {
+            throw CancellationError()
+        } catch {
+            guard isUnreadableMediaError(error) else { return true }
+            readable = false
+        }
+        nativeReadability.withLock { cache in
+            if cache.count >= 1024 { cache.removeAll() }
+            cache[url] = readable
+        }
+        return readable
+    }
+
     /// What AVFoundation can't read from an MPEG transport stream on this platform (I-38): on
     /// macOS its TS demuxer reads H.264 and MPEG-2 video only; on iOS (measured on the iOS
     /// Simulator in CI) it opens no standalone transport stream at all.
@@ -92,8 +149,7 @@ enum RemoteVideoSupport {
     /// Part 2 no video track; on iOS every TS fails (I-38). `nil` for other sources, whose
     /// original error is kept.
     static func unreadableTransportStreamError(for url: URL) async -> VideoError? {
-        let isTransportStream = transportStreamExtensions.contains(url.pathExtension.lowercased())
-        if !isTransportStream {
+        if !transportStreamExtensions.contains(url.pathExtension.lowercased()) {
             guard await sourceContainer(for: url) == .transportStream else { return nil }
         }
         return .unsupportedCodec(url, unreadableTransportStreamDescription)

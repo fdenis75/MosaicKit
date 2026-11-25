@@ -299,7 +299,7 @@ struct PreviewGenerationLogic {
         progressHandler(0.0, .analyzing, nil, nil)
         
         // Load asset
-        let asset = await RemoteVideoSupport.makeAsset(url: video.url, options: [AVURLAssetPreferPreciseDurationAndTimingKey: true])
+        let asset = try await RemoteVideoSupport.makeAsset(url: video.url, options: [AVURLAssetPreferPreciseDurationAndTimingKey: true])
         
         // Validate
         try await validateVideo(asset: asset, video: video, config: config)
@@ -421,7 +421,7 @@ struct PreviewGenerationLogic {
         progressHandler(0.0, .analyzing, nil, nil)
         
         // Load asset
-        let asset = await RemoteVideoSupport.makeAsset(url: video.url, options: [AVURLAssetPreferPreciseDurationAndTimingKey: true])
+        let asset = try await RemoteVideoSupport.makeAsset(url: video.url, options: [AVURLAssetPreferPreciseDurationAndTimingKey: true])
         
         // Validate
         try await validateVideo(asset: asset, video: video, config: config)
