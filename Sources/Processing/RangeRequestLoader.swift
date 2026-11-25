@@ -44,13 +44,16 @@ final class RangeRequestLoader: NSObject, AVAssetResourceLoaderDelegate, Sendabl
     }
 
     let sourceURL: URL
+    /// The container sniffed from the source's first bytes, when its extension doesn't say (I-38).
+    let container: ContainerSniffer.Container?
     let queue = DispatchQueue(label: "com.mosaicKit.range-loader")
     private let session: URLSession
     private let info = Mutex<ContentInfo?>(nil)
     private let tasks = Mutex<[ObjectIdentifier: Task<Void, Never>]>([:])
 
-    init(sourceURL: URL, session: URLSession = .shared) {
+    init(sourceURL: URL, container: ContainerSniffer.Container? = nil, session: URLSession = .shared) {
         self.sourceURL = sourceURL
+        self.container = container
         self.session = session
     }
 
@@ -70,8 +73,9 @@ final class RangeRequestLoader: NSObject, AVAssetResourceLoaderDelegate, Sendabl
 
     /// An asset of `url` that reads through a new loader. The asset keeps the loader alive:
     /// `AVAssetResourceLoader` holds its delegate weakly.
-    static func makeAsset(url: URL, options: [String: Any], session: URLSession = .shared) -> AVURLAsset {
-        let loader = RangeRequestLoader(sourceURL: url, session: session)
+    static func makeAsset(url: URL, options: [String: Any], container: ContainerSniffer.Container? = nil,
+                          session: URLSession = .shared) -> AVURLAsset {
+        let loader = RangeRequestLoader(sourceURL: url, container: container, session: session)
         let asset = AVURLAsset(url: loader.assetURL, options: options)
         asset.resourceLoader.setDelegate(loader, queue: loader.queue)
         objc_setAssociatedObject(asset, &associatedLoaderKey, loader, .OBJC_ASSOCIATION_RETAIN)
@@ -200,7 +204,7 @@ final class RangeRequestLoader: NSObject, AVAssetResourceLoaderDelegate, Sendabl
         ) else {
             throw MosaicError.processingFailed("The source server did not report the file size")
         }
-        let contentInfo = ContentInfo(length: total, uti: Self.uti(for: sourceURL, mimeType: http.mimeType))
+        let contentInfo = ContentInfo(length: total, uti: Self.uti(for: sourceURL, mimeType: http.mimeType, container: container))
         info.withLock { $0 = contentInfo }
         return (data, contentInfo)
     }
@@ -215,12 +219,14 @@ final class RangeRequestLoader: NSObject, AVAssetResourceLoaderDelegate, Sendabl
             "The source server does not support byte-range requests (\(status)); turn off reduceSourceReads")
     }
 
-    /// The type AVFoundation parses the source as: from the path extension, then the server's
-    /// MIME type, else MPEG-4, the same default as ``RemoteVideoSupport/overrideMIMEType(for:)``.
-    static func uti(for url: URL, mimeType: String?) -> String {
+    /// The type AVFoundation parses the source as: from the path extension, then the sniffed
+    /// container, then the server's MIME type, else MPEG-4, the same default as
+    /// ``RemoteVideoSupport/overrideMIMEType(for:)``.
+    static func uti(for url: URL, mimeType: String?, container: ContainerSniffer.Container? = nil) -> String {
         if let type = UTType(filenameExtension: url.pathExtension), type.conforms(to: .audiovisualContent) {
             return type.identifier
         }
+        if let uti = container?.uti { return uti }
         if let mimeType, let type = UTType(mimeType: mimeType), type.conforms(to: .audiovisualContent) {
             return type.identifier
         }

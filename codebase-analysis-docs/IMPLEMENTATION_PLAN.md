@@ -170,6 +170,7 @@ Every PR updates its row here (status) and the matching §4.2 / §6.1 entries in
 | U-4 | uneven tiles: options (optional) | planned | |
 | U-5 | uneven tiles: hero emphasis and fallback variant (optional) | planned | |
 | R-1 | low-data reads: `reduceSourceReads` (range loader + keyframe snapping), I-33 ⚡ | done (#96, released in 1.17.0); A/B/A gate passed 2026-11-21 (flag off: every median within ±4 % of the closer `main` run; §8.1); byte measurements in KB §F2 | |
+| T-1 | MPEG-TS sources: container sniffing + clear unsupported-codec error, I-38 | done (released in 1.18.0); no hot-path change: sources with a known extension do no extra I/O | |
 
 ### 8.1 Benchmark baseline
 

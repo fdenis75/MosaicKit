@@ -148,7 +148,7 @@ public actor MetalMosaicGenerator: MosaicGeneratorProtocol {
                         if config.gifMode == .withMosaic {
                             let animationURL = config.animatedOutputURL(for: video, referenceDate: referenceDate)
                             if !FileManager.default.fileExists(atPath: animationURL.path) {
-                                let asset = RemoteVideoSupport.makeAsset(url: video.url, reduceReads: config.reduceSourceReads)
+                                let asset = await RemoteVideoSupport.makeAsset(url: video.url, reduceReads: config.reduceSourceReads)
                                 let duration: Double
                                 if let known = video.duration { duration = known } else { duration = try await asset.load(.duration).seconds }
                                 guard duration.isFinite, duration > 0 else { throw MosaicError.invalidVideo("Invalid duration") }
@@ -330,7 +330,8 @@ public actor MetalMosaicGenerator: MosaicGeneratorProtocol {
         forIphone: Bool,
         progressHandler: (@Sendable (MosaicGenerationProgress) -> Void)?
     ) async throws -> MosaicPlan {
-        let asset = RemoteVideoSupport.makeAsset(url: video.url, reduceReads: config.reduceSourceReads)
+        let asset = await RemoteVideoSupport.makeAsset(url: video.url, reduceReads: config.reduceSourceReads)
+        try await Self.checkTransportStreamReadable(asset, url: video.url)
         let duration: Double
         if let known = video.duration { duration = known } else { duration = try await asset.load(.duration).seconds }
         guard duration.isFinite, duration > 0, config.width > 0, config.width <= 16_384, (video.width ?? 1).isFinite, (video.height ?? 1).isFinite, (video.width ?? 1) > 0, (video.height ?? 1) > 0 else { throw MosaicError.invalidVideo("Invalid duration or dimensions") }
@@ -345,6 +346,23 @@ public actor MetalMosaicGenerator: MosaicGeneratorProtocol {
         var adjustedConfig = config
         adjustedConfig.updateAspectRatio(new: AspectRatio.findNearest(to: layout.mosaicSize))
         return MosaicPlan(asset: asset, layout: layout, config: adjustedConfig)
+    }
+
+    /// Throws ``VideoError/unsupportedCodec(_:_:)`` for an MPEG transport stream AVFoundation
+    /// can't read video from (HEVC, AV1, MPEG-4 Part 2 in TS; I-38), instead of a "Cannot Open"
+    /// or frame-extraction failure later. Loads the video tracks of transport streams only: other
+    /// sources return at once, and the container is cached, so the common path does no I/O.
+    private static func checkTransportStreamReadable(_ asset: AVURLAsset, url: URL) async throws {
+        guard let unreadable = await RemoteVideoSupport.unreadableTransportStreamError(for: url) else { return }
+        let videoTracks: [AVAssetTrack]
+        do {
+            videoTracks = try await asset.loadTracks(withMediaType: .video)
+        } catch is CancellationError {
+            throw CancellationError()
+        } catch {
+            throw unreadable
+        }
+        if videoTracks.isEmpty { throw unreadable }
     }
 
     /// The layout type that is actually calculated.

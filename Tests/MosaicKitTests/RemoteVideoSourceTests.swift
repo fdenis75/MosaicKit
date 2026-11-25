@@ -13,13 +13,16 @@ struct RemoteVideoSourceTests {
         VideoInput(canonicalID: UUID(), url: url, title: title, duration: 60, width: 1920, height: 1080)
     }
 
-    @Test("Only remote URLs without a video extension get a MIME override")
+    @Test("The MIME override follows the extension, then the sniffed container (I-30, I-38)")
     func mimeOverride() {
-        #expect(RemoteVideoSupport.overrideMIMEType(for: downloadLink) == "video/mp4")
-        #expect(RemoteVideoSupport.overrideMIMEType(for: URL(string: "https://host/get.php?id=1")!) == "video/mp4")
-        #expect(RemoteVideoSupport.overrideMIMEType(for: URL(string: "https://host/clip.MP4?token=1")!) == nil)
-        #expect(RemoteVideoSupport.overrideMIMEType(for: URL(string: "https://host/clip.mov")!) == nil)
-        #expect(RemoteVideoSupport.overrideMIMEType(for: URL(fileURLWithPath: "/tmp/no-extension")) == nil)
+        let local = URL(fileURLWithPath: "/tmp/no-extension")
+        #expect(RemoteVideoSupport.overrideMIMEType(for: downloadLink, container: .unknown) == "video/mp4")
+        #expect(RemoteVideoSupport.overrideMIMEType(for: downloadLink, container: .mpeg4) == "video/mp4")
+        #expect(RemoteVideoSupport.overrideMIMEType(for: downloadLink, container: .transportStream) == "video/mp2t")
+        #expect(RemoteVideoSupport.overrideMIMEType(for: URL(string: "https://host/clip.MP4?token=1")!, container: .transportStream) == nil)
+        #expect(RemoteVideoSupport.overrideMIMEType(for: URL(string: "https://host/clip.mov")!, container: .unknown) == nil)
+        #expect(RemoteVideoSupport.overrideMIMEType(for: local, container: .unknown) == nil)
+        #expect(RemoteVideoSupport.overrideMIMEType(for: local, container: .transportStream) == "video/mp2t")
     }
 
     @Test("Local and extension-bearing remote names are unchanged")
