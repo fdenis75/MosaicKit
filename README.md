@@ -32,6 +32,11 @@ A high-performance Swift package for generating video mosaics with Metal-acceler
   helpers and a few others) and `LayoutType.dynamic`.
 - Upgrading? Read [MIGRATING-TO-2.0.md](MIGRATING-TO-2.0.md).
 
+### Behavior changes
+
+- 📁 Configurations that used `.dynamic` now decode as `.custom`, so their `configurationHash` and `{layout}` token change and their
+  output path moves once.
+
 ## New in 1.19.0
 
 Minor release on top of 1.18.0: HEVC transport streams on macOS through an opt-in ffmpeg remux. Additive API (`TransportStreamRemuxer`); defaults are unchanged and output names do not change. Upgrading from 1.18.x? [MIGRATING-TO-1.19.md](MIGRATING-TO-1.19.md) lists what can change for your app.

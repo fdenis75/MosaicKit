@@ -18,7 +18,6 @@ graph LR
   end
   subgraph Orchestration
     BAT[F10 Batch coordinators<br/>Mosaic/PreviewGeneratorCoordinator]
-    JOB[F11 Job lifecycle<br/>GenerationJobController]
   end
   subgraph Shared
     OUT[F12 Output paths & atomic commit<br/>*Configuration paths + OutputTransaction]
@@ -35,8 +34,6 @@ graph LR
   PRV --> EXP
   BAT --> MOS
   BAT --> PRV
-  JOB -. wraps closures .-> MOS
-  JOB -. wraps closures .-> PRV
   MOS --> OUT
   ANI --> OUT
   EXP --> OUT
