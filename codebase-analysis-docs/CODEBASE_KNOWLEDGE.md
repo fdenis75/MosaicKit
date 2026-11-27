@@ -1192,30 +1192,33 @@ backbone. Read `LayoutProcessor` algorithms, `ThumbnailProcessor` header/label r
     AVFoundation decodes it → `.native` (MP4/MOV family: `isDecodable`; anything else: one frame
     is decoded). Otherwise `ffprobe`: codec in h264, hevc, mpeg4, mpeg2video, prores, av1 →
     `.remuxed`, else `.ffmpeg`. If neither can read it → `.native`, so AVFoundation's error
-    surfaces (not cached). Verdicts are cached per URL + size + mtime
-    [[F:Sources/Processing/FFmpeg/SourceRouter.swift#26-147#f3a48c2b]]. `route(for:)` writes nothing,
+    surfaces (not cached; neither is a remote source whose probe failed for a network reason).
+    Verdicts are cached per URL + size + mtime
+    [[F:Sources/Processing/FFmpeg/SourceRouter.swift#28-173#a41868f0]]. `route(for:)` writes nothing,
     so its `.remuxed` answer is a prediction. The routing probe
     always uses AVFoundation's own loader (`reduceReads: false`), so with the fallback on, a
     remote non-MP4/MOV source is probed that way even under `reduceSourceReads`.
   - **`.remuxed`:** `ffmpeg -c copy` into a cached MP4: `hvc1` tag first (AVFoundation decodes
     HEVC in MP4 only with it; `hev1` gives "Cannot Open", measured 2026-11-25), then without, then
     video only. Only an ffmpeg error exit is retried; a stall or time-out fails at once. Free space
-    is checked against the source size + 500 MB; failures are `VideoError.processingFailed(url, …)`. AAC, AC-3, E-AC-3 and ALAC audio is copied, other audio re-encoded to AAC. If no copy
-    decodes, the source falls back to `.ffmpeg`
-    [[F:Sources/Processing/FFmpeg/SourceRouter.swift#149-280#f3a48c2b]]. A remote source is downloaded
+    is checked against the source size + 500 MB; failures are `VideoError.processingFailed(url, …)`. AAC, AC-3, E-AC-3 and ALAC audio is copied, other audio re-encoded to AAC. If ffmpeg refuses every
+    attempt or no copy decodes, the source falls back to `.ffmpeg`
+    [[F:Sources/Processing/FFmpeg/SourceRouter.swift#175-326#a41868f0]]. A remote source is downloaded
     in full, once.
   - **`.ffmpeg`:** `RemoteVideoSupport.makeAsset` throws `VideoError.unsupportedCodec`; callers
     that handle the route use `SourceRouter.prepare`. Frames come from `FFmpegFrames` (one `-ss`
     input per time, 10 per process, 4 processes; strict, deinterlaced, square pixels). Preview
     extracts are encoded by `FFmpegExtracts` (§F8). An avi/divx/flv/mpg/mpeg/vob file whose seek
     near the end takes > 1 s longer than at the start is first copied to Matroska.
-    `reduceSourceReads` and `useAccurateTimestamps` don't apply: frames are at exact times. HDR is
+    Thumbnail extraction (`allowCopies: false`) never copies a source on either
+    route: it uses an existing cached copy or seeks in the source. `reduceSourceReads` and `useAccurateTimestamps` don't apply: frames are at exact times. HDR is
     not tone-mapped.
   - **Inspection** never remuxes: for non-native routes `VideoMetadataExtractor` returns
     `ffprobe`'s values for the original file.
   - **Cache** (`FFmpegCache`, default `<temp>/MosaicKitFFmpegCache`, 20 GB): names are 16 hex
-    digits of SHA-256(URL [+ size + mtime] + variant); `.mp4`/`.mkv` files are evicted least
-    recently used first, partial files excluded. Concurrent readers share one run (`RemuxJobs`):
+    digits of SHA-256(URL [+ size + mtime] + variant); only files with such names are evicted or cleared, least
+    recently used first. Partial files (one unique name per job) are excluded, and so are files
+    held by a reader in this process (`FFmpegCache.Lease`). Concurrent readers share one run (`RemuxJobs`):
     cancelling one reader doesn't stop the others.
   - **Processes** (`FFmpegRunner`): stdin closed (I-32), time-limited, `SIGKILL` on cancel,
     `-protocol_whitelist` limited to what the source needs.
@@ -2875,8 +2878,8 @@ P1 = core feature, P2 = supporting, P3 = docs/infra.
 | 80 | P1 | `Sources/Processing/FFmpeg/FFmpegFrames.swift` | code | 111 | 4533ce22 | Frames for `.ffmpeg`-route sources (2.0) |
 | 81 | P1 | `Sources/Processing/FFmpeg/FFmpegRunner.swift` | code | 108 | c0b560c6 | ffmpeg/ffprobe process runner (2.0) |
 | 82 | P1 | `Sources/Processing/FFmpeg/MediaInfo.swift` | code | 101 | a164d591 | `ffprobe` description (2.0) |
-| 83 | P1 | `Sources/Processing/FFmpeg/RemuxJobs.swift` | code | 66 | 6e377df2 | Shares one ffmpeg run between readers (2.0) |
-| 84 | P1 | `Sources/Processing/FFmpeg/SourceRouter.swift` | code | 280 | f3a48c2b | Route detection, remux, seekable copy (2.0) |
+| 83 | P1 | `Sources/Processing/FFmpeg/RemuxJobs.swift` | code | 70 | 0d2fb5cd | Shares one ffmpeg run between readers (2.0) |
+| 84 | P1 | `Sources/Processing/FFmpeg/SourceRouter.swift` | code | 326 | a41868f0 | Route detection, remux, seekable copy (2.0) |
 | 85 | P2 | `Tests/MosaicKitTests/FFmpegFallbackTests.swift` | test | 116 | 247a19f8 | Fallback routes (2.0) |
 
 Excluded or low value: `Media.xcassets/**` (binary fixture), `Tests/MosaicKitTests/embeddedAsset/test_video.mp4`
