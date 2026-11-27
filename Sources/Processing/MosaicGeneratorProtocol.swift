@@ -24,16 +24,6 @@ public protocol MosaicGeneratorProtocol: Actor {
     /// - Throws: An error if the mosaic generation fails.
     func generateMosaicImage(for video: VideoInput, config: MosaicConfiguration, forIphone: Bool) async throws -> CGImage
 
-    /// Generates mosaics for all predefined combinations of width sizes and density configurations.
-    ///
-    /// - Parameters:
-    ///   - video: The video input to process.
-    ///   - config: The base configuration settings for the mosaic generation.
-    /// - Returns: An array of file `URL`s representing the generated mosaics.
-    /// - Throws: An error if the mosaic generation fails for any combination.
-    @available(*, deprecated, message: "Ignores most of the configuration it is given. Removed in MosaicKit 2.0. Call generate(for:config:forIphone:) once per configuration.")
-    func generateallcombinations(for video: VideoInput, config: MosaicConfiguration) async throws -> [URL]
-
     /// Cancels ongoing mosaic generation for the specified video.
     ///
     /// - Parameter video: The video to cancel mosaic generation for.

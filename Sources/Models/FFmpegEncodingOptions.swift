@@ -210,39 +210,6 @@ public struct FFmpegEncodingOptions: Codable, Sendable, Hashable {
         }
     }
 
-    /// Encoding options optimised for **preview generation** where speed is paramount.
-    ///
-    /// Always uses `hevc_videotoolbox` (Apple hardware encoder) with real-time mode enabled.
-    /// The `compressionQuality` value only influences the `-q:v` level and output resolution cap.
-    ///
-    /// | Quality  | SpeedPreset | -q:v | Max res |
-    /// |----------|-------------|------|---------|
-    /// | ≥ 0.7    | fast        | 65   | 1080p   |
-    /// | 0.4–0.69 | veryfast    | 55   | 1080p   |
-    /// | < 0.4    | superfast   | 50   | 720p    |
-    ///
-    /// Falls back to software H.264 (`libx264`) via ``from(quality:format:)`` if you
-    /// need cross-platform compatibility without VideoToolbox.
-    @available(*, deprecated, message: "Unused by MosaicKit. Removed in MosaicKit 2.0. Use from(quality:format:), or build FFmpegEncodingOptions with videoCodec .hevcVideoToolbox.")
-    public static func forPreview(quality: Double) -> FFmpegEncodingOptions {
-        if quality >= 0.7 {
-            return FFmpegEncodingOptions(
-                videoCodec: .hevcVideoToolbox, crf: nil, speedPreset: .fast,
-                maxResolution: ._1080p, audioCodec: .aac, audioBitrate: "128k"
-            )
-        } else if quality >= 0.4 {
-            return FFmpegEncodingOptions(
-                videoCodec: .hevcVideoToolbox, crf: nil, speedPreset: .veryfast,
-                maxResolution: ._1080p, audioCodec: .aac, audioBitrate: "128k"
-            )
-        } else {
-            return FFmpegEncodingOptions(
-                videoCodec: .hevcVideoToolbox, crf: nil, speedPreset: .superfast,
-                maxResolution: ._720p, audioCodec: .aac, audioBitrate: "128k"
-            )
-        }
-    }
-
     // MARK: - Argument assembly
 
     /// Build the ffmpeg argument list for encoding `inputURL` to `outputURL`.

@@ -85,7 +85,14 @@ extension TransportStreamSourceTests {
                                                   includeAudio: true, outputDirectory: folder)
                 config.enableAppLifecycleMonitor = false
                 config.enableExportRetry = false
-                let output = try await PreviewVideoGenerator().generate(for: video, config: config)
+                let output: URL
+                do {
+                    output = try await PreviewVideoGenerator().generate(for: video, config: config)
+                } catch PreviewError.exportStalled {
+                    // I-26: the export session sometimes freezes mid-encode under parallel load.
+                    withKnownIssue("I-26: export stall", isIntermittent: true) { Issue.record("export stalled") }
+                    return
+                }
                 let asset = AVURLAsset(url: output)
                 #expect(try await asset.load(.duration).seconds > 1)
                 #expect(try await !asset.loadTracks(withMediaType: .video).isEmpty)

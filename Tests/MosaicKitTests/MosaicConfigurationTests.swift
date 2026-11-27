@@ -34,7 +34,7 @@ struct MosaicConfigurationTests {
         for density in DensityConfig.allCases {
             for format in formats {
                 for aspect in AspectRatio.allCases {
-                    for layoutType in [LayoutType.auto, .custom, .dynamic, .classic, .iphone] {
+                    for layoutType in [LayoutType.auto, .custom, .classic, .iphone] {
                         for includeMetadata in metadataOptions {
                             for accurate in accurateOptions {
                                 for fullPath in fullPathOptions {
@@ -105,7 +105,7 @@ struct MosaicConfigurationTests {
             width: 5120,
             density: .m,
             format: .png,
-            layout: LayoutConfiguration(aspectRatio: .vertical, layoutType: .dynamic),
+            layout: LayoutConfiguration(aspectRatio: .vertical, layoutType: .custom),
             includeMetadata: true,
             useAccurateTimestamps: true,
             compressionQuality: 0.5,
@@ -282,4 +282,11 @@ struct MosaicConfigurationTests {
             postID: postID
         )
     }
+}
+
+@Test("A saved \"dynamic\" layout type, removed in 2.0, decodes as custom")
+func removedDynamicLayoutDecodes() throws {
+    let types = try JSONDecoder().decode([LayoutType].self, from: Data(#"["dynamic","classic"]"#.utf8))
+    #expect(types == [.custom, .classic])
+    #expect(throws: DecodingError.self) { try JSONDecoder().decode([LayoutType].self, from: Data(#"["nope"]"#.utf8)) }
 }

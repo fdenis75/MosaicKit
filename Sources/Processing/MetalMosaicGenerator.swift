@@ -68,27 +68,6 @@ public actor MetalMosaicGenerator: MosaicGeneratorProtocol {
         self.metalProcessor = try MetalImageProcessor()
     }
     
-    @available(*, deprecated, message: "Ignores most of the configuration it is given. Removed in MosaicKit 2.0. Call generate(for:config:forIphone:) once per configuration.")
-    public func generateallcombinations(for video: VideoInput, config: MosaicConfiguration) async throws -> [URL] {
-        signposter.emitEvent("generateallcombinations")
-        let intervalState = signposter.beginInterval("generateallcombinations")
-        defer { signposter.endInterval("generateallcombinations", intervalState) }
-        let sizes = [2000,5000,10000]
-        let densities: [DensityConfig] = DensityConfig.allCases
-        
-        var mosaics: [URL] = []
-        
-        for size in sizes {
-            for density in densities {
-                try Task.checkCancellation()
-                let config = MosaicConfiguration(width: size, density: density, format: .heif, layout: .default, includeMetadata: true, useAccurateTimestamps: true, compressionQuality: 0.4)
-                let mosaic = try await generate(for: video, config: config)
-                mosaics.append(mosaic)
-            }
-        }
-        return mosaics
-    }
-    
     // MARK: - MosaicGenerating
     
 

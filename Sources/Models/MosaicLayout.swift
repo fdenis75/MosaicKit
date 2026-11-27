@@ -120,40 +120,6 @@ extension MosaicLayout {
         return "Rows: \(rows), Cols: \(cols), Thumbnail Size: \(thumbnailSize), Positions: \(positions), Thumb Count: \(thumbCount), Thumbnail Sizes: \(thumbnailSizes), Mosaic Size: \(mosaicSize)"
     }
 
-    /// Draws an ASCII art representation of the mosaic layout.
-    ///
-    /// This method creates a visual representation of the mosaic layout using ASCII characters.
-    /// Small thumbnails are represented by 'x' and large thumbnails by 'X', based on their
-    /// individual sizes in the thumbnailSizes array.
-    ///
-    /// - Returns: A string containing the ASCII art representation of the mosaic layout.
-    @available(*, deprecated, message: "Debugging aid, unused by MosaicKit. Removed in MosaicKit 2.0. Use description().")
-    public func drawMosaicASCIIArt() -> String {
-        var ascii = ""
-        var grid = Array(repeating: Array(repeating: " ", count: cols), count: rows)
-
-        // Determine average thumbnail size to use as threshold
-        let smallSize = thumbnailSize
-
-        // Fill the grid with appropriate characters based on thumbnail sizes
-        for (index, position) in positions.enumerated() {
-            // Ensure we don't exceed grid boundaries
-            if position.y < rows && position.x < cols {
-                let size = thumbnailSizes[index]
-
-                // Use 'X' for larger than average thumbnails, 'x' for smaller ones
-                let character = size.width > smallSize.width ? "X" : "x"
-                grid[position.y][position.x] = character
-            }
-        }
-
-        // Convert grid to string
-        for row in grid {
-            ascii += row.joined() + "\n"
-        }
-
-        return ascii
-    }
 }
 
 /// Helper struct for encoding/decoding CGSize
