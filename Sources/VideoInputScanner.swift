@@ -5,6 +5,15 @@ private let videoFileExtensions: Set<String> = [
     "3gp", "ts", "m2ts", "mts", "mxf", "f4v", "asf"
 ]
 
+/// Found only while ``FFmpegFallback`` is enabled: AVFoundation alone reads few of them.
+private let fallbackFileExtensions: Set<String> = ["mpg", "mpeg", "vob", "ogv", "divx", "rm", "rmvb", "dv"]
+
+private func isVideoFileExtension(_ pathExtension: String) -> Bool {
+    let pathExtension = pathExtension.lowercased()
+    return videoFileExtensions.contains(pathExtension)
+        || (FFmpegFallback.isEnabled && fallbackFileExtensions.contains(pathExtension))
+}
+
 /// Legacy tolerant discovery. Use `discoverVideos` to observe failures and cancellation.
 public func scanVideos(in folder: URL, recursive: Bool = false) async -> [VideoInput] {
     let scoped = folder.startAccessingSecurityScopedResource()
@@ -132,7 +141,7 @@ private func collectVideoURLs(in folder: URL, recursive: Bool) throws -> [URL] {
         while let item = enumerator.nextObject() as? URL {
             try Task.checkCancellation()
             if try item.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile == true,
-               videoFileExtensions.contains(item.pathExtension.lowercased()) {
+               isVideoFileExtension(item.pathExtension) {
                 urls.append(item)
             }
         }
@@ -144,7 +153,7 @@ private func collectVideoURLs(in folder: URL, recursive: Bool) throws -> [URL] {
         for item in contents {
             try Task.checkCancellation()
             if try item.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile == true,
-               videoFileExtensions.contains(item.pathExtension.lowercased()) {
+               isVideoFileExtension(item.pathExtension) {
                 urls.append(item)
             }
         }
