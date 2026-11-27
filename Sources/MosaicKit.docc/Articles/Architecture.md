@@ -57,10 +57,6 @@ public actor MetalMosaicGenerator: MosaicGeneratorProtocol {
 }
 ```
 
-`generateallcombinations(for:config:)` is deprecated and will be removed in MosaicKit 2.0: it
-ignores most of the configuration it is given. Call `generate(for:config:forIphone:)` once per
-configuration instead.
-
 For batches, wrap it in ``MosaicGeneratorCoordinator`` (or use the `createDefaultMosaicCoordinator`/
 `createMosaicCoordinatorWithMetal` convenience functions), which adds CPU/memory-aware
 concurrency limits and per-video cancellation on top of a single generator instance.
@@ -136,10 +132,6 @@ Extracts frames from video using `AVAssetImageGenerator`, hardware-accelerated v
 The generator uses its internal `processedFramesStream`, which requests frames in batches and
 yields each labeled frame with its layout index as soon as it is decoded, so frames never pile up
 in an array.
-
-The array-based helpers (`extractThumbnails`, `extractFramesStream`, `extractThumbnailsUI`), the
-CoreGraphics `generateMosaic(from:…)` and the legacy `createMetadataHeader(metadata:…)` are
-deprecated and will be removed in MosaicKit 2.0.
 
 **Frame Distribution Strategy:**
 - First third: 20% of frames

@@ -125,8 +125,7 @@ MosaicKit/
 - **Previews:** `PreviewVideoGenerator` (actor) composes a highlight reel and exports it with
   `.native` (AVAssetExportSession), `.sjs` (SJSAssetExportSession) or `.ffmpeg`.
 - **Batches:** `MosaicGeneratorCoordinator` and `PreviewGeneratorCoordinator` (concurrency
-  limits, `batchEpoch` cancellation). `GenerationJobController` provides an explicit job
-  lifecycle; it is deprecated (S-6) and removed in 2.0.
+  limits, `batchEpoch` cancellation).
 
 ### Key types
 
@@ -135,7 +134,6 @@ MosaicKit/
 | `MetalMosaicGenerator` | `Processing/MetalMosaicGenerator.swift` | Mosaic engine (actor) |
 | `MosaicGeneratorProtocol` | `Processing/MosaicGeneratorProtocol.swift` | Shared interface |
 | `MosaicGeneratorCoordinator` | `Processing/MosaicGeneratorCoordinator.swift` | Concurrent mosaic batches |
-| `GenerationJobController` | `Processing/GenerationJobs.swift` | Explicit job lifecycle (deprecated in S-6; removed in 2.0) |
 | `LayoutProcessor` | `Processing/LayoutProcessor.swift` | Layout calculation + caching |
 | `planFixedGrid`, `fixedGridCanvasWidth` | `Processing/LayoutProcessor+FixedGrid.swift` | Fixed-grid planner (pure, never throws) |
 | `UnevenTilePacker`, `calculateUnevenLayout` | `Processing/UnevenTilePacker.swift`, `Processing/LayoutProcessor+Uneven.swift` | Uneven-tiles packer (internal, pure) and its `LayoutType.uneven` wiring |
@@ -146,7 +144,7 @@ MosaicKit/
 | `OutputTransaction` | `Processing/OutputTransaction.swift` | Staged output publication (shared by 6 features) |
 | `VideoMetadataExtractor` | `Processing/VideoMetadataExtractor.swift` | AVFoundation metadata |
 | `RemoteVideoSupport`, `ContainerSniffer` | `Processing/RemoteVideoSupport.swift`, `Processing/ContainerSniffer.swift` | Asset creation: MIME override for sources without a known extension, sniffed from their first 1 KB (I-30, I-38) |
-| `TransportStreamRemuxer`, `RemuxJobs` | `Processing/TransportStreamRemuxer.swift` | Opt-in ffmpeg remux (macOS) of MPEG-TS AVFoundation can't read (HEVC/AV1) to a cached MP4; process-wide `enable(ffmpegBinaryPath:)` (I-38) |
+| `FFmpegFallback`, `SourceRouter`, `FFmpegFrames`, `FFmpegExtracts`, `RemuxJobs` | `Processing/FFmpeg/` | Opt-in ffmpeg fallback (macOS) for sources AVFoundation can't read: native, stream copy to MP4, or ffmpeg-decoded frames and extracts. Off by default; native code paths branch before it (I-38) |
 | `scanVideos(in:recursive:)` | `VideoInputScanner.swift` | Directory scan → `[VideoInput]` |
 | `PreviewVideoGenerator` | `Processing/Preview/PreviewVideoGenerator.swift` | Highlight-reel generation |
 | `PreviewGeneratorCoordinator` | `Processing/Preview/PreviewGeneratorCoordinator.swift` | Concurrent preview batches |
@@ -188,7 +186,6 @@ knowledge base §5.2–§5.3.
   - `custom`: three-zone, **default**.
   - `classic`: uniform grid.
   - `auto`: screen-aware, measured in pixels (fixed in F-7, I-9).
-  - `dynamic`: deprecated (removed in 2.0); laid out as `custom` (F-7, I-8).
   - `iphone`: mobile-optimized.
   - `fixedGrid`: caller-chosen rows × columns (`LayoutConfiguration.grid`); all four fit modes work (`.adaptCanvas`, `.letterbox`, `.stretch`, `.crop`; G-1…G-5). Live-preview example: `Examples/FixedGridPreviewExample.swift` (G-6). Spec: `codebase-analysis-docs/specs/SPEC_FIXED_GRID_LAYOUT.md`.
   - `uneven`: tiles in several sizes, a bento grid of source-aspect unit cells (`UnevenTilePacker`, U-1…U-3); frames are decoded per tile size (`ThumbnailProcessor.extractionGroups`). Spec: `codebase-analysis-docs/specs/SPEC_UNEVEN_TILES_LAYOUT.md`.
@@ -243,7 +240,7 @@ knowledge base §5.2–§5.3.
 - Coordinators keep a `batchEpoch` counter. `cancelAllGenerations()` bumps it, and a cancelled
   batch stops dequeuing and throws `CancellationError`. Cancelling a single video only fails
   that video's result.
-- Long loops (frame extraction, animated encoding, `generateallcombinations`) must call
+- Long loops (frame extraction, animated encoding) must call
   `try Task.checkCancellation()` on every iteration.
 - Report cancelled work with the `.cancelled` status, never `.failed`.
 
@@ -283,6 +280,7 @@ logger.info("Processing started: \(url.lastPathComponent, privacy: .public)")
 
 ## Platform-specific code
 
+- ffmpeg is never required: `FFmpegFallback` is off until the app enables it, and AVFoundation is the default.
 - Metal runs on every platform. Guard `Process`/ffmpeg and other macOS-only APIs with
   `#if os(macOS)`.
 - Use `#if canImport(AppKit)` / `#elseif canImport(UIKit)` for image types.

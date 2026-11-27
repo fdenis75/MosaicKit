@@ -4,7 +4,7 @@ Understanding the layout algorithms and choosing the right one for your use case
 
 ## Overview
 
-MosaicKit provides six layout algorithms (plus the deprecated `.dynamic`), each optimized for different use cases and visual aesthetics. This guide explains how each algorithm works and when to use it.
+MosaicKit provides six layout algorithms, each optimized for different use cases and visual aesthetics. This guide explains how each algorithm works and when to use it.
 
 ## Layout Algorithm Overview
 
@@ -190,9 +190,8 @@ let config = MosaicConfiguration(
 - Presentations on unknown display configurations
 - Adaptive UIs
 
-## Dynamic Layout (deprecated)
-
-`LayoutType.dynamic` is deprecated and is removed in 2.0. Its algorithm produced overlapping rows and clipped cells, so it is now laid out exactly like ``LayoutType/custom``. Configurations that stored `"dynamic"` still decode, and a one-time warning is logged. Use `.custom` instead.
+`LayoutType.dynamic` was removed in 2.0. Saved configurations that contain `"dynamic"` decode as
+`.custom`.
 
 ## iPhone Layout
 
