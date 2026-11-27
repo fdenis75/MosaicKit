@@ -107,6 +107,113 @@ public final class ThumbnailProcessor: Sendable {
         return frames.map(\.image)
     }
 
+    /// Animation frames from either kind of source.
+    func extractAnimationFrames(
+        from file: URL,
+        source: PreparedSource,
+        count: Int,
+        gifSize: GifSize,
+        accurate: Bool,
+        snapToKeyframes: Bool = false,
+        policy: FrameSamplingPolicy
+    ) async throws -> [CGImage] {
+        switch source {
+        case .asset(let asset):
+            return try await extractAnimationFrames(from: file, asset: asset, count: count, gifSize: gifSize,
+                                                    accurate: accurate, snapToKeyframes: snapToKeyframes, policy: policy)
+        case .ffmpeg(let source):
+            let maximumSize: CGSize? = switch gifSize {
+            case .nochange: nil
+            case .large: CGSize(width: 1280, height: 720)
+            case .small: CGSize(width: 960, height: 540)
+            }
+            var frames: [CGImage] = []
+            frames.reserveCapacity(count)
+            try await forEachFrame(from: source, count: count, maximumSize: maximumSize, policy: policy) { _, image, _ in
+                frames.append(image)
+            }
+            return frames
+        }
+    }
+
+    /// ``forEachFrame(from:count:maximumSize:accurate:snapToKeyframes:policy:duration:_:)`` for a
+    /// source only ffmpeg decodes. Seeks are exact, so each frame shows its requested time.
+    func forEachFrame(
+        from source: FFmpegSource,
+        count: Int,
+        maximumSize: CGSize?,
+        policy: FrameSamplingPolicy,
+        duration knownDuration: Double? = nil,
+        _ body: (Int, CGImage, CMTime) async throws -> Void
+    ) async throws {
+        #if os(macOS)
+        let times = calculateExtractionTimes(duration: knownDuration ?? source.info.duration, count: count, policy: policy)
+        guard !times.isEmpty else { throw MosaicError.invalidVideo("Invalid duration or frame count") }
+        try await FFmpegFrames.forEach(in: source, at: times.map(\.seconds), fitting: maximumSize) { index, image in
+            try await body(index, image, times[index])
+        }
+        #else
+        throw MosaicError.invalidVideo("The ffmpeg fallback is only available on macOS")
+        #endif
+    }
+
+    /// ``processedFramesStream(from:layout:asset:accurate:snapToKeyframes:labelConfig:sampling:crop:collectColor:)``
+    /// for a source only ffmpeg decodes.
+    func processedFramesStream(
+        from source: FFmpegSource, layout: MosaicLayout, duration knownDuration: Double?,
+        labelConfig: FrameLabelConfig,
+        sampling: FrameSamplingPolicy,
+        crop: FrameCrop?,
+        collectColor: (@Sendable (Int, CGImage) async -> Void)?
+    ) -> AsyncThrowingStream<(Int, CGImage), Error> {
+        let (stream, continuation) = AsyncThrowingStream<(Int, CGImage), Error>.makeStream()
+        #if os(macOS)
+        let processor = self
+        let sizes = layout.thumbnailSizes
+        let producer = Task {
+            do {
+                let times = processor.calculateExtractionTimes(
+                    duration: knownDuration ?? source.info.duration, count: layout.positions.count, policy: sampling)
+                guard !times.isEmpty else { throw MosaicError.invalidVideo("Invalid duration or frame count") }
+                // One pass per tile size, as on the native path, so small tiles are decoded small.
+                for group in Self.extractionGroups(for: sizes) {
+                    let box = processor.decodeBox(for: group.map { sizes[$0] }, crop: crop)
+                    try await FFmpegFrames.forEach(in: source, at: group.map { times[$0].seconds }, fitting: box) { position, image in
+                        let index = group[position]
+                        let image = crop.map { Self.croppedCenter(image, toAspect: $0.aspect) } ?? image
+                        await collectColor?(index, image)
+                        let labeled = processor.addTimestampToImage(
+                            image: image, timestamp: processor.formatTimestamp(seconds: times[index].seconds),
+                            frameIndex: index, size: sizes[index], labelConfig: labelConfig
+                        )
+                        continuation.yield((index, labeled))
+                    }
+                }
+                continuation.finish()
+            } catch {
+                continuation.finish(throwing: error)
+            }
+        }
+        continuation.onTermination = { _ in producer.cancel() }
+        #else
+        continuation.finish(throwing: MosaicError.invalidVideo("The ffmpeg fallback is only available on macOS"))
+        #endif
+        return stream
+    }
+
+    /// The box frames of these cells are decoded into. The decoder fits the frame *inside* it, so
+    /// for a crop it must be big enough for the frame to cover the cell on both axes.
+    func decodeBox(for cells: [CGSize], crop: FrameCrop?) -> CGSize {
+        var width = cells.map(\.width).max() ?? 1
+        var height = cells.map(\.height).max() ?? 1
+        if let crop {
+            let cell = width / max(height, 1)
+            width *= max(1, crop.sourceAspect / cell)
+            height *= max(1, cell / crop.sourceAspect)
+        }
+        return CGSize(width: width * decodeQualityScale, height: height * decodeQualityScale)
+    }
+
     /// Decodes `count` raw frames (no label) at the times `policy` picks, in temporal order, with
     /// the time each decoded frame actually shows. Strict: an undecodable frame throws (rules
     /// card #10). Shared by animation export and the public thumbnail extraction.
@@ -579,24 +686,36 @@ public final class ThumbnailProcessor: Sendable {
         try Task.checkCancellation()
         // Takes the URL, not an `AVAsset`: assets are not Sendable, and this runs off the
         // generator's actor.
-        let asset = try await RemoteVideoSupport.makeAsset(url: url, reduceReads: reduceReads)
+        let prepared = try await SourceRouter.prepare(url, reduceReads: reduceReads)
         let duration: Double
-        if let knownDuration {
-            duration = knownDuration
-        } else {
-            duration = try await asset.load(.duration).seconds
+        switch prepared {
+        case .asset(let asset):
+            if let knownDuration { duration = knownDuration } else { duration = try await asset.load(.duration).seconds }
+        case .ffmpeg(let source):
+            duration = knownDuration ?? source.info.duration
         }
         guard duration.isFinite, duration > 0 else { return [] }
-        let generator = AVAssetImageGenerator(asset: asset)
-        generator.appliesPreferredTrackTransform = true
-        Self.applyTimeTolerance(to: generator, accurate: false, snapToKeyframes: reduceReads)
-        generator.maximumSize = CGSize(width: 64, height: 64)
         let start = duration * 0.05
         let span = duration * 0.90
         let times = (0..<swatches).map { index in
             CMTime(seconds: start + span * (Double(index) + 0.5) / Double(swatches), preferredTimescale: 600)
         }
         var colors: [CGColor] = []
+        guard case .asset(let asset) = prepared else {
+            #if os(macOS)
+            if case .ffmpeg(let source) = prepared {
+                try await FFmpegFrames.forEach(in: source, at: times.map(\.seconds),
+                                               fitting: CGSize(width: 64, height: 64)) { _, image in
+                    colors.append(OverlayProcessor.averageColor(of: image))
+                }
+            }
+            #endif
+            return colors
+        }
+        let generator = AVAssetImageGenerator(asset: asset)
+        generator.appliesPreferredTrackTransform = true
+        Self.applyTimeTolerance(to: generator, accurate: false, snapToKeyframes: reduceReads)
+        generator.maximumSize = CGSize(width: 64, height: 64)
         for try await result in generator.images(for: times) {
             try Task.checkCancellation()
             guard case .success(_, let image, _) = result else { continue }

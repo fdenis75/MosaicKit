@@ -82,6 +82,7 @@ public enum FFmpegFallback {
         } catch {
             throw MosaicError.invalidConfiguration("Can't create the cache folder \(directory.path): \(error.localizedDescription)")
         }
+        SourceRouter.forgetVerdicts()
         settings.withLock {
             $0 = Settings(ffmpegBinaryPath: ffmpegBinaryPath, ffprobeBinaryPath: ffprobe,
                           cacheDirectory: directory, maximumCacheBytes: maximumCacheBytes)
@@ -94,17 +95,18 @@ public enum FFmpegFallback {
     /// Turns the fallback off. Cached files stay until ``clearCache()``.
     public static func disable() {
         settings.withLock { $0 = nil }
+        SourceRouter.forgetVerdicts()
     }
 
     /// Deletes every file in the cache folder. Does nothing when the fallback is off.
     public static func clearCache() throws {
-        // Stub: implemented with the cache.
+        guard let directory = currentSettings?.cacheDirectory else { return }
+        try FFmpegCache.clear(directory)
     }
 
     /// How `url` would be read. Never writes a file. Returns ``Route/native`` without probing when
     /// the fallback is off.
     public static func route(for url: URL) async throws -> Route {
-        // Stub: detection follows.
-        .native
+        try await SourceRouter.detect(url).route
     }
 }

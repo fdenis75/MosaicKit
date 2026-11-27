@@ -298,29 +298,17 @@ struct PreviewGenerationLogic {
 
         progressHandler(0.0, .analyzing, nil, nil)
         
-        // Load asset
-        let asset = try await RemoteVideoSupport.makeAsset(url: video.url, options: [AVURLAssetPreferPreciseDurationAndTimingKey: true])
-        
-        // Validate
-        try await validateVideo(asset: asset, video: video, config: config)
-        
-        if cancellationCheck() { throw PreviewError.cancelled }
-        
-        // Get video duration for extract calculation
-        let duration = try await asset.load(.duration)
-        let videoDuration = CMTimeGetSeconds(duration)
-        
-        // Calculate parameters
-        let (extractDuration, playbackSpeed) = config.calculateExtractParameters(forVideoDuration: videoDuration)
-        let extractCount = config.extractCount(forVideoDuration: videoDuration)
-        
-        progressHandler(0.05, .analyzing, nil, "Calculating timestamps...")
-        let timestamps = try await calculateExtractTimestamps(
-            asset: asset,
-            video: video,
-            extractCount: extractCount,
-            extractDuration: extractDuration
-        )
+        // Extracts of a source only ffmpeg decodes live in this folder until the export is done.
+        let extractFolder = FileManager.default.temporaryDirectory
+            .appendingPathComponent("MosaicKitExtracts", isDirectory: true)
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: extractFolder) }
+        let source = try await previewSource(for: video, config: config, extractFolder: extractFolder,
+                                             progressHandler: progressHandler, cancellationCheck: cancellationCheck)
+        let asset = source.asset
+        let timestamps = source.timestamps
+        let extractDuration = source.extractDuration
+        let playbackSpeed = source.playbackSpeed
 
         if cancellationCheck() { throw PreviewError.cancelled }
 
@@ -360,6 +348,7 @@ struct PreviewGenerationLogic {
             maxResolutionRaw: config.effectiveExportPreset == nativeExportPreset.AVAssetExportPresetPassthrough.rawValue ? nil : config.exportMaxResolutionRaw,
             customTargetSize: customTargetSize,
             includeOverlayCues: config.showTimestampOverlay,
+            labelStarts: source.labelStarts,
             video: video,
             progressHandler: progressHandler,
             cancellationCheck: cancellationCheck
@@ -420,29 +409,14 @@ struct PreviewGenerationLogic {
         
         progressHandler(0.0, .analyzing, nil, nil)
         
-        // Load asset
-        let asset = try await RemoteVideoSupport.makeAsset(url: video.url, options: [AVURLAssetPreferPreciseDurationAndTimingKey: true])
-        
-        // Validate
-        try await validateVideo(asset: asset, video: video, config: config)
-        
-        if cancellationCheck() { throw PreviewError.cancelled }
-        
-        // Get video duration for extract calculation
-        let duration = try await asset.load(.duration)
-        let videoDuration = CMTimeGetSeconds(duration)
-        
-        // Calculate parameters
-        let (extractDuration, playbackSpeed) = config.calculateExtractParameters(forVideoDuration: videoDuration)
-        let extractCount = config.extractCount(forVideoDuration: videoDuration)
-        
-        progressHandler(0.05, .analyzing, nil, "Calculating timestamps...")
-        let timestamps = try await calculateExtractTimestamps(
-            asset: asset,
-            video: video,
-            extractCount: extractCount,
-            extractDuration: extractDuration
-        )
+        // The player item outlives this call, so extracts go to the (evicted) cache folder.
+        let source = try await previewSource(for: video, config: config,
+                                             extractFolder: FFmpegFallback.currentSettings?.cacheDirectory,
+                                             progressHandler: progressHandler, cancellationCheck: cancellationCheck)
+        let asset = source.asset
+        let timestamps = source.timestamps
+        let extractDuration = source.extractDuration
+        let playbackSpeed = source.playbackSpeed
 
         if cancellationCheck() { throw PreviewError.cancelled }
 
@@ -487,6 +461,113 @@ struct PreviewGenerationLogic {
         return playerItem
     }
     
+    /// What a preview is composed from: the source and where its extracts are in it.
+    private struct PreviewSource {
+        let asset: AVAsset
+        let timestamps: [(start: CMTime, duration: CMTime)]
+        let extractDuration: TimeInterval
+        let playbackSpeed: Double
+        /// The times the timestamp pills show, when `timestamps` aren't times of the source.
+        var labelStarts: [CMTime]? = nil
+    }
+
+    /// Opens `video` and picks its extracts. For a source only ffmpeg decodes, the extracts are
+    /// encoded first and the returned source is those files joined.
+    private static func previewSource(
+        for video: VideoInput,
+        config: PreviewConfiguration,
+        extractFolder: URL?,
+        progressHandler: @escaping @Sendable (Double, PreviewGenerationStatus, URL?, String?) -> Void,
+        cancellationCheck: @escaping @Sendable () -> Bool
+    ) async throws -> PreviewSource {
+        let options = [AVURLAssetPreferPreciseDurationAndTimingKey: true]
+        // `cancel(for:)` only flips a token: poll it so a remux or copy in progress stops too.
+        let prepared = try await polling(cancellationCheck) {
+            UncheckedSource(try await SourceRouter.prepare(video.url, options: options))
+        }.value
+
+        switch prepared {
+        case .asset(let asset):
+            try await validateVideo(asset: asset, video: video, config: config)
+            if cancellationCheck() { throw PreviewError.cancelled }
+            let videoDuration = CMTimeGetSeconds(try await asset.load(.duration))
+            let (extractDuration, playbackSpeed) = config.calculateExtractParameters(forVideoDuration: videoDuration)
+            progressHandler(0.05, .analyzing, nil, "Calculating timestamps...")
+            let timestamps = try await calculateExtractTimestamps(
+                asset: asset, video: video,
+                extractCount: config.extractCount(forVideoDuration: videoDuration),
+                extractDuration: extractDuration)
+            return PreviewSource(asset: asset, timestamps: timestamps,
+                                 extractDuration: extractDuration, playbackSpeed: playbackSpeed)
+
+        case .ffmpeg(let source):
+            #if os(macOS)
+            let videoDuration = source.info.duration
+            try validateDuration(videoDuration, config: config)
+            let (extractDuration, playbackSpeed) = config.calculateExtractParameters(forVideoDuration: videoDuration)
+            progressHandler(0.05, .analyzing, nil, "Calculating timestamps...")
+            let timestamps = extractTimestamps(
+                totalDuration: videoDuration,
+                extractCount: config.extractCount(forVideoDuration: videoDuration),
+                extractDuration: extractDuration)
+            guard let extractFolder else { throw PreviewError.invalidConfiguration("The ffmpeg fallback is not enabled") }
+            let extracts = try await polling(cancellationCheck) {
+                UncheckedExtracts(try await FFmpegExtracts.make(
+                    from: source, extracts: timestamps, includeAudio: config.includeAudio, in: extractFolder
+                ) { done in
+                    progressHandler(0.05, .analyzing, nil, "Decoding extract \(done)/\(timestamps.count) with ffmpeg...")
+                })
+            }.value
+            return PreviewSource(asset: extracts.asset, timestamps: extracts.ranges,
+                                 extractDuration: extractDuration, playbackSpeed: playbackSpeed,
+                                 labelStarts: timestamps.map(\.start))
+            #else
+            throw PreviewError.invalidConfiguration("The ffmpeg fallback is only available on macOS")
+            #endif
+        }
+    }
+
+    private struct UncheckedSource: @unchecked Sendable {
+        let value: PreparedSource
+        init(_ value: PreparedSource) { self.value = value }
+    }
+
+    private struct UncheckedExtracts: @unchecked Sendable {
+        let value: FFmpegExtracts
+        init(_ value: FFmpegExtracts) { self.value = value }
+    }
+
+    /// Runs `work`, cancelling it when `cancellationCheck` turns true.
+    private static func polling<Value: Sendable>(
+        _ cancellationCheck: @escaping @Sendable () -> Bool,
+        _ work: @escaping @Sendable () async throws -> Value
+    ) async throws -> Value {
+        try await withThrowingTaskGroup(of: Value?.self) { group in
+            group.addTask { try await work() }
+            group.addTask {
+                while !cancellationCheck() { try await Task.sleep(for: .milliseconds(200)) }
+                throw PreviewError.cancelled
+            }
+            defer { group.cancelAll() }
+            while let result = try await group.next() {
+                if let result { return result }
+            }
+            throw PreviewError.cancelled
+        }
+    }
+
+    /// The source must be long enough for the extracts asked of it.
+    private static func validateDuration(_ durationSeconds: Double, config: PreviewConfiguration) throws {
+        guard durationSeconds.isFinite, durationSeconds > 0 else {
+            throw PreviewError.invalidConfiguration("Source duration must be finite and positive")
+        }
+        let (extractDuration, _) = config.calculateExtractParameters(forVideoDuration: durationSeconds)
+        let minimumRequired = extractDuration * Double(config.extractCount(forVideoDuration: durationSeconds))
+        guard durationSeconds >= minimumRequired else {
+            throw PreviewError.insufficientVideoDuration(required: minimumRequired, actual: durationSeconds)
+        }
+    }
+
     private static func validateVideo(asset: AVAsset, video: VideoInput, config: PreviewConfiguration) async throws {
         logger.info("🔍 Validating video: \(video.title)")
         
@@ -511,30 +592,8 @@ struct PreviewGenerationLogic {
         let durationSeconds = CMTimeGetSeconds(duration)
         logger.info("⏱️  Video duration: \(durationSeconds)s")
         
-        guard durationSeconds.isFinite, durationSeconds > 0 else {
-            throw PreviewError.invalidConfiguration("Source duration must be finite and positive")
-        }
+        try validateDuration(durationSeconds, config: config)
 
-        // Minimum required duration: at least enough for the minimum extract duration
-        let (extractDuration, playbackSpeed) = config.calculateExtractParameters(forVideoDuration: durationSeconds)
-        let extractCount = config.extractCount(forVideoDuration: durationSeconds)
-        let minimumRequired = extractDuration * Double(extractCount)
-        
-        logger.info("📊 Extract parameters:")
-        logger.info("  - Base extract count: \(config.baseExtractCount)")
-        logger.info("  - Adjusted extract count: \(extractCount)")
-        logger.info("  - Extract duration: \(extractDuration)s")
-        logger.info("  - Playback speed: \(playbackSpeed)x")
-        logger.info("  - Minimum required video duration: \(minimumRequired)s")
-        
-        guard durationSeconds >= minimumRequired else {
-            logger.error("❌ Video too short: \(durationSeconds)s < \(minimumRequired)s")
-            throw PreviewError.insufficientVideoDuration(
-                required: minimumRequired,
-                actual: durationSeconds
-            )
-        }
-        
         logger.info("✅ Video validation passed")
     }
     
@@ -545,8 +604,15 @@ struct PreviewGenerationLogic {
         extractDuration: TimeInterval
     ) async throws -> [(start: CMTime, duration: CMTime)] {
         let duration = try await asset.load(.duration)
-        let totalDuration = CMTimeGetSeconds(duration)
-        
+        return extractTimestamps(totalDuration: CMTimeGetSeconds(duration), extractCount: extractCount,
+                                 extractDuration: extractDuration)
+    }
+
+    private static func extractTimestamps(
+        totalDuration: TimeInterval,
+        extractCount: Int,
+        extractDuration: TimeInterval
+    ) -> [(start: CMTime, duration: CMTime)] {
         // Use biased distribution (skip first/last 5%, concentrate in middle)
         let skipStart = totalDuration * 0.05
         let skipEnd = totalDuration * 0.05
@@ -622,6 +688,7 @@ struct PreviewGenerationLogic {
         maxResolutionRaw: String?,
         customTargetSize: CGSize? = nil,
         includeOverlayCues: Bool = false,
+        labelStarts: [CMTime]? = nil,
         video: VideoInput,
         progressHandler: @escaping @Sendable (Double, PreviewGenerationStatus, URL?, String?) -> Void,
         cancellationCheck: @escaping @Sendable () -> Bool
@@ -723,7 +790,7 @@ struct PreviewGenerationLogic {
                             seconds: min(1.0, CMTimeGetSeconds(segmentOutputDuration)),
                             preferredTimescale: 600
                         ),
-                        text: formatExtractTimestamp(seconds: CMTimeGetSeconds(timestamp.start))
+                        text: formatExtractTimestamp(seconds: CMTimeGetSeconds(labelStarts?[index] ?? timestamp.start))
                     )
                 )
                 

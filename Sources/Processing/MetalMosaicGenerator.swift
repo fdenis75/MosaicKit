@@ -148,15 +148,14 @@ public actor MetalMosaicGenerator: MosaicGeneratorProtocol {
                         if config.gifMode == .withMosaic {
                             let animationURL = config.animatedOutputURL(for: video, referenceDate: referenceDate)
                             if !FileManager.default.fileExists(atPath: animationURL.path) {
-                                let asset = try await RemoteVideoSupport.makeAsset(url: video.url, reduceReads: config.reduceSourceReads)
-                                let duration: Double
-                                if let known = video.duration { duration = known } else { duration = try await asset.load(.duration).seconds }
+                                let source = try await SourceRouter.prepare(video.url, reduceReads: config.reduceSourceReads)
+                                let duration = try await Self.duration(of: video, source: source)
                                 guard duration.isFinite, duration > 0 else { throw MosaicError.invalidVideo("Invalid duration") }
                                 // The same layout `planMosaic` computes (P2): one shared helper.
                                 let (_, layout) = try makeLayout(for: video, duration: duration, config: config,
                                                                  forIphone: forIphone, progressHandler: nil)
                                 // `config.overwrite` is false on this path.
-                                try await exportAnimation(for: video, asset: asset, layout: layout, config: config, to: animationURL)
+                                try await exportAnimation(for: video, source: source, layout: layout, config: config, to: animationURL)
                             }
                         }
                         return mosaicURL
@@ -166,7 +165,7 @@ public actor MetalMosaicGenerator: MosaicGeneratorProtocol {
     
             let plan = try await planMosaic(for: video, config: config, forIphone: forIphone,
                                             progressHandler: attemptProgressHandler)
-            let asset = plan.asset
+            let source = plan.source
             let layout = plan.layout
             let plannedConfig = plan.config
 
@@ -184,7 +183,7 @@ public actor MetalMosaicGenerator: MosaicGeneratorProtocol {
                         attributes: nil
                     )
                 }
-                try await exportAnimation(for: video, asset: asset, layout: layout, config: plannedConfig, to: animURL)
+                try await exportAnimation(for: video, source: source, layout: layout, config: plannedConfig, to: animURL)
                 logger.debug("💾 Animation-only saved to: \(animURL.path)")
                 return animURL
             }
@@ -219,7 +218,7 @@ public actor MetalMosaicGenerator: MosaicGeneratorProtocol {
                 if FileManager.default.fileExists(atPath: animURL.path) && !plannedConfig.overwrite {
                     logger.debug("⏭️ Animation already exists, skipping animation save: \(animURL.path)")
                 } else {
-                    try await exportAnimation(for: video, asset: asset, layout: layout, config: plannedConfig, to: animURL)
+                    try await exportAnimation(for: video, source: source, layout: layout, config: plannedConfig, to: animURL)
                     logger.debug("💾 Animation saved to: \(animURL.path)")
                 }
             }
@@ -315,7 +314,7 @@ public actor MetalMosaicGenerator: MosaicGeneratorProtocol {
 
     /// Inputs of one mosaic composition, resolved once per attempt.
     private struct MosaicPlan {
-        let asset: AVURLAsset
+        let source: PreparedSource
         let layout: MosaicLayout
         /// The caller's configuration with the aspect ratio snapped to the computed layout.
         let config: MosaicConfiguration
@@ -330,10 +329,9 @@ public actor MetalMosaicGenerator: MosaicGeneratorProtocol {
         forIphone: Bool,
         progressHandler: (@Sendable (MosaicGenerationProgress) -> Void)?
     ) async throws -> MosaicPlan {
-        let asset = try await RemoteVideoSupport.makeAsset(url: video.url, reduceReads: config.reduceSourceReads)
-        try await Self.checkTransportStreamReadable(asset, url: video.url)
-        let duration: Double
-        if let known = video.duration { duration = known } else { duration = try await asset.load(.duration).seconds }
+        let source = try await SourceRouter.prepare(video.url, reduceReads: config.reduceSourceReads)
+        if case .asset(let asset) = source { try await Self.checkTransportStreamReadable(asset, url: video.url) }
+        let duration = try await Self.duration(of: video, source: source)
         guard duration.isFinite, duration > 0, config.width > 0, config.width <= 16_384, (video.width ?? 1).isFinite, (video.height ?? 1).isFinite, (video.width ?? 1) > 0, (video.height ?? 1) > 0 else { throw MosaicError.invalidVideo("Invalid duration or dimensions") }
         if duration < 5.0 {
             throw MosaicError.invalidVideo("video too short")
@@ -345,7 +343,7 @@ public actor MetalMosaicGenerator: MosaicGeneratorProtocol {
 
         var adjustedConfig = config
         adjustedConfig.updateAspectRatio(new: AspectRatio.findNearest(to: layout.mosaicSize))
-        return MosaicPlan(asset: asset, layout: layout, config: adjustedConfig)
+        return MosaicPlan(source: source, layout: layout, config: adjustedConfig)
     }
 
     /// Throws ``VideoError/unsupportedCodec(_:_:)`` for an MPEG transport stream AVFoundation
@@ -362,6 +360,15 @@ public actor MetalMosaicGenerator: MosaicGeneratorProtocol {
             throw RemoteVideoSupport.isUnreadableMediaError(error) ? unreadable : error
         }
         if videoTracks.isEmpty { throw unreadable }
+    }
+
+    /// The duration planning uses: the input's own, else what the source reports.
+    private static func duration(of video: VideoInput, source: PreparedSource) async throws -> Double {
+        if let known = video.duration { return known }
+        switch source {
+        case .asset(let asset): return try await asset.load(.duration).seconds
+        case .ffmpeg(let source): return source.info.duration
+        }
     }
 
     /// The layout type that is actually calculated.
@@ -580,19 +587,32 @@ public actor MetalMosaicGenerator: MosaicGeneratorProtocol {
         )
 
         let colorCollector = overlayConfig.colorDNA.show ? FrameColorCollector() : nil
-        let processedStream = thumbnailProcessor.processedFramesStream(
-            from: video.url, layout: layout, asset: plan.asset,
-            accurate: config.useAccurateTimestamps,
-            snapToKeyframes: config.reduceSourceReads,
-            labelConfig: overlayConfig.frameLabel,
-            sampling: Self.samplingPolicy(for: config),
-            crop: Self.frameCrop(for: video, layout: layout, config: config),
-            collectColor: { index, image in
-                if let collector = colorCollector {
-                    await collector.store(OverlayProcessor.averageColor(of: image), at: index)
-                }
+        let crop = Self.frameCrop(for: video, layout: layout, config: config)
+        let collectColor: @Sendable (Int, CGImage) async -> Void = { index, image in
+            if let collector = colorCollector {
+                await collector.store(OverlayProcessor.averageColor(of: image), at: index)
             }
-        )
+        }
+        let processedStream = switch plan.source {
+        case .asset(let asset):
+            thumbnailProcessor.processedFramesStream(
+                from: video.url, layout: layout, asset: asset,
+                accurate: config.useAccurateTimestamps,
+                snapToKeyframes: config.reduceSourceReads,
+                labelConfig: overlayConfig.frameLabel,
+                sampling: Self.samplingPolicy(for: config),
+                crop: crop,
+                collectColor: collectColor
+            )
+        case .ffmpeg(let source):
+            thumbnailProcessor.processedFramesStream(
+                from: source, layout: layout, duration: video.duration,
+                labelConfig: overlayConfig.frameLabel,
+                sampling: Self.samplingPolicy(for: config),
+                crop: crop,
+                collectColor: collectColor
+            )
+        }
 
         var mosaic = try await metalProcessor.generateMosaicStream(
             stream: processedStream,
@@ -640,14 +660,14 @@ public actor MetalMosaicGenerator: MosaicGeneratorProtocol {
     /// three animation sites in `generate(for:config:forIphone:)`.
     private func exportAnimation(
         for video: VideoInput,
-        asset: AVURLAsset,
+        source: PreparedSource,
         layout: MosaicLayout,
         config: MosaicConfiguration,
         to url: URL
     ) async throws {
         let frames = try await thumbnailProcessor.extractAnimationFrames(
             from: video.url,
-            asset: asset,
+            source: source,
             count: layout.thumbCount,
             gifSize: config.gifSize,
             accurate: config.useAccurateTimestamps,
