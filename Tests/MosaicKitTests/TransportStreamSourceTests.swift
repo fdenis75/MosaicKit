@@ -227,17 +227,58 @@ struct TransportStreamSourceTests {
             .appendingPathComponent("MosaicKitEvict-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: folder) }
-        for (index, name) in ["old", "middle", "new"].enumerated() {
+        for (index, name) in ["0000000000000001", "0000000000000002", "0000000000000003"].enumerated() {
             let file = folder.appendingPathComponent("\(name).mp4")
             try Data(count: 100).write(to: file)
             try FileManager.default.setAttributes([.modificationDate: Date(timeIntervalSinceNow: Double(index - 10))],
                                                   ofItemAtPath: file.path)
         }
         // A remux in progress is never evicted.
-        try Data(count: 100).write(to: folder.appendingPathComponent("running.part.mp4"))
+        try Data(count: 100).write(to: folder.appendingPathComponent("0000000000000004.X.part.mp4"))
+        // A file the cache did not make is never deleted.
+        try Data(count: 100).write(to: folder.appendingPathComponent("holiday.mp4"))
         FFmpegCache.evict(in: folder, toFit: 150, maximumBytes: 300)
         let left = try FileManager.default.contentsOfDirectory(atPath: folder.path).sorted()
-        #expect(left == ["new.mp4", "running.part.mp4"])
+        #expect(left == ["0000000000000003.mp4", "0000000000000004.X.part.mp4", "holiday.mp4"])
+    }
+
+    @Test("A cancelled job finishing late doesn't touch the job that replaced it")
+    func staleCompletion() async throws {
+        let jobs = RemuxJobs()
+        let source = URL(fileURLWithPath: "/v/replaced.ts")
+        // Ignores cancellation for a while, as a dying ffmpeg does.
+        let slowToDie: @Sendable () async throws -> URL = {
+            await Task.detached { try? await Task.sleep(for: .milliseconds(150)) }.value
+            throw CancellationError()
+        }
+        let first = Task { try await jobs.result(for: source, slowToDie) }
+        try await Task.sleep(for: .milliseconds(30))
+        first.cancel()
+        _ = try? await first.value
+        let result = URL(fileURLWithPath: "/cache/replaced.mp4")
+        let second = try await jobs.result(for: source) {
+            try await Task.sleep(for: .milliseconds(300))
+            return result
+        }
+        #expect(second == result)
+    }
+
+    @Test("Eviction leaves files being read alone")
+    func evictionSkipsHeldFiles() throws {
+        let folder = FileManager.default.temporaryDirectory
+            .appendingPathComponent("MosaicKitHeld-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let held = folder.appendingPathComponent("000000000000000a.mp4")
+        let free = folder.appendingPathComponent("000000000000000b.mp4")
+        for file in [held, free] { try Data(count: 100).write(to: file) }
+        do {
+            let lease = FFmpegCache.Lease(held)
+            FFmpegCache.evict(in: folder, toFit: 0, maximumBytes: 0)
+            #expect(try FileManager.default.contentsOfDirectory(atPath: folder.path) == ["000000000000000a.mp4"])
+            withExtendedLifetime(lease) {}
+        }
+        #expect(!FFmpegCache.isHeld(held))
     }
 
     @Test("Cancelling one reader of a shared remux doesn't fail the others; the last cancel stops it")

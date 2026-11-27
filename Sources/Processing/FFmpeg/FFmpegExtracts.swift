@@ -89,7 +89,7 @@ struct FFmpegExtracts {
                 if index > 0 {
                     logger.warning("Audio of \(source.original.lastPathComponent, privacy: .public) can't be encoded at \(start, privacy: .public) s: extract has none")
                 }
-                try FileManager.default.moveItem(at: partial, to: file)
+                try FFmpegCache.publish(partial, as: file)
                 return
             }
             lastError = String(output.stderr.suffix(300))
@@ -129,6 +129,8 @@ struct FFmpegExtracts {
             ranges.append((cursor, length))
             cursor = CMTimeAdd(cursor, length)
         }
+        // Extracts made for a player live in the cache: keep them while the composition does.
+        files.forEach { FFmpegCache.hold($0, for: composition) }
         return FFmpegExtracts(asset: composition, ranges: ranges)
     }
     #endif

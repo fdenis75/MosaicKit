@@ -1,14 +1,14 @@
 # Migrating to MosaicKit 2.0.0
 
 This guide is for apps that already use MosaicKit 1.19.x. 2.0.0 adds an opt-in ffmpeg fallback for
-sources AVFoundation can't read (macOS), and removes the API deprecated since 1.x.
+sources AVFoundation can't read (macOS), and removes the API 1.x scheduled for removal.
 
 ## 1. Do I need to change anything?
 
 | If your app… | You are affected by | Severity |
 |---|---|---|
 | calls `TransportStreamRemuxer` | [2.2](#22-transportstreamremuxer-is-replaced) | Source break |
-| uses API deprecated in 1.x, or `LayoutType.dynamic` | [2.3](#23-removed-api) | Source break |
+| uses API scheduled for removal in 2.0, or `LayoutType.dynamic` | [2.3](#23-removed-api) | Source break |
 | wants AVI, WMV, FLV, MKV, WebM and similar on macOS | [2.1](#21-ffmpegfallback) | Opt-in |
 | runs on iOS or Mac Catalyst | [2.3](#23-removed-api) only | `enable` throws; `FFmpegFallback.isSupported` is `false` |
 
@@ -50,6 +50,9 @@ AVFoundation stays the default. Each source takes one route:
   otherwise. It is dropped only if that fails too.
 - **Previews** of an `.ffmpeg` source first encode only the chosen extracts (VideoToolbox) into
   temporary files, then compose them as usual. Timestamp overlays show source times.
+- **Thumbnails** (`extractThumbnails`, `exportThumbnails`) never copy a source: they use a cached copy
+  if there is one, else ffmpeg seeks in the file itself.
+- **Cache.** Files being read are not evicted (within one process).
 - **Files without a usable index** (some AVI and FLV): when a seek near the end is slow, a
   Matroska copy is made in the cache first.
 - **`reduceSourceReads`** doesn't apply to fallback routes, and `.ffmpeg` frames are always
@@ -74,6 +77,9 @@ Differences: `ffprobe` is now required too, and the default cache folder is
 
 ### 2.3 Removed API
 
+Deprecated names that only point to a newer spelling (`useNativeExport`, the older configuration
+initializers, `FFmpegEncodingOptions.MaxResolution`, `gifOutputURL`) stay, still deprecated.
+
 | Removed | Use instead |
 |---|---|
 | `GenerationJobController`, `GenerationJobID`, `GenerationAttemptID`, `GenerationJobState`, `GenerationJobSnapshot` | `MosaicGeneratorCoordinator`, or cancel your own `Task` |
@@ -86,7 +92,8 @@ Differences: `ffprobe` is now required too, and the default cache folder is
 | `PreviewGeneratorCoordinator`'s unused getters | Keep the value you passed in |
 | `LayoutType.dynamic` | `.custom` |
 
-A saved configuration containing `"dynamic"` still decodes, as `.custom`. It was already laid out
+`LayoutType(rawValue: "dynamic")` now returns `nil`: if you store the raw string yourself, map it to
+`.custom`. A saved configuration containing `"dynamic"` still decodes, as `.custom`. It was already laid out
 that way, but its `configurationHash` and `{layout}` token now say `custom`, so its output path
 changes once.
 

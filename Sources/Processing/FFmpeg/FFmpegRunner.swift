@@ -74,7 +74,7 @@ enum FFmpegRunner {
                     try processRef.run()
                 } catch {
                     processRef.terminationHandler = nil
-                    continuation.resume(throwing: error)
+                    continuation.resume(throwing: MosaicError.processingFailed("Can't run \(binary): \(error.localizedDescription)"))
                     return
                 }
                 let cancelledAlready = state.withLock {

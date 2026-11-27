@@ -9,6 +9,8 @@ actor RemuxJobs {
     static let shared = RemuxJobs()
 
     private struct Job {
+        /// A cancelled job's late completion must not touch the job that replaced it.
+        let token: UUID
         let task: Task<Void, Never>
         var waiters: [UUID: CheckedContinuation<URL, any Error>] = [:]
     }
@@ -35,12 +37,13 @@ actor RemuxJobs {
             return
         }
         if jobs[source] == nil {
+            let token = UUID()
             let task = Task {
                 let outcome: Result<URL, any Error>
                 do { outcome = .success(try await work()) } catch { outcome = .failure(error) }
-                self.complete(source, with: outcome)
+                self.complete(source, token: token, with: outcome)
             }
-            jobs[source] = Job(task: task)
+            jobs[source] = Job(token: token, task: task)
         }
         jobs[source]?.waiters[id] = continuation
     }
@@ -59,8 +62,9 @@ actor RemuxJobs {
         }
     }
 
-    private func complete(_ source: URL, with outcome: Result<URL, any Error>) {
-        guard let job = jobs.removeValue(forKey: source) else { return }
+    private func complete(_ source: URL, token: UUID, with outcome: Result<URL, any Error>) {
+        guard let job = jobs[source], job.token == token else { return }
+        jobs[source] = nil
         for continuation in job.waiters.values { continuation.resume(with: outcome) }
     }
 }

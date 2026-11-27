@@ -53,7 +53,11 @@ extension TransportStreamSourceTests {
                 #expect(try await FFmpegFallback.route(for: url) == sample.route)
                 #expect(video.width == 320 && video.height == 180)
                 #expect(abs(try #require(video.duration) - 12) < 0.5)
-                // Inspection and routing write nothing.
+                // Inspection, routing and thumbnails write nothing.
+                let frames = try await MetalMosaicGenerator().extractThumbnails(
+                    for: video, options: ThumbnailExtractionOptions(count: 12))
+                #expect(frames.count == 12)
+                #expect(frames.allSatisfy { $0.image.width == 320 && $0.image.height == 180 })
                 #expect(try FFmpegCache.files(in: cache).isEmpty)
 
                 var config = MosaicConfiguration(width: 640, density: .xxl, format: .jpeg, includeMetadata: true)
@@ -64,11 +68,6 @@ extension TransportStreamSourceTests {
                 let output = try await MetalMosaicGenerator().generate(for: video, config: config)
                 #expect(FileManager.default.fileExists(atPath: output.path))
                 #expect(!output.path.contains(cache.lastPathComponent))
-
-                let frames = try await MetalMosaicGenerator().extractThumbnails(
-                    for: video, options: ThumbnailExtractionOptions(count: 12))
-                #expect(frames.count == 12)
-                #expect(frames.allSatisfy { $0.image.width > 0 && $0.image.height > 0 })
             }
         }
     }

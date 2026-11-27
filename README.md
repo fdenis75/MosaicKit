@@ -28,7 +28,7 @@ A high-performance Swift package for generating video mosaics with Metal-acceler
 - **Other formats through ffmpeg on macOS, opt-in.** `FFmpegFallback.enable(ffmpegBinaryPath:)` makes mosaics, previews and animations
   work for AVI, WMV, FLV, MKV, WebM and similar. AVFoundation stays the default; ffmpeg copies the streams into MP4 when the codec is
   decodable, and otherwise decodes only the frames and extracts needed. It replaces `TransportStreamRemuxer`.
-- **Removed:** the API deprecated in 1.x (`GenerationJobController`, `generateallcombinations`, the array-based `ThumbnailProcessor`
+- **Removed:** the API 1.x scheduled for removal (`GenerationJobController`, `generateallcombinations`, the array-based `ThumbnailProcessor`
   helpers and a few others) and `LayoutType.dynamic`.
 - Upgrading? Read [MIGRATING-TO-2.0.md](MIGRATING-TO-2.0.md).
 

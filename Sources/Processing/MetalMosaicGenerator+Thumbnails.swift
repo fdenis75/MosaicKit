@@ -74,6 +74,8 @@ extension MetalMosaicGenerator {
 
     // MARK: Off-actor work
 
+    /// Never copies the whole source, whatever its route.
+    ///
     /// Decodes the frames `options` selects and hands each one (index, image, decoded time in
     /// seconds) to `body`.
     @concurrent
@@ -87,7 +89,7 @@ extension MetalMosaicGenerator {
         let didStartAccessingSource = video.url.startAccessingSecurityScopedResource()
         defer { if didStartAccessingSource { video.url.stopAccessingSecurityScopedResource() } }
         let policy: ThumbnailProcessor.FrameSamplingPolicy = options.sampling == .uniform ? .uniform : .weighted
-        switch try await SourceRouter.prepare(video.url) {
+        switch try await SourceRouter.prepare(video.url, allowCopies: false) {
         case .asset(let asset):
             let duration: Double
             if let known = video.duration { duration = known } else { duration = try await asset.load(.duration).seconds }

@@ -13,6 +13,8 @@ struct FFmpegSource: Sendable {
     let input: URL
     let info: MediaInfo
     let settings: FFmpegFallback.Settings
+    /// Keeps `input` from eviction when it is a cached copy.
+    var lease: FFmpegCache.Lease? = nil
 }
 
 /// How a source is read once any file it needs has been made.
@@ -34,8 +36,12 @@ enum SourceRouter {
     /// Verdicts per source and contents, so each file is probed once.
     private static let verdicts = Mutex<[String: Verdict]>([:])
 
+    /// Sources already timed and found to seek quickly, so they are timed once.
+    private static let seeksQuickly = Mutex<Set<String>>([])
+
     static func forgetVerdicts() {
         verdicts.withLock { $0.removeAll() }
+        seeksQuickly.withLock { $0.removeAll() }
     }
 
     private static func remember(_ verdict: Verdict, for url: URL) {
@@ -63,9 +69,15 @@ enum SourceRouter {
             return .native
         }
         if let known = verdicts.withLock({ $0[FFmpegCache.key(for: url)] }) { return known }
-        if try await decodesNatively(url) {
+        switch try await decodesNatively(url) {
+        case true?:
             remember(.native, for: url)
             return .native
+        case nil:
+            // A network failure says nothing about the format: not remembered, so it is retried.
+            return .native
+        case false?:
+            break
         }
         let info: MediaInfo
         do {
@@ -88,9 +100,9 @@ enum SourceRouter {
         #endif
     }
 
-    /// Whether AVFoundation can decode `url` itself. Outside Apple's containers this decodes one
+    /// Whether AVFoundation can decode `url` itself (`nil`: a remote source that couldn't be asked). Outside Apple's containers this decodes one
     /// frame: some AVI files load tracks and a duration, then fail every decode (-11869).
-    static func decodesNatively(_ url: URL) async throws -> Bool {
+    static func decodesNatively(_ url: URL) async throws -> Bool? {
         let container = await RemoteVideoSupport.sourceContainer(for: url)
         let asset = RemoteVideoSupport.nativeAsset(url: url, options: [:], reduceReads: false, container: container)
         do {
@@ -105,7 +117,7 @@ enum SourceRouter {
         } catch {
             try Task.checkCancellation()
             // A remote source also fails for network reasons, which are not a routing matter.
-            return url.isFileURL ? false : !RemoteVideoSupport.isUnreadableMediaError(error)
+            return url.isFileURL || RemoteVideoSupport.isUnreadableMediaError(error) ? false : nil
         }
     }
 
@@ -118,21 +130,41 @@ enum SourceRouter {
     }
 
     /// Reads `url` by its route, remuxing or copying it first when needed.
-    static func prepare(_ url: URL, options: [String: Any] = [:], reduceReads: Bool = false) async throws -> PreparedSource {
+    ///
+    /// With `allowCopies` false (thumbnails: a few frames, often from a whole folder), a source
+    /// on a fallback route is never copied: an existing cached copy is used, else ffmpeg seeks in
+    /// the source itself.
+    static func prepare(_ url: URL, options: [String: Any] = [:], reduceReads: Bool = false,
+                        allowCopies: Bool = true) async throws -> PreparedSource {
         #if os(macOS)
         if let settings = FFmpegFallback.currentSettings {
             var verdict = try await detect(url)
             if verdict.route == .remuxed {
-                if let file = try await remux(url, audioCodec: verdict.info?.audioCodec, settings: settings) {
-                    return .asset(AVURLAsset(url: file, options: options))
+                let cached = remuxFile(of: url, settings: settings)
+                var file = FFmpegCache.existing(cached)
+                if file == nil, allowCopies {
+                    file = try await remux(url, audioCodec: verdict.info?.audioCodec, settings: settings)
+                    if file == nil {
+                        // The codec didn't decode after all (for example AV1 on a Mac without the decoder).
+                        verdict = Verdict(route: .ffmpeg, info: verdict.info)
+                        remember(verdict, for: url)
+                    }
                 }
-                // The codec didn't decode after all (for example AV1 on a Mac without the decoder).
-                verdict = Verdict(route: .ffmpeg, info: verdict.info)
-                remember(verdict, for: url)
+                if let file {
+                    let asset = AVURLAsset(url: file, options: options)
+                    FFmpegCache.hold(file, for: asset)
+                    return .asset(asset)
+                }
             }
-            if verdict.route == .ffmpeg, let info = verdict.info {
-                let input = try await seekableInput(for: url, info: info, settings: settings)
-                return .ffmpeg(FFmpegSource(original: url, input: input, info: info, settings: settings))
+            if let info = verdict.info {
+                let input: URL
+                if allowCopies {
+                    input = try await seekableInput(for: url, info: info, settings: settings)
+                } else {
+                    input = FFmpegCache.existing(seekableFile(of: url, settings: settings)) ?? url
+                }
+                return .ffmpeg(FFmpegSource(original: url, input: input, info: info, settings: settings,
+                                            lease: input == url ? nil : FFmpegCache.Lease(input)))
             }
         }
         #endif
@@ -166,38 +198,55 @@ enum SourceRouter {
     }
 
     /// The MP4 copy of `url`, made on first use. `nil` when AVFoundation can't decode any copy.
+    private static func remuxFile(of url: URL, settings: FFmpegFallback.Settings) -> URL {
+        FFmpegCache.file(for: url, variant: "remux", extension: "mp4", in: settings.cacheDirectory)
+    }
+
+    private static func seekableFile(of url: URL, settings: FFmpegFallback.Settings) -> URL {
+        FFmpegCache.file(for: url, variant: "seekable", extension: "mkv", in: settings.cacheDirectory)
+    }
+
     private static func remux(_ url: URL, audioCodec: String?, settings: FFmpegFallback.Settings) async throws -> URL? {
-        let destination = FFmpegCache.file(for: url, variant: "remux", extension: "mp4", in: settings.cacheDirectory)
+        let destination = remuxFile(of: url, settings: settings)
         if let existing = FFmpegCache.existing(destination) { return existing }
         do {
             return try await RemuxJobs.shared.result(for: destination) {
                 try await copyStreams(of: url, to: destination, attempts: remuxAttempts(audioCodec: audioCodec), format: "mp4",
                                       verify: true, settings: settings)
             }
-        } catch is UndecodableCopy {
+        } catch is UnusableCopy {
             return nil
         }
     }
 
-    private struct UndecodableCopy: Error {}
+    private struct UnusableCopy: Error {}
 
     /// The file ffmpeg seeks in for `url`: the source itself, or, when seeking near its end is
     /// slow (a missing or broken index), a Matroska copy of its streams.
     private static func seekableInput(for url: URL, info: MediaInfo, settings: FFmpegFallback.Settings) async throws -> URL {
         guard url.isFileURL, indexlessExtensions.contains(url.pathExtension.lowercased()) else { return url }
-        let destination = FFmpegCache.file(for: url, variant: "seekable", extension: "mkv", in: settings.cacheDirectory)
+        let destination = seekableFile(of: url, settings: settings)
         if let existing = FFmpegCache.existing(destination) { return existing }
+        let key = FFmpegCache.key(for: url)
+        if seeksQuickly.withLock({ $0.contains(key) }) { return url }
         let early = try await seekTime(url, at: 0, settings: settings)
         let late = try await seekTime(url, at: info.duration * 0.9, settings: settings)
-        guard late - early > .seconds(1) else { return url }
+        guard late - early > .seconds(1) else {
+            seeksQuickly.withLock { _ = $0.insert(key) }
+            return url
+        }
         logger.notice("Seeking is slow in \(url.lastPathComponent, privacy: .public): copying it to Matroska first")
         let attempts = [
             Attempt(label: "mkv", arguments: videoAndAudio + ["-c", "copy"]),
             Attempt(label: "mkv, video only", arguments: ["-map", "0:V:0", "-c", "copy", "-an"]),
         ]
-        return try await RemuxJobs.shared.result(for: destination) {
-            try await copyStreams(of: url, to: destination, attempts: attempts, format: "matroska",
-                                  verify: false, settings: settings)
+        do {
+            return try await RemuxJobs.shared.result(for: destination) {
+                try await copyStreams(of: url, to: destination, attempts: attempts, format: "matroska",
+                                      verify: false, settings: settings)
+            }
+        } catch is UnusableCopy {
+            return url   // slow seeks are still better than failing
         }
     }
 
@@ -228,8 +277,6 @@ enum SourceRouter {
         }
         FFmpegCache.evict(in: settings.cacheDirectory, toFit: size ?? 0, maximumBytes: settings.maximumCacheBytes)
 
-        var lastError: (any Error)?
-        var undecodable = false
         for attempt in attempts {
             try Task.checkCancellation()
             logger.info("Copying \(source.lastPathComponent, privacy: .public) (\(attempt.label, privacy: .public))")
@@ -251,7 +298,7 @@ enum SourceRouter {
                 // Only an ffmpeg error exit is worth another attempt (a refused tag or codec
                 // fails at once). A stall or the time limit would only read the source again.
                 guard case .ffmpegEncodingFailed = error else { throw VideoError.processingFailed(source, error) }
-                lastError = error
+                logger.notice("Copy attempt \(attempt.label, privacy: .public) failed: \(error.localizedDescription, privacy: .public)")
                 continue
             } catch {
                 throw VideoError.processingFailed(source, error)
@@ -262,19 +309,18 @@ enum SourceRouter {
                 } catch is CancellationError {
                     throw CancellationError()
                 } catch {
-                    undecodable = true
                     continue
                 }
             }
             do {
-                try FileManager.default.moveItem(at: partial, to: destination)
+                try FFmpegCache.publish(partial, as: destination)
             } catch {
                 throw VideoError.processingFailed(source, error)
             }
             return destination
         }
-        if undecodable { throw UndecodableCopy() }
-        throw VideoError.processingFailed(source, lastError ?? MosaicError.processingFailed("ffmpeg copy failed"))
+        // ffmpeg refused every attempt, or none decoded: the caller falls back to decoding.
+        throw UnusableCopy()
     }
     #endif
 }
