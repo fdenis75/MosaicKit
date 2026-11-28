@@ -357,7 +357,7 @@ public actor MetalMosaicGenerator: MosaicGeneratorProtocol {
     /// layout.
     static func effectiveLayoutType(config: MosaicConfiguration, forIphone: Bool) -> LayoutType {
         if config.layout.layoutType == .fixedGrid { return .fixedGrid }
-        return forIphone ? .iphone : config.layout.layoutType
+        return forIphone ? .phone : config.layout.layoutType
     }
 
     /// How frames are spread over the video: evenly for a fixed grid (read left to right, equal

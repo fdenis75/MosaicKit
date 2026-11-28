@@ -23,6 +23,13 @@ A high-performance Swift package for generating video mosaics with Metal-acceler
 
 - Nothing yet. Add a line here for every change; output-naming and location changes (📁) also get a **Behavior changes** note.
 
+## New in 2.0.1
+
+- **`classic`, `custom` and `auto` layouts are coherent.** A longer video, higher density or wider mosaic never gives fewer thumbnails,
+  cells are at least 50 px wide, `classic` follows the mosaic aspect, and `auto` now honors width and density.
+  Mosaics made with these layouts look different than with 2.0.0: read [MIGRATING-TO-2.0.1.md](MIGRATING-TO-2.0.1.md).
+- **`LayoutType.iphone` is deprecated.**
+
 ## New in 2.0.0
 
 - **Other formats through ffmpeg on macOS, opt-in.** `FFmpegFallback.enable(ffmpegBinaryPath:)` makes mosaics, previews and animations
@@ -387,7 +394,7 @@ Add MosaicKit to your `Package.swift`:
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/fdenis75/MosaicKit.git", from: "2.0.0")
+    .package(url: "https://github.com/fdenis75/MosaicKit.git", from: "2.0.1")
 ]
 ```
 

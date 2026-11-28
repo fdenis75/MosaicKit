@@ -184,9 +184,9 @@ knowledge base §5.2–§5.3.
   `S` 2.0× → `XS` 3.0× → `XXS` 4.0×.
 - **`LayoutType`:**
   - `custom`: three-zone, **default**.
-  - `classic`: uniform grid.
-  - `auto`: screen-aware, measured in pixels (fixed in F-7, I-9).
-  - `iphone`: mobile-optimized.
+  - `classic`: uniform grid. `custom`, `classic` and `auto` choose their grid by column count, never pixels, so counts are monotonic; cells are at least 50 px (`LayoutProcessor+Grids.swift`, 2.0.1).
+  - `auto`: `classic` grid in the largest screen's shape, at the configured width and density (2.0.1, I-41).
+  - `iphone`: deprecated (2.0.1); one 1200 px column; still used by `forIphone`.
   - `fixedGrid`: caller-chosen rows × columns (`LayoutConfiguration.grid`); all four fit modes work (`.adaptCanvas`, `.letterbox`, `.stretch`, `.crop`; G-1…G-5). Live-preview example: `Examples/FixedGridPreviewExample.swift` (G-6). Spec: `codebase-analysis-docs/specs/SPEC_FIXED_GRID_LAYOUT.md`.
   - `uneven`: tiles in several sizes, a bento grid of source-aspect unit cells (`UnevenTilePacker`, U-1…U-3); frames are decoded per tile size (`ThumbnailProcessor.extractionGroups`). Spec: `codebase-analysis-docs/specs/SPEC_UNEVEN_TILES_LAYOUT.md`.
 - **`AspectRatio`:** `16:9`, `4:3`, `1:1`, `21:9`, `9:16`.
