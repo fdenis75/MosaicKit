@@ -131,7 +131,7 @@ flowchart LR
 - **1.17.0** (2026-11-21): opt-in low-data reads, `MosaicConfiguration.reduceSourceReads` (R-1, I-33, #96), and `MosaicConfiguration.minimal()`; additive API, no output name change.
 - **1.18.0** (2026-11-25): MPEG-TS sources without a known extension: container sniffing and a clear `VideoError.unsupportedCodec` for HEVC/AV1/MPEG-4 Part 2 in TS (T-1, I-38, #98); no API or config change, no output name change.
 - **1.19.0** (2026-11-25): opt-in ffmpeg remux of HEVC/AV1/MPEG-4 Part 2 transport streams on macOS, `TransportStreamRemuxer` (T-2, I-38, #99); additive API, no output name change.
-- **2.0.0** (unreleased; on `claude/mosaickit-2.0`, tag after merge): major release. Opt-in macOS `FFmpegFallback` (native / remuxed / ffmpeg routes) replaces `TransportStreamRemuxer` (T-3, I-38); everything deprecated in S-6 is removed, including `GenerationJobController`, and `LayoutType.dynamic` (S-8). Source breaks; 📁 output paths change once only for configs that used `.dynamic`. See `MIGRATING-TO-2.0.md`. Layout and header issues I-39 to I-43 are planned after it.
+- **2.0.0** (2026-11-28, PR #101): major release. Opt-in macOS `FFmpegFallback` (native / remuxed / ffmpeg routes) replaces `TransportStreamRemuxer` (T-3, I-38); everything deprecated in S-6 is removed, including `GenerationJobController`, and `LayoutType.dynamic` (S-8). Source breaks; 📁 output paths change once only for configs that used `.dynamic`. See `MIGRATING-TO-2.0.md`. Layout and header issues I-39 to I-43 are planned after it.
 
 ## 8. Tracking
 
@@ -174,8 +174,8 @@ Every PR updates its row here (status) and the matching §4.2 / §6.1 entries in
 | R-1 | low-data reads: `reduceSourceReads` (range loader + keyframe snapping), I-33 ⚡ | done (#96, released in 1.17.0); A/B/A gate passed 2026-11-21 (flag off: every median within ±4 % of the closer `main` run; §8.1); byte measurements in KB §F2 | |
 | T-1 | MPEG-TS sources: container sniffing + clear unsupported-codec error, I-38 | done (#98, released in 1.18.0); no hot-path change: sources with a known extension do no extra I/O | |
 | T-2 | MPEG-TS: opt-in ffmpeg remux for HEVC/AV1 TS (`TransportStreamRemuxer`, macOS), I-38 | done (#99, released in 1.19.0); no hot-path change: only TS sources are probed | |
-| T-3 | opt-in macOS `FFmpegFallback` replaces `TransportStreamRemuxer`, I-38 | done on `claude/mosaickit-2.0`, for 2.0.0; with the fallback off, sources open as in 1.19.0; no benchmark run recorded | |
-| S-8 | remove the S-6 deprecated API and `LayoutType.dynamic` | done on `claude/mosaickit-2.0`, for 2.0.0; removes unused code paths; no benchmark run recorded | |
+| T-3 | opt-in macOS `FFmpegFallback` replaces `TransportStreamRemuxer`, I-38 | done, 2.0.0 (PR #101); with the fallback off, sources open as in 1.19.0; mosaic and animation A/B/A within noise (see PR #101) | |
+| S-8 | remove the S-6 deprecated API and `LayoutType.dynamic` | done, 2.0.0 (PR #101); removes unused code paths; mosaic and animation A/B/A within noise (see PR #101) | |
 | L-1 | layout issues I-39, I-40, I-41; deprecate `.iphone` (I-42) | planned after 2.0 | |
 | H-1 | header bitrate unit, I-43 | planned after 2.0 | |
 

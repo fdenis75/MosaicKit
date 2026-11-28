@@ -2010,6 +2010,9 @@ robustness, performance, or cosmetic.
 | I-41 | F4 | **`.auto` ignores the requested width and density.** Count and canvas come from the largest screen only. | Confirmed (static); open, planned after 2.0 | Low | `calculateThumbnailCount` and `calculateAutoLayout` [[F:Sources/Processing/LayoutProcessor.swift#180-295#19f3db83]] | Honor them, or document and warn. |
 | I-42 | F4 | **`.iphone` layout is to be deprecated** (one column, fixed 1200 px, ignores `config.width`). | Maintainer decision 2026-11-28 (D8); open, planned after 2.0 | Low | `calculateiPhoneLayout` [[F:Sources/Processing/LayoutProcessor.swift#569-631#19f3db83]] | Deprecate; keep the raw value decodable (rules card #3); decide the fate of `forIphone:`. |
 | I-43 | F5 | **The header bitrate is labelled MB/s or KB/s but the value is bits per second** (about 8× overstated as read). | Confirmed (static); open, planned after 2.0 | Medium | `VideoMetadataExtractor.calculateBitrate` returns `fileSize × 8 / duration` [[F:Sources/Processing/VideoMetadataExtractor.swift#174-187#c5f24084]]; `formatBitrate` formats it with a byte formatter (binary) and appends `/s` [[F:Sources/Processing/ThumbnailProcessor.swift#958-978#9f9efa33]] | Format as kbit/s or Mbit/s (changes header text only). |
+| I-44 | F2/F8 | **Player-composition extracts can take the ffmpeg cache past its size limit.** `generateComposition` writes `.ffmpeg`-route extracts into the cache, but eviction runs only before a stream copy. | Confirmed (static); open | Low | Found by the 2.0 review | Evict after making cached extracts. |
+| I-45 | F2 | **`RemuxJobs.cancelledBeforeJoining` can keep entries.** A cancel arriving after the job completed adds an ID nothing removes. | Confirmed (static); open | Low | Found by the 2.0 review | Track waiters that already finished. |
+| I-46 | F2/F8 | **Little cancellation coverage for the ffmpeg fallback.** No test cancels a running ffmpeg, hits its time limit, or runs two player compositions of one source. | Open (tests) | Low | Found by the 2.0 review | Add those tests. |
 
 ### 4.3 Performance: hotspots & budgets
 
@@ -2748,6 +2751,7 @@ with the code.
 | 19 | ~~MPEG-TS behind download links / extensionless files: container sniffing, clear error for unreadable TS codecs; other containers and codecs through the opt-in ffmpeg fallback on macOS (`FFmpegFallback`, 2.0; replaces `TransportStreamRemuxer`)~~ **Done** | I-38 | Tessera users open HEVC TS download links and AVI/WMV/MKV files | done |
 | 20 | Layout fixes after 2.0: `.classic` row search, `.custom` monotonic counts, `.auto` honoring width/density; deprecate `.iphone` | I-39, I-40, I-41, I-42 | Wrong or surprising layouts | M |
 | 21 | Header bitrate unit (bits/s shown as bytes/s), after 2.0 | I-43 | Wrong header text | S |
+| 22 | ffmpeg fallback follow-ups: cache limit for player extracts, waiter bookkeeping, cancellation tests | I-44, I-45, I-46 | Left from the 2.0 review | S |
 
 ### 6.2 Open questions (still unresolved)
 
