@@ -25,7 +25,7 @@ Alternatively, add it to your `Package.swift`:
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/fdenis75/MosaicKit.git", from: "1.19.0")
+    .package(url: "https://github.com/fdenis75/MosaicKit.git", from: "2.0.0")
 ]
 ```
 
@@ -177,30 +177,6 @@ can't be combined with `useAccurateTimestamps`. The server must support byte-ran
 ```swift
 config.reduceSourceReads = true
 ```
-
-### Cancellation, pause, and retry
-
-Coordinator methods support cancelling one video (`cancelGeneration(for:)`) or an entire batch
-(`cancelAllGenerations()`). Retry by calling the generation method again; a failed or
-cancelled attempt leaves no partial output behind.
-
-> Deprecated: ``GenerationJobController`` will be removed in MosaicKit 2.0. A job cancelled before
-> it runs stays in `.cancelling` and cannot be retried. Existing code keeps working:
-
-```swift
-let controller = GenerationJobController()
-let job = await controller.submit {
-    let input = try await VideoSource(url: videoURL).inspect()
-    return try await MetalMosaicGenerator().generate(for: input, config: .default)
-}
-
-await controller.cancel(job)
-// A paused, failed, or cancelled job can be scheduled again:
-await controller.retry(job)
-```
-
-Every retry has a new ``GenerationAttemptID``. Generated files are staged and committed atomically;
-callers therefore see either a complete output or no output from a failed/cancelled attempt.
 
 ## Understanding Density Levels
 
@@ -385,23 +361,23 @@ Available tokens for `PreviewConfiguration`: `{root}`, `{duration}`, `{density}`
 
 When either template is `nil` (the default), the existing naming logic is used unchanged.
 
-## MPEG-TS sources (macOS)
+## Other formats through ffmpeg (macOS)
 
-AVFoundation reads H.264 and MPEG-2 video from a transport stream (`.ts`), but not HEVC, AV1 or
-MPEG-4 Part 2; on iOS it reads no standalone transport stream. Such sources fail with
-``VideoError/unsupportedCodec(_:_:)``. On macOS, with an `ffmpeg` binary, turn on
-``TransportStreamRemuxer`` once at startup: those streams are then copied into MP4 (no
-re-encode) in a cache folder and read from there.
+AVFoundation can't read some sources: AVI, WMV, FLV, MKV, WebM, or HEVC in a transport stream. On
+macOS, with `ffmpeg` and `ffprobe` installed, turn on ``FFmpegFallback`` once at startup.
+AVFoundation stays the default. Such a source is either copied into MP4 (no re-encode) when its
+codec is decodable, or decoded by ffmpeg for the frames and extracts needed.
 
 ```swift
 #if os(macOS)
-try TransportStreamRemuxer.enable(ffmpegBinaryPath: "/opt/homebrew/bin/ffmpeg")
+try FFmpegFallback.enable(ffmpegBinaryPath: "/opt/homebrew/bin/ffmpeg")
 #endif
-let input = try await VideoInput(from: hevcTransportStreamURL)  // remuxed here, once
+let input = try await VideoInput(from: wmvURL)            // described by ffprobe
+let route = try await FFmpegFallback.route(for: wmvURL)   // .ffmpeg
 ```
 
-A remote source is downloaded in full, once; the cache is reused across runs and capped at
-20 GB by default (``TransportStreamRemuxer/clearCache()`` empties it).
+Copies are kept in a cache capped at 20 GB by default (``FFmpegFallback/clearCache()`` empties
+it). On iOS and Mac Catalyst `enable` throws.
 
 ## Error Handling
 

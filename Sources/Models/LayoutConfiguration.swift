@@ -69,12 +69,6 @@ public enum LayoutType: String, Codable, Sendable {
     case auto
     /// A custom layout with specific zone-based arrangements.
     case custom
-    /// A dynamic layout emphasizing center frames.
-    ///
-    /// Deprecated (I-8): the algorithm produced overlapping and clipped rows, so it is laid out
-    /// as ``custom`` instead. Existing configurations that store `"dynamic"` still decode.
-    @available(*, deprecated, message: "Laid out as .custom; use .custom instead. Removed in 2.0.")
-    case dynamic
     /// A classic uniform grid layout.
     case classic
     /// A layout optimized for portrait iPhone screens.
@@ -90,7 +84,21 @@ public enum LayoutType: String, Codable, Sendable {
     /// ``classic`` layout. Ignored when generating `forIphone`.
     case uneven
 
-    /// An array of all available layout types. The deprecated ``dynamic`` is not listed.
+    /// Decodes a raw value. `"dynamic"`, removed in 2.0, decodes as ``custom``, which is how it
+    /// was laid out since 1.x, so saved configurations keep loading.
+    public init(from decoder: Decoder) throws {
+        let value = try decoder.singleValueContainer().decode(String.self)
+        if value == "dynamic" {
+            self = .custom
+        } else if let type = LayoutType(rawValue: value) {
+            self = type
+        } else {
+            throw DecodingError.dataCorrupted(.init(codingPath: decoder.codingPath,
+                                                    debugDescription: "Unknown layout type \(value)"))
+        }
+    }
+
+    /// An array of all available layout types.
     public static let allCases: [LayoutType] = [.auto, .custom, .classic, .iphone, .fixedGrid, .uneven]
 }
 

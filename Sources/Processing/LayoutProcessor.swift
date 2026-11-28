@@ -21,25 +21,6 @@ public final class LayoutProcessor {
     }
     private var layoutCache: [String: MosaicLayout] = [:]
 
-    /// Whether the one-time `.dynamic` deprecation warning was already logged (I-8, F-7).
-    private static let dynamicWarningLogged = Mutex(false)
-
-    /// The layout type that is actually calculated for `layoutType`.
-    ///
-    /// `.dynamic` is deprecated (I-8): it still decodes, because persisted raw values must
-    /// stay valid, but it is laid out as `.custom`. The warning is logged once per process.
-    static func resolved(_ layoutType: LayoutType, logger: Logger) -> LayoutType {
-        // Compared by raw value so this file doesn't trip the case's own deprecation warning.
-        guard layoutType.rawValue == "dynamic" else { return layoutType }
-        let firstUse = dynamicWarningLogged.withLock { logged -> Bool in
-            defer { logged = true }
-            return !logged
-        }
-        if firstUse {
-            logger.warning("LayoutType.dynamic is deprecated and is laid out as .custom; use .custom instead")
-        }
-        return .custom
-    }
     
     /// Get the screen with the largest size
     private func getLargestScreen() -> (size: CGSize, scale: CGFloat)? {
@@ -117,7 +98,6 @@ public final class LayoutProcessor {
             return MosaicLayout(rows: 0, cols: 0, thumbnailSize: .zero, positions: [], thumbCount: 0,
                                 thumbnailSizes: [], mosaicSize: .zero)
         }
-        let layoutType = Self.resolved(layoutType, logger: logger)
         storedAspectRatio = mosaicAspectRatio.ratio
         logger.debug("🎯 Starting layout calculation - AR: \(originalAspectRatio), Count: \(thumbnailCount), Width: \(mosaicWidth), target AR: \(self.mosaicAspectRatio)")
         logger.debug("⚙️ Layout mode: \(layoutType.rawValue), Density: \(density.name)")
@@ -181,17 +161,6 @@ public final class LayoutProcessor {
                 reservedHeight: reservedHeight
             )
         case .custom:
-            layout = calculateCustomLayout(
-                originalAspectRatio: originalAspectRatio,
-                thumbnailCount: thumbnailCount,
-                mosaicWidth: mosaicWidth,
-                mosaicAspectRatio: mosaicAspectRatio,
-                density: density.name
-            )
-        default:
-            // Only the deprecated `.dynamic` reaches this (`resolved(_:logger:)` already maps it to
-            // `.custom`); it is not named so this file stays free of its deprecation warning.
-            // Every other case is listed above, so a new one is never laid out as `.custom` by accident.
             layout = calculateCustomLayout(
                 originalAspectRatio: originalAspectRatio,
                 thumbnailCount: thumbnailCount,

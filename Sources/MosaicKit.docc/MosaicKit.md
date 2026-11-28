@@ -15,7 +15,7 @@ MosaicKit is a powerful Swift package that generates beautiful video mosaics by 
 ### Key Features
 
 - **Metal GPU Acceleration**: Single high-performance engine on every platform
-- **Multiple Layout Algorithms**: Classic, custom, auto, dynamic, and iPhone-optimized layouts
+- **Multiple Layout Algorithms**: Classic, custom, auto, uneven, fixed-grid and iPhone-optimized layouts
 - **Flexible Configuration**: Control density, aspect ratio, output format, and visual styling
 - **Batch Processing**: Generate mosaics for multiple videos with intelligent concurrency management
 - **Hardware Acceleration**: VideoToolbox for frame extraction, Metal for image processing
@@ -96,14 +96,6 @@ WebP output (`OutputFormat.webp` / `AnimatedFormat.webp`) requires linking the s
 
 - <doc:PerformanceGuide>
 
-### Reliability & Lifecycle
-
-`MetalMosaicGenerator` and both coordinators observe Swift task cancellation at frame extraction,
-GPU processing, and export boundaries. Outputs are written to a staging URL and atomically moved
-into place only after validation, so cancellation or a failed retry cannot leave a partial file.
-``GenerationJobController`` (stable job IDs, pause and retry) is deprecated and will be removed in
-MosaicKit 2.0; use the coordinators' cancellation methods instead.
-
 ### Error Handling
 
 - ``MosaicError``
@@ -116,8 +108,3 @@ MosaicKit 2.0; use the coordinators' cancellation methods instead.
 
 Removed in MosaicKit 2.0.
 
-- ``GenerationJobController``
-- ``GenerationJobID``
-- ``GenerationAttemptID``
-- ``GenerationJobState``
-- ``GenerationJobSnapshot``

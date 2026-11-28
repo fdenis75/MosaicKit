@@ -29,6 +29,9 @@ actor VideoMetadataExtractor {
     /// Optimized for performance with parallel property loading
     func extractMetadataValues(from url: URL) async throws -> VideoMetadataValues {
         try Task.checkCancellation()
+        // A source on a fallback route is described by ffprobe, so inspection never remuxes.
+        let verdict = try await SourceRouter.detect(url)
+        if let info = verdict.info { return try await values(of: url, info: info) }
         let asset = try await RemoteVideoSupport.makeAsset(url: url)
 
         // Load multiple properties at once for better performance
@@ -132,6 +135,30 @@ actor VideoMetadataExtractor {
             fileCreationDate: fileCreationDate,
             width: width,
             height: height,
+            fileSize: fileSize
+        )
+    }
+
+    /// The values of a source ffprobe described: of the source itself, never of a cached file.
+    private func values(of url: URL, info: MediaInfo) async throws -> VideoMetadataValues {
+        let fileSize: Int64?
+        if url.isFileURL {
+            fileSize = try? FileManager.default.attributesOfItem(atPath: url.path)[.size] as? Int64
+        } else {
+            fileSize = await RemoteVideoSupport.contentLength(of: url)
+        }
+        try Task.checkCancellation()
+        return VideoMetadataValues(
+            duration: info.duration,
+            resolution: "\(info.width)×\(info.height)",
+            frameRate: info.frameRate,
+            videoCodec: MediaInfo.displayName(ofCodec: info.videoCodec),
+            audioCodec: info.audioCodec.map(MediaInfo.displayName(ofCodec:)),
+            bitrate: calculateBitrate(fileSize: fileSize, duration: info.duration),
+            hasAudio: info.hasAudio,
+            fileCreationDate: extractFileCreationDate(from: url),
+            width: Double(info.width),
+            height: Double(info.height),
             fileSize: fileSize
         )
     }

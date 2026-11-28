@@ -30,40 +30,6 @@ public final class ThumbnailProcessor: Sendable {
         self.decodeQualityScale = decodeQualityScale.isFinite ? min(max(decodeQualityScale, 1), 4) : 1
     }
     
-    /// Extract thumbnails from video with timestamps
-    /// - Parameters:
-    ///   - file: Video file URL
-    ///   - layout: Layout information for the mosaic
-    ///   - asset: Video asset to extract thumbnails from
-    ///   - preview: Whether generating preview thumbnails
-    ///   - accurate: Whether to use accurate timestamp extraction
-    /// - Returns: Array of tuples containing thumbnail images and their timestamps
-    @available(*, deprecated, message: "Unused by MosaicKit. Removed in MosaicKit 2.0. Use MetalMosaicGenerator.generateMosaicImage(for:config:forIphone:) for a mosaic, or MetalMosaicGenerator.extractThumbnails(for:options:) for raw frames.")
-    public func extractThumbnails(
-        from file: URL,
-        layout: MosaicLayout,
-        asset: AVAsset,
-        preview: Bool = false,
-        accurate: Bool = false,
-        progressHandler: ((Double) -> Void)? = nil
-    ) async throws -> [(image: CGImage, timestamp: String)] {
-        signposter.emitEvent("extractThumbnails")
-        let intervalState = signposter.beginInterval("extractThumbnails")
-        defer { signposter.endInterval("extractThumbnails", intervalState) }
-        var thumbnails: [(image: CGImage, timestamp: String)] = []
-        thumbnails.reserveCapacity(layout.positions.count)
-        let stream = makeImageStream(file: file, layout: layout, asset: asset, accurate: accurate)
-        for try await frame in stream {
-            try Task.checkCancellation()
-            let image = addTimestampToImage(image: frame.image, timestamp: frame.timestamp,
-                                            size: layout.thumbnailSizes[frame.index])
-            thumbnails.append((image, frame.timestamp))
-            progressHandler?(Double(thumbnails.count) / Double(layout.positions.count))
-        }
-        try Task.checkCancellation()
-        return thumbnails
-    }
-    
     /// Extract raw frames for animated GIF creation (no timestamp overlay).
     /// Uses a separate `AVAssetImageGenerator` pass sized according to `gifSize`.
     /// - Parameters:
@@ -105,6 +71,113 @@ public final class ThumbnailProcessor: Sendable {
         let frames = try await extractFrames(from: asset, count: count, maximumSize: maximumSize,
                                              accurate: accurate, snapToKeyframes: snapToKeyframes, policy: policy)
         return frames.map(\.image)
+    }
+
+    /// Animation frames from either kind of source.
+    func extractAnimationFrames(
+        from file: URL,
+        source: PreparedSource,
+        count: Int,
+        gifSize: GifSize,
+        accurate: Bool,
+        snapToKeyframes: Bool = false,
+        policy: FrameSamplingPolicy
+    ) async throws -> [CGImage] {
+        switch source {
+        case .asset(let asset):
+            return try await extractAnimationFrames(from: file, asset: asset, count: count, gifSize: gifSize,
+                                                    accurate: accurate, snapToKeyframes: snapToKeyframes, policy: policy)
+        case .ffmpeg(let source):
+            let maximumSize: CGSize? = switch gifSize {
+            case .nochange: nil
+            case .large: CGSize(width: 1280, height: 720)
+            case .small: CGSize(width: 960, height: 540)
+            }
+            var frames: [CGImage] = []
+            frames.reserveCapacity(count)
+            try await forEachFrame(from: source, count: count, maximumSize: maximumSize, policy: policy) { _, image, _ in
+                frames.append(image)
+            }
+            return frames
+        }
+    }
+
+    /// ``forEachFrame(from:count:maximumSize:accurate:snapToKeyframes:policy:duration:_:)`` for a
+    /// source only ffmpeg decodes. Seeks are exact, so each frame shows its requested time.
+    func forEachFrame(
+        from source: FFmpegSource,
+        count: Int,
+        maximumSize: CGSize?,
+        policy: FrameSamplingPolicy,
+        duration knownDuration: Double? = nil,
+        _ body: (Int, CGImage, CMTime) async throws -> Void
+    ) async throws {
+        #if os(macOS)
+        let times = calculateExtractionTimes(duration: knownDuration ?? source.info.duration, count: count, policy: policy)
+        guard !times.isEmpty else { throw MosaicError.invalidVideo("Invalid duration or frame count") }
+        try await FFmpegFrames.forEach(in: source, at: times.map(\.seconds), fitting: maximumSize) { index, image in
+            try await body(index, image, times[index])
+        }
+        #else
+        throw MosaicError.invalidVideo("The ffmpeg fallback is only available on macOS")
+        #endif
+    }
+
+    /// ``processedFramesStream(from:layout:asset:accurate:snapToKeyframes:labelConfig:sampling:crop:collectColor:)``
+    /// for a source only ffmpeg decodes.
+    func processedFramesStream(
+        from source: FFmpegSource, layout: MosaicLayout, duration knownDuration: Double?,
+        labelConfig: FrameLabelConfig,
+        sampling: FrameSamplingPolicy,
+        crop: FrameCrop?,
+        collectColor: (@Sendable (Int, CGImage) async -> Void)?
+    ) -> AsyncThrowingStream<(Int, CGImage), Error> {
+        let (stream, continuation) = AsyncThrowingStream<(Int, CGImage), Error>.makeStream()
+        #if os(macOS)
+        let processor = self
+        let sizes = layout.thumbnailSizes
+        let producer = Task {
+            do {
+                let times = processor.calculateExtractionTimes(
+                    duration: knownDuration ?? source.info.duration, count: layout.positions.count, policy: sampling)
+                guard !times.isEmpty else { throw MosaicError.invalidVideo("Invalid duration or frame count") }
+                // One pass per tile size, as on the native path, so small tiles are decoded small.
+                for group in Self.extractionGroups(for: sizes) {
+                    let box = processor.decodeBox(for: group.map { sizes[$0] }, crop: crop)
+                    try await FFmpegFrames.forEach(in: source, at: group.map { times[$0].seconds }, fitting: box) { position, image in
+                        let index = group[position]
+                        let image = crop.map { Self.croppedCenter(image, toAspect: $0.aspect) } ?? image
+                        await collectColor?(index, image)
+                        let labeled = processor.addTimestampToImage(
+                            image: image, timestamp: processor.formatTimestamp(seconds: times[index].seconds),
+                            frameIndex: index, size: sizes[index], labelConfig: labelConfig
+                        )
+                        continuation.yield((index, labeled))
+                    }
+                }
+                continuation.finish()
+            } catch {
+                continuation.finish(throwing: error)
+            }
+        }
+        continuation.onTermination = { _ in producer.cancel() }
+        #else
+        continuation.finish(throwing: MosaicError.invalidVideo("The ffmpeg fallback is only available on macOS"))
+        #endif
+        return stream
+    }
+
+    /// The box frames of these cells are decoded into. The decoder fits the frame *inside* it, so
+    /// for a crop it must be big enough for the frame to cover the cell on both axes.
+    func decodeBox(for cells: [CGSize], crop: FrameCrop?) -> CGSize {
+        var width = cells.map(\.width).max() ?? 1
+        var height = cells.map(\.height).max() ?? 1
+        if let crop {
+            let cell = width / max(height, 1)
+            width *= max(1, crop.sourceAspect / cell)
+            height *= max(1, cell / crop.sourceAspect)
+        }
+        return CGSize(width: width * decodeQualityScale, height: height * decodeQualityScale)
     }
 
     /// Decodes `count` raw frames (no label) at the times `policy` picks, in temporal order, with
@@ -178,26 +251,6 @@ public final class ThumbnailProcessor: Sendable {
         guard delivered == times.count else { throw MosaicError.processingFailed("Missing frames") }
     }
     
-    /// Extract thumbnails from video with timestamps as an async stream
-    /// - Parameters:
-    ///   - file: Video file URL
-    ///   - layout: Layout information for the mosaic
-    ///   - asset: Video asset to extract thumbnails from
-    ///   - accurate: Whether to use accurate timestamp extraction
-    /// - Returns: Async stream of tuples containing index, thumbnail image and timestamp
-    @available(*, deprecated, message: "Unused by MosaicKit. Removed in MosaicKit 2.0. Use MetalMosaicGenerator.generateMosaicImage(for:config:forIphone:) for a mosaic, or MetalMosaicGenerator.extractThumbnails(for:options:) for raw frames.")
-    public func extractFramesStream(
-        from file: URL,
-        layout: MosaicLayout,
-        asset: AVAsset,
-        accurate: Bool = false
-    ) -> AsyncThrowingStream<(index: Int, image: CGImage, timestamp: String), Error> {
-        signposter.emitEvent("extractFramesStream")
-        let intervalState = signposter.beginInterval("extractFramesStream")
-        defer { signposter.endInterval("extractFramesStream", intervalState) }
-        return makeImageStream(file: file, layout: layout, asset: asset, accurate: accurate)
-    }
-
     internal func processedFramesStream(
         from file: URL, layout: MosaicLayout, asset: AVAsset, accurate: Bool,
         snapToKeyframes: Bool = false,
@@ -322,231 +375,7 @@ public final class ThumbnailProcessor: Sendable {
         return stream
     }
 
-    /// Extract thumbnails from video with timestamps
-    /// - Parameters:
-    ///   - file: Video file URL
-    ///   - count: Number of thumbnails to extract
-    ///   - size: Size of each thumbnail
-    ///   - asset: Video asset to extract thumbnails from
-    ///   - accurate: Whether to use accurate timestamp extraction
-    /// - Returns: Array of tuples containing thumbnail images and their timestamps
-    @available(*, deprecated, message: "Unused by MosaicKit. Removed in MosaicKit 2.0. Use MetalMosaicGenerator.extractThumbnails(for:options:) for raw frames.")
-    public func extractThumbnailsUI(
-        from file: URL,
-        count: Int,
-        size: CGSize,
-        asset: AVAsset,
-        accurate: Bool = true
-    ) async throws -> [(image: CGImage, timestamp: String)] {
-        signposter.emitEvent("extractThumbnailsUI")
-        let intervalState = signposter.beginInterval("extractThumbnailsUI")
-        defer { signposter.endInterval("extractThumbnailsUI", intervalState) }
-        try Task.checkCancellation()
-        let duration = try await asset.load(.duration).seconds
-        guard duration.isFinite, duration > 0 else { throw MosaicError.invalidVideo("Invalid duration") }
-        let generator = configureGenerator(for: asset, accurate: accurate, preview: false, layout: .init(rows: 1, cols: 1, thumbnailSize: size, positions: [(x: 0, y: 0)], thumbCount: count, thumbnailSizes: [size], mosaicSize: size))
-        
-        guard count > 0, count <= 100_000 else { throw MosaicError.processingFailed("Invalid thumbnail count") }
-        // Calculate evenly spaced times
-        let interval = duration / Double(count + 1)
-        let times = (1...count).map { i in
-            CMTime(seconds: interval * Double(i), preferredTimescale: 600)
-        }
-        
-        var thumbnails: [(Int, CGImage, String)] = []
-        
-        for await result in generator.images(for: times) {
-            try Task.checkCancellation()
-            switch result {
-            case .success(requestedTime: _, image: let image, actualTime: let actual):
-                let timestamp = formatTimestamp(seconds: actual.seconds)
-                let imageWithTimestamp = addTimestampToImage(image: image, timestamp: timestamp, size: size)
-                thumbnails.append((thumbnails.count, imageWithTimestamp, timestamp))
-            case .failure:
-                if let blankImage = createBlankImage(size: size) {
-                    thumbnails.append((thumbnails.count, blankImage, "00:00:00"))
-                }
-            }
-        }
-        
-        return thumbnails
-            .sorted { $0.0 < $1.0 }
-            .map { ($0.1, $0.2) }
-    }
-    
 
-    
-    /// Generate mosaic from extracted frames (CoreGraphics fallback version)
-    /// - Parameters:
-    ///   - frames: Array of frames with timestamps
-    ///   - layout: Layout information
-    ///   - metadata: Video metadata
-    ///   - config: Mosaic configuration
-    /// - Returns: Generated mosaic image
-    @available(*, deprecated, message: "CoreGraphics fallback, unused since the Metal engine runs on every platform. Removed in MosaicKit 2.0. Use MetalMosaicGenerator.generateMosaicImage(for:config:forIphone:).")
-    public func generateMosaic(
-        from frames: [(image: CGImage, timestamp: String)],
-        layout: MosaicLayout,
-        metadata: VideoMetadata,
-        config: MosaicConfiguration,
-        metadataHeader: CGImage? = nil,
-        progressHandler: (@Sendable (Double) -> Void)? = nil
-    ) async throws -> CGImage {
-        signposter.emitEvent("generateMosaic")
-        let intervalState = signposter.beginInterval("generateMosaic")
-        defer { signposter.endInterval("generateMosaic", intervalState) }
-        let startTime = CFAbsoluteTimeGetCurrent()
-        defer { trackPerformance(startTime: startTime) }
-        
-        logger.debug("🎨 Starting mosaic generation - Frames: \(frames.count)")
-        
-        // Create a new image context
-        let hasMetadata = config.includeMetadata && metadataHeader != nil
-        let metadataHeight = hasMetadata ? metadataHeader!.height : 0
-        let outerPadding = mosaicOuterPadding(for: layout)
-        
-        // Calculate final mosaic size
-        let contentSize = layout.mosaicSize
-        var mosaicSize = CGSize(
-            width: contentSize.width + (outerPadding * 2),
-            height: contentSize.height + (outerPadding * 2)
-        )
-        if hasMetadata {
-            mosaicSize.height += CGFloat(metadataHeight)
-        }
-        
-        // Create bitmap context
-        guard let context = CGContext(
-            data: nil,
-            width: Int(mosaicSize.width),
-            height: Int(mosaicSize.height),
-            bitsPerComponent: 8,
-            bytesPerRow: 0,
-            space: CGColorSpaceCreateDeviceRGB(),
-            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
-        ) else {
-            throw MosaicError.generationFailed(CancellationError())
-        }
-        
-        // Fill background
-        context.setFillColor(CGColor(gray: 0.1, alpha: 1.0))
-        context.fill(CGRect(origin: .zero, size: mosaicSize))
-        
-        // Draw metadata header if present
-        if hasMetadata, let headerImage = metadataHeader {
-            progressHandler?(0.1)
-            let yPos = mosaicSize.height - outerPadding - CGFloat(metadataHeight)
-            context.draw(
-                headerImage,
-                in: CGRect(
-                    x: outerPadding,
-                    y: yPos,
-                    width: contentSize.width,
-                    height: CGFloat(metadataHeight)
-                )
-            )
-        }
-        
-        // Draw thumbnails
-        let totalFrames = frames.count
-        for (index, frame) in frames.enumerated() {
-            try Task.checkCancellation()
-            guard index < layout.positions.count else { break }
-            
-            // Get original position
-            let position = layout.positions[index]
-            let size = layout.thumbnailSizes[index]
-            
-            // Create adjusted position with offset for metadata header if needed
-            let yOffset = hasMetadata ? metadataHeight : 0
-            
-            // Calculate Y position for Core Graphics (bottom-left origin)
-            // We want (0,0) of the layout to be at the top-left of the image (below metadata)
-            // So y = mosaicHeight - (layoutY + height + offset)
-            // Wait, layout.positions.y starts at 0 for top row.
-            // So top row y=0.
-            // In CG: y = mosaicHeight - (0 + size.height) - metadataHeight if metadata is at top.
-            // Let's verify:
-            // If metadata is at top (height=100), mosaicHeight=1000.
-            // Header drawn at y = 900.
-            // First row item (y=0, h=200).
-            // Should be drawn below header. Top of item at 900, bottom at 700.
-            // CG draw rect origin is bottom-left of the rect.
-            // So y = 900 - 200 = 700.
-            // Formula: mosaicHeight - (position.y + size.height) - (hasMetadata ? metadataHeight : 0)
-            // Wait, if metadata is at top, we shift everything down by metadataHeight.
-            // So visual Y (from top) = position.y + metadataHeight.
-            // CG Y = mosaicHeight - (visualY + size.height)
-            //      = mosaicHeight - (position.y + metadataHeight + size.height)
-            
-            let visualY = outerPadding + CGFloat(position.y) + CGFloat(yOffset)
-            let cgY = mosaicSize.height - visualY - size.height
-            
-            // CGRect works on both platforms
-            let rect = CGRect(
-                x: outerPadding + CGFloat(position.x),
-                y: cgY, 
-                width: size.width, 
-                height: size.height
-            )
-            
-            // Apply visual effects
-            #if canImport(AppKit)
-            if config.layout.visual.addShadow, let shadowSettings = config.layout.visual.shadowSettings {
-                let shadow = NSShadow()
-                shadow.shadowColor = NSColor.black.withAlphaComponent(shadowSettings.opacity)
-                shadow.shadowOffset = shadowSettings.offset
-                shadow.shadowBlurRadius = shadowSettings.radius
-                shadow.set()
-            }
-            
-            // Draw the thumbnail
-            NSImage(cgImage: frame.image, size: size).draw(in: rect)
-            #elseif canImport(UIKit)
-            // For iOS, we need to handle drawing with shadow using Core Graphics
-            if config.layout.visual.addShadow, let shadowSettings = config.layout.visual.shadowSettings {
-                // Save the graphics state
-                context.saveGState()
-                
-                // Set up shadow
-                context.setShadow(
-                    offset: shadowSettings.offset,
-                    blur: shadowSettings.radius,
-                    color: UIColor.black.withAlphaComponent(shadowSettings.opacity).cgColor
-                )
-                
-                // Draw the image with shadow
-                context.draw(frame.image, in: rect)
-                
-                // Restore graphics state
-                context.restoreGState()
-            } else {
-                // Draw without shadow
-                context.draw(frame.image, in: rect)
-            }
-            #endif
-            
-            // Update progress
-            let progress = 0.2 + (0.7 * Double(index + 1) / Double(totalFrames))
-            progressHandler?(progress)
-            
-            if Task.isCancelled {
-                logger.warning("❌ Mosaic creation cancelled")
-                throw MosaicError.generationFailed(CancellationError())
-            }
-        }
-        
-        // Get the resulting image
-        progressHandler?(0.9)
-        guard let cgImage = context.makeImage() else {
-            throw MosaicError.generationFailed(CancellationError())
-        }
-        
-        let generationTime = CFAbsoluteTimeGetCurrent() - startTime
-        logger.debug("✅ Mosaic generation complete - Size: \(cgImage.width)x\(cgImage.height) in \(generationTime) seconds")
-        progressHandler?(1.0)
-        return cgImage
-    }
     
     // MARK: - Private Methods
     
@@ -579,24 +408,36 @@ public final class ThumbnailProcessor: Sendable {
         try Task.checkCancellation()
         // Takes the URL, not an `AVAsset`: assets are not Sendable, and this runs off the
         // generator's actor.
-        let asset = try await RemoteVideoSupport.makeAsset(url: url, reduceReads: reduceReads)
+        let prepared = try await SourceRouter.prepare(url, reduceReads: reduceReads)
         let duration: Double
-        if let knownDuration {
-            duration = knownDuration
-        } else {
-            duration = try await asset.load(.duration).seconds
+        switch prepared {
+        case .asset(let asset):
+            if let knownDuration { duration = knownDuration } else { duration = try await asset.load(.duration).seconds }
+        case .ffmpeg(let source):
+            duration = knownDuration ?? source.info.duration
         }
         guard duration.isFinite, duration > 0 else { return [] }
-        let generator = AVAssetImageGenerator(asset: asset)
-        generator.appliesPreferredTrackTransform = true
-        Self.applyTimeTolerance(to: generator, accurate: false, snapToKeyframes: reduceReads)
-        generator.maximumSize = CGSize(width: 64, height: 64)
         let start = duration * 0.05
         let span = duration * 0.90
         let times = (0..<swatches).map { index in
             CMTime(seconds: start + span * (Double(index) + 0.5) / Double(swatches), preferredTimescale: 600)
         }
         var colors: [CGColor] = []
+        guard case .asset(let asset) = prepared else {
+            #if os(macOS)
+            if case .ffmpeg(let source) = prepared {
+                try await FFmpegFrames.forEach(in: source, at: times.map(\.seconds),
+                                               fitting: CGSize(width: 64, height: 64)) { _, image in
+                    colors.append(OverlayProcessor.averageColor(of: image))
+                }
+            }
+            #endif
+            return colors
+        }
+        let generator = AVAssetImageGenerator(asset: asset)
+        generator.appliesPreferredTrackTransform = true
+        Self.applyTimeTolerance(to: generator, accurate: false, snapToKeyframes: reduceReads)
+        generator.maximumSize = CGSize(width: 64, height: 64)
         for try await result in generator.images(for: times) {
             try Task.checkCancellation()
             guard case .success(_, let image, _) = result else { continue }
@@ -1110,116 +951,6 @@ public final class ThumbnailProcessor: Sendable {
         case .colorPalette:
             return nil  // rendered as swatches, not text
         }
-    }
-    
-    /// Creates a metadata header image to be placed at the top of the mosaic (legacy version)
-    /// - Parameters:
-    ///   - metadata: The video metadata to display
-    ///   - width: The width of the mosaic
-    ///   - height: The height of the metadata header (matching first row of thumbnails)
-    ///   - backgroundColor: Optional background color (if nil, platform-specific default will be used)
-    /// - Returns: A CGImage containing the metadata header
-    @available(*, deprecated, message: "Legacy header, unused by MosaicKit. Removed in MosaicKit 2.0. Use createMetadataHeader(for:width:height:thumbnailHeight:backgroundColor:forIphone:headerConfig:swatchColors:).")
-    public func createMetadataHeader(
-        metadata: VideoMetadata,
-        width: Int,
-        height: Int? = nil,
-        backgroundColor: CGColor? = nil
-    ) -> CGImage? {
-        signposter.emitEvent("createMetadataHeaderLegacy")
-        let intervalState = signposter.beginInterval("createMetadataHeaderLegacy")
-        defer { signposter.endInterval("createMetadataHeaderLegacy", intervalState) }
-        // Set default background color based on platform
-        #if canImport(AppKit)
-        let bgColor = backgroundColor ?? NSColor(white: 0.1, alpha: 0.25).cgColor
-        #elseif canImport(UIKit)
-        let bgColor = backgroundColor ?? UIColor(white: 0.1, alpha: 0.25).cgColor
-        #endif
-        logger.debug("🏷️ Creating metadata header image (legacy version) - Width: \(width)")
-        
-        // Use provided height or calculate based on width
-        let metadataHeight = height ?? Int(round(Double(width) * 0.05))
-        let fontSize = max(12.0, CGFloat(metadataHeight) / 3.0)
-        
-        // Create bitmap context for the header
-        let colorSpace = CGColorSpaceCreateDeviceRGB()
-        guard let context = CGContext(
-            data: nil,
-            width: width,
-            height: metadataHeight,
-            bitsPerComponent: 8,
-            bytesPerRow: 0,
-            space: colorSpace,
-            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
-        ) else {
-            logger.error("❌ Failed to create graphics context for metadata header")
-            return nil
-        }
-        
-        // Create dark semi-transparent background for metadata
-        context.setFillColor(bgColor)
-        drawRoundedHeaderBackground(
-            in: context,
-            width: CGFloat(width),
-            height: CGFloat(metadataHeight),
-            color: bgColor
-        )
-        
-        // Prepare the metadata text
-        var metadataItems = [
-            "Codec: \(metadata.codec ?? "Unknown")",
-            "Bitrate: \(formatBitrate(metadata.bitrate))"
-        ]
-        
-        // Add custom metadata
-        let customText = metadata.custom.map { "\($0.key): \($0.value)" }.joined(separator: " | ")
-        if !customText.isEmpty {
-            metadataItems.append(customText)
-        }
-        
-        let metadataText = metadataItems.joined(separator: " | ")
-        
-        // Set up text attributes using CoreText
-        let font = CTFontCreateWithName("Helvetica-Bold" as CFString, fontSize, nil)
-        let paragraphStyle = NSMutableParagraphStyle()
-        paragraphStyle.alignment = .center
-        
-        #if canImport(AppKit)
-        // Create the attributed string
-        let attributes: [NSAttributedString.Key: Any] = [
-            .font: font,
-            .foregroundColor: NSColor.black,
-            .paragraphStyle: paragraphStyle
-            ]
-        #elseif canImport(UIKit)
-        let attributes: [NSAttributedString.Key: Any] = [
-            .font: font,
-            .foregroundColor: UIColor.black,
-            .paragraphStyle: paragraphStyle
-            ]
-        #endif
-        
-        let attributedString = NSAttributedString(string: metadataText, attributes: attributes)
-        let line = CTLineCreateWithAttributedString(attributedString)
-        
-        // Calculate text width to center it
-        let textBounds = CTLineGetBoundsWithOptions(line, .useOpticalBounds)
-        let textWidth = textBounds.width
-        let xPos = (CGFloat(width) - textWidth) / 2
-        let yPos = CGFloat(metadataHeight) / 2 + textBounds.height / 4  // Vertically centered
-        
-        // Draw text
-        context.textMatrix = CGAffineTransform.identity
-        context.translateBy(x: xPos, y: yPos)
-        CTLineDraw(line, context)
-        
-        guard let headerImage = context.makeImage() else {
-            logger.error("❌ Failed to create metadata header image")
-            return nil
-        }
-        
-        logger.debug("✅ Created metadata header - Size: \(width)×\(metadataHeight)")
-        return headerImage
     }
     
     // Private helper method to draw metadata directly to a context

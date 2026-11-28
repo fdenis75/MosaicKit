@@ -164,39 +164,10 @@ struct LayoutProcessorTests {
         #expect(uniqueWidths.count >= 2, "Expected at least 2 distinct thumbnail widths in custom layout")
     }
 
-    // MARK: - calculateLayout: dynamic (deprecated, I-8)
+    // MARK: - allCases
 
-    /// `.dynamic` is deprecated; build it from its persisted raw value so the tests don't
-    /// reference the deprecated case.
-    private func legacyDynamic() throws -> LayoutType {
-        try #require(LayoutType(rawValue: "dynamic"), "The persisted raw value \"dynamic\" must keep decoding")
-    }
-
-    @Test("Deprecated dynamic layout is laid out exactly as custom (I-8)")
-    func dynamicLayoutIsCustom() throws {
-        let dynamic = try legacyDynamic()
-        for (count, width) in [(20, 2000), (107, 5120), (800, 5120)] {
-            let custom = makeProcessor().calculateLayout(
-                originalAspectRatio: wideAR, mosaicAspectRatio: .widescreen,
-                thumbnailCount: count, mosaicWidth: width, density: .m, layoutType: .custom
-            )
-            let legacy = makeProcessor().calculateLayout(
-                originalAspectRatio: wideAR, mosaicAspectRatio: .widescreen,
-                thumbnailCount: count, mosaicWidth: width, density: .m, layoutType: dynamic
-            )
-            #expect(legacy.positions.count > 0)
-            #expect(legacy.positions.map(\.x) == custom.positions.map(\.x))
-            #expect(legacy.positions.map(\.y) == custom.positions.map(\.y))
-            #expect(legacy.thumbnailSizes == custom.thumbnailSizes)
-            #expect(legacy.mosaicSize == custom.mosaicSize)
-        }
-    }
-
-    @Test("Dynamic still decodes, and is not listed in allCases")
-    func dynamicStillDecodes() throws {
-        let decoded = try JSONDecoder().decode(LayoutType.self, from: Data(#""dynamic""#.utf8))
-        #expect(decoded.rawValue == "dynamic")
-        #expect(!LayoutType.allCases.contains(decoded))
+    @Test("allCases lists every layout type")
+    func allCasesList() {
         #expect(LayoutType.allCases == [.auto, .custom, .classic, .iphone, .fixedGrid, .uneven])
     }
 
@@ -305,7 +276,7 @@ struct LayoutProcessorTests {
     @Test("All layout types produce non-negative thumbnail positions")
     func allLayoutTypesNonNegativePositions() throws {
         let proc = makeProcessor()
-        for layoutType in [LayoutType.classic, .custom, .iphone] + [try legacyDynamic()] {
+        for layoutType in [LayoutType.classic, .custom, .iphone] {
             let layout = proc.calculateLayout(
                 originalAspectRatio: wideAR,
                 mosaicAspectRatio: .widescreen,
@@ -324,7 +295,7 @@ struct LayoutProcessorTests {
     @Test("All layout types produce at least one thumbnail")
     func allLayoutTypesAtLeastOneThumb() throws {
         let proc = makeProcessor()
-        for layoutType in [LayoutType.classic, .custom, .iphone] + [try legacyDynamic()] {
+        for layoutType in [LayoutType.classic, .custom, .iphone] {
             let layout = proc.calculateLayout(
                 originalAspectRatio: wideAR,
                 mosaicAspectRatio: .widescreen,

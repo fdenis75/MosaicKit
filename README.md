@@ -23,6 +23,20 @@ A high-performance Swift package for generating video mosaics with Metal-acceler
 
 - Nothing yet. Add a line here for every change; output-naming and location changes (📁) also get a **Behavior changes** note.
 
+## New in 2.0.0
+
+- **Other formats through ffmpeg on macOS, opt-in.** `FFmpegFallback.enable(ffmpegBinaryPath:)` makes mosaics, previews and animations
+  work for AVI, WMV, FLV, MKV, WebM and similar. AVFoundation stays the default; ffmpeg copies the streams into MP4 when the codec is
+  decodable, and otherwise decodes only the frames and extracts needed. It replaces `TransportStreamRemuxer`.
+- **Removed:** the API 1.x scheduled for removal (`GenerationJobController`, `generateallcombinations`, the array-based `ThumbnailProcessor`
+  helpers and a few others) and `LayoutType.dynamic`.
+- Upgrading? Read [MIGRATING-TO-2.0.md](MIGRATING-TO-2.0.md).
+
+### Behavior changes
+
+- 📁 Configurations that used `.dynamic` now decode as `.custom`, so their `configurationHash` and `{layout}` token change and their
+  output path moves once.
+
 ## New in 1.19.0
 
 Minor release on top of 1.18.0: HEVC transport streams on macOS through an opt-in ffmpeg remux. Additive API (`TransportStreamRemuxer`); defaults are unchanged and output names do not change. Upgrading from 1.18.x? [MIGRATING-TO-1.19.md](MIGRATING-TO-1.19.md) lists what can change for your app.
@@ -373,7 +387,7 @@ Add MosaicKit to your `Package.swift`:
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/fdenis75/MosaicKit.git", from: "1.19.0")
+    .package(url: "https://github.com/fdenis75/MosaicKit.git", from: "2.0.0")
 ]
 ```
 
@@ -899,33 +913,6 @@ Cancellation semantics (mosaic and preview coordinators alike):
   sessions (native, SJS, and ffmpeg) and animated-image encoding all observe
   cancellation.
 
-### Explicit job lifecycle (deprecated)
-
-> `GenerationJobController` is deprecated and will be removed in MosaicKit 2.0. A job cancelled
-> before it runs stays in `.cancelling` and cannot be retried. Use the coordinators'
-> `cancelGeneration(for:)` / `cancelAllGenerations()` and their progress handlers instead.
-
-For applications that persist work in a queue or need controls independent of a video URL, use
-`GenerationJobController`. Each submission receives a stable `GenerationJobID`; retries receive a
-new `GenerationAttemptID`. Pausing is a scheduling boundary: queued work is removed from execution,
-while an active encoder is allowed to finish. Resuming is done with `retry`.
-
-```swift
-let jobs = GenerationJobController()
-let jobID = await jobs.submit {
-    let source = try await VideoInput(from: videoURL)
-    return try await MetalMosaicGenerator().generate(for: source, config: .default)
-}
-
-await jobs.pause(jobID)       // queued jobs only
-await jobs.retry(jobID)       // paused, failed, or cancelled jobs
-let snapshot = await jobs.snapshot(for: jobID)
-```
-
-Use `VideoSource` when constructing durable queues. It stores only the URL and caller metadata;
-`try await source.inspect()` loads AVFoundation metadata once at worker time and validates duration,
-dimensions, and frame rate before processing.
-
 ## Video Preview Generation
 
 MosaicKit can generate short highlight-reel previews from any video. A preview stitches together evenly-distributed clips from across the video into a single condensed output.
@@ -1118,7 +1105,7 @@ Density chooses the frame count (as for `.custom`) and the largest tile (`XXL`/`
 
 ### Dynamic Layout (deprecated)
 
-`.dynamic` is deprecated and is removed in 2.0: its algorithm overlapped and clipped cells, so it is now laid out as `.custom`. Saved configurations that contain `"dynamic"` still decode.
+`.dynamic` was removed in 2.0. Saved configurations that contain `"dynamic"` decode as `.custom`.
 
 ## Examples
 

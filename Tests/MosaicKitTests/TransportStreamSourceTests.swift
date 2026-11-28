@@ -13,7 +13,7 @@ let transportStreamDecodes = true
 let transportStreamDecodes = false
 #endif
 
-/// Serialized: the remux tests turn ``TransportStreamRemuxer`` on for the process, which would
+/// Serialized: the remux tests turn ``FFmpegFallback`` on for the process, which would
 /// change what the error tests see.
 @Suite("MPEG-TS sources", .serialized)
 struct TransportStreamSourceTests {
@@ -127,15 +127,15 @@ struct TransportStreamSourceTests {
 
     // MARK: Remuxing through ffmpeg (macOS)
 
-    private static var ffmpegPath: String? { TestEnvironment.ffmpegPath }
+    static var ffmpegPath: String? { TestEnvironment.ffmpegPath }
 
     /// Runs `body` with remuxing enabled into a new cache folder, then disables it.
-    private static func withRemuxer(_ body: (URL) async throws -> Void) async throws {
+    static func withRemuxer(_ body: (URL) async throws -> Void) async throws {
         let cache = FileManager.default.temporaryDirectory
             .appendingPathComponent("MosaicKitRemuxTest-\(UUID().uuidString)", isDirectory: true)
-        try TransportStreamRemuxer.enable(ffmpegBinaryPath: try #require(ffmpegPath), cacheDirectory: cache)
+        try FFmpegFallback.enable(ffmpegBinaryPath: try #require(ffmpegPath), cacheDirectory: cache)
         defer {
-            TransportStreamRemuxer.disable()
+            FFmpegFallback.disable()
             try? FileManager.default.removeItem(at: cache)
         }
         try await body(cache)
@@ -147,7 +147,7 @@ struct TransportStreamSourceTests {
     }
 
     @Test("With the remuxer, an HEVC transport stream makes a mosaic, remuxed once",
-          .enabled(if: TransportStreamRemuxer.isSupported && ffmpegPath != nil, "needs macOS and an ffmpeg binary"))
+          .enabled(if: FFmpegFallback.isSupported && ffmpegPath != nil, "needs macOS and an ffmpeg binary"))
     func remuxHEVC() async throws {
         let source = try Self.fixture("hevc_stream")
         let copy = try Self.extensionlessCopy(of: source)
@@ -166,19 +166,19 @@ struct TransportStreamSourceTests {
             }
             // One file per source URL; a second inspection reuses it.
             #expect(try Self.cachedMP4s(cache).count == 2)
-            let file = TransportStreamRemuxer.cacheFile(for: source, in: cache)
+            let file = FFmpegCache.file(for: source, variant: "remux", extension: "mp4", in: cache)
             let before = try FileManager.default.attributesOfItem(atPath: file.path)[.systemFileNumber] as? Int
             _ = try await VideoInput(from: source)
             let after = try FileManager.default.attributesOfItem(atPath: file.path)[.systemFileNumber] as? Int
             #expect(before == after)
 
-            try TransportStreamRemuxer.clearCache()
+            try FFmpegFallback.clearCache()
             #expect(try Self.cachedMP4s(cache).isEmpty)
         }
     }
 
     @Test("A transport stream AVFoundation reads itself is not remuxed",
-          .enabled(if: TransportStreamRemuxer.isSupported && ffmpegPath != nil, "needs macOS and an ffmpeg binary"))
+          .enabled(if: FFmpegFallback.isSupported && ffmpegPath != nil, "needs macOS and an ffmpeg binary"))
     func noRemuxForH264() async throws {
         try await Self.withRemuxer { cache in
             let video = try await VideoInput(from: Self.fixture("test_stream"))
@@ -188,12 +188,14 @@ struct TransportStreamSourceTests {
     }
 
     @Test("Concurrent readers of one source share a single remux",
-          .enabled(if: TransportStreamRemuxer.isSupported && ffmpegPath != nil, "needs macOS and an ffmpeg binary"))
+          .enabled(if: FFmpegFallback.isSupported && ffmpegPath != nil, "needs macOS and an ffmpeg binary"))
     func concurrentRemux() async throws {
         let source = try Self.fixture("hevc_stream")
         try await Self.withRemuxer { cache in
             let files = try await withThrowingTaskGroup(of: URL.self) { group in
-                for _ in 0..<4 { group.addTask { try await TransportStreamRemuxer.remux(source) } }
+                for _ in 0..<4 {
+                    group.addTask { try await RemoteVideoSupport.makeAsset(url: source).url }
+                }
                 return try await group.reduce(into: Set<URL>()) { $0.insert($1) }
             }
             #expect(files.count == 1)
@@ -204,24 +206,18 @@ struct TransportStreamSourceTests {
     @Test("Enabling needs an executable ffmpeg")
     func enableValidates() {
         #expect(throws: MosaicError.self) {
-            try TransportStreamRemuxer.enable(ffmpegBinaryPath: "/nonexistent/ffmpeg")
+            try FFmpegFallback.enable(ffmpegBinaryPath: "/nonexistent/ffmpeg")
         }
-        #expect(!TransportStreamRemuxer.isEnabled)
+        #expect(!FFmpegFallback.isEnabled)
     }
 
-    @Test("ffmpeg arguments: stream copy with hvc1 first, reconnects for remote sources")
-    func remuxArguments() throws {
+    @Test("ffmpeg gets only the protocols its source needs")
+    func inputProtocols() throws {
         #if os(macOS)
-        let output = URL(fileURLWithPath: "/tmp/out.part.mp4")
-        let local = TransportStreamRemuxer.arguments(source: URL(fileURLWithPath: "/v/a.ts"), output: output,
-                                                     attempt: TransportStreamRemuxer.attempts[0])
-        #expect(local == ["-nostdin", "-hide_banner", "-y", "-i", "/v/a.ts", "-map", "0:v:0", "-map", "0:a:0?",
-                          "-c", "copy", "-tag:v", "hvc1", "-f", "mp4", "/tmp/out.part.mp4"])
-        let remote = TransportStreamRemuxer.arguments(source: URL(string: "https://h/download/?fid=1&s=2")!,
-                                                      output: output, attempt: TransportStreamRemuxer.attempts[2])
-        #expect(remote.contains("-reconnect"))
-        #expect(remote.contains("https://h/download/?fid=1&s=2"))
-        #expect(remote.contains("-an") && !remote.contains("hvc1"))
+        let local = FFmpegRunner.inputArguments(for: URL(fileURLWithPath: "/v/a.ts"))
+        #expect(local == ["-protocol_whitelist", "file", "-i", "file:/v/a.ts"])
+        let remote = FFmpegRunner.inputArguments(for: URL(string: "https://h/download/?fid=1&s=2")!)
+        #expect(remote == ["-protocol_whitelist", "http,https,tcp,tls,crypto", "-i", "https://h/download/?fid=1&s=2"])
         #endif
     }
 
@@ -231,17 +227,58 @@ struct TransportStreamSourceTests {
             .appendingPathComponent("MosaicKitEvict-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: folder) }
-        for (index, name) in ["old", "middle", "new"].enumerated() {
+        for (index, name) in ["0000000000000001", "0000000000000002", "0000000000000003"].enumerated() {
             let file = folder.appendingPathComponent("\(name).mp4")
             try Data(count: 100).write(to: file)
             try FileManager.default.setAttributes([.modificationDate: Date(timeIntervalSinceNow: Double(index - 10))],
                                                   ofItemAtPath: file.path)
         }
         // A remux in progress is never evicted.
-        try Data(count: 100).write(to: folder.appendingPathComponent("running.part.mp4"))
-        TransportStreamRemuxer.evict(in: folder, toFit: 150, maximumBytes: 300)
+        try Data(count: 100).write(to: folder.appendingPathComponent("0000000000000004.X.part.mp4"))
+        // A file the cache did not make is never deleted.
+        try Data(count: 100).write(to: folder.appendingPathComponent("holiday.mp4"))
+        FFmpegCache.evict(in: folder, toFit: 150, maximumBytes: 300)
         let left = try FileManager.default.contentsOfDirectory(atPath: folder.path).sorted()
-        #expect(left == ["new.mp4", "running.part.mp4"])
+        #expect(left == ["0000000000000003.mp4", "0000000000000004.X.part.mp4", "holiday.mp4"])
+    }
+
+    @Test("A cancelled job finishing late doesn't touch the job that replaced it")
+    func staleCompletion() async throws {
+        let jobs = RemuxJobs()
+        let source = URL(fileURLWithPath: "/v/replaced.ts")
+        // Ignores cancellation for a while, as a dying ffmpeg does.
+        let slowToDie: @Sendable () async throws -> URL = {
+            await Task.detached { try? await Task.sleep(for: .milliseconds(150)) }.value
+            throw CancellationError()
+        }
+        let first = Task { try await jobs.result(for: source, slowToDie) }
+        try await Task.sleep(for: .milliseconds(30))
+        first.cancel()
+        _ = try? await first.value
+        let result = URL(fileURLWithPath: "/cache/replaced.mp4")
+        let second = try await jobs.result(for: source) {
+            try await Task.sleep(for: .milliseconds(300))
+            return result
+        }
+        #expect(second == result)
+    }
+
+    @Test("Eviction leaves files being read alone")
+    func evictionSkipsHeldFiles() throws {
+        let folder = FileManager.default.temporaryDirectory
+            .appendingPathComponent("MosaicKitHeld-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let held = folder.appendingPathComponent("000000000000000a.mp4")
+        let free = folder.appendingPathComponent("000000000000000b.mp4")
+        for file in [held, free] { try Data(count: 100).write(to: file) }
+        do {
+            let lease = FFmpegCache.Lease(held)
+            FFmpegCache.evict(in: folder, toFit: 0, maximumBytes: 0)
+            #expect(try FileManager.default.contentsOfDirectory(atPath: folder.path) == ["000000000000000a.mp4"])
+            withExtendedLifetime(lease) {}
+        }
+        #expect(!FFmpegCache.isHeld(held))
     }
 
     @Test("Cancelling one reader of a shared remux doesn't fail the others; the last cancel stops it")

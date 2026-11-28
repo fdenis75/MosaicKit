@@ -74,6 +74,8 @@ extension MetalMosaicGenerator {
 
     // MARK: Off-actor work
 
+    /// Never copies the whole source, whatever its route.
+    ///
     /// Decodes the frames `options` selects and hands each one (index, image, decoded time in
     /// seconds) to `body`.
     @concurrent
@@ -86,16 +88,25 @@ extension MetalMosaicGenerator {
         // whole decode so a user-selected file stays readable in a sandboxed app.
         let didStartAccessingSource = video.url.startAccessingSecurityScopedResource()
         defer { if didStartAccessingSource { video.url.stopAccessingSecurityScopedResource() } }
-        let asset = try await RemoteVideoSupport.makeAsset(url: video.url)
-        let duration: Double
-        if let known = video.duration { duration = known } else { duration = try await asset.load(.duration).seconds }
-        guard duration.isFinite, duration > 0 else { throw MosaicError.invalidVideo("Invalid duration") }
         let policy: ThumbnailProcessor.FrameSamplingPolicy = options.sampling == .uniform ? .uniform : .weighted
-        try await ThumbnailProcessor(config: .default).forEachFrame(
-            from: asset, count: options.count, maximumSize: options.maximumSize,
-            accurate: options.accurate, policy: policy, duration: duration
-        ) { index, image, time in
-            try await body(index, image, time.seconds)
+        switch try await SourceRouter.prepare(video.url, allowCopies: false) {
+        case .asset(let asset):
+            let duration: Double
+            if let known = video.duration { duration = known } else { duration = try await asset.load(.duration).seconds }
+            guard duration.isFinite, duration > 0 else { throw MosaicError.invalidVideo("Invalid duration") }
+            try await ThumbnailProcessor(config: .default).forEachFrame(
+                from: asset, count: options.count, maximumSize: options.maximumSize,
+                accurate: options.accurate, policy: policy, duration: duration
+            ) { index, image, time in
+                try await body(index, image, time.seconds)
+            }
+        case .ffmpeg(let source):
+            try await ThumbnailProcessor(config: .default).forEachFrame(
+                from: source, count: options.count, maximumSize: options.maximumSize,
+                policy: policy, duration: video.duration
+            ) { index, image, time in
+                try await body(index, image, time.seconds)
+            }
         }
     }
 
