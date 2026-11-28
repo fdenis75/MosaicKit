@@ -229,17 +229,6 @@ After running these examples:
 
 Happy mosaic generating! 🎬
 
-### Lifecycle control
-
-`GenerationJobController` demonstrates explicit job identity and cancellation/pause/retry for app-managed work. It is deprecated and will be removed in MosaicKit 2.0; prefer the coordinator APIs, which also report progress, for mosaic or preview batches.
-
-```swift
-let controller = GenerationJobController()
-let job = await controller.submit {
-    let source = try await VideoInput(from: videoURL)
-    return try await MetalMosaicGenerator().generate(for: source, config: .default)
-}
-await controller.cancel(job) // or pause(job), then retry(job)
-```
+### Persisted queues
 
 `VideoSource` is the lightweight, Codable input for queues and persistence; call `inspect()` when a worker is ready to load metadata and validate the source.
