@@ -26,23 +26,12 @@ The custom layout algorithm divides the mosaic into three horizontal zones with 
 
 ### Algorithm
 
-```swift
-// 1. Divide mosaic into 3 zones
-let zones = [
-    topZone: 0.25 * totalHeight,    // 25% - small thumbnails
-    centerZone: 0.50 * totalHeight,  // 50% - large thumbnails
-    bottomZone: 0.25 * totalHeight   // 25% - small thumbnails
-]
-
-// 2. Calculate thumbnail sizes based on target aspect ratio
-let largeRatio = targetAspectRatio * 1.2  // 20% larger
-let smallRatio = targetAspectRatio * 0.8  // 20% smaller
-
-// 3. Optimize layout to minimize thumbnail count difference
-while abs(smallCount - largeCount) > threshold {
-    adjustZoneSizes()
-}
-```
+The grid is chosen by the number of small tiles per row. For each candidate, the canvas height in
+small rows follows from the video and mosaic aspect ratios; about a third of it goes to the large
+band, whose tiles are 1.25× to 2× larger (by mosaic aspect), and the rest is split above and below.
+The first candidate holding at least the requested count wins. Because nothing depends on pixels,
+a longer video, higher density or wider mosaic never gives fewer thumbnails. Thumbnails are at least
+50 px wide, so a narrow mosaic at high density can hold fewer than requested.
 
 ### Visual Representation
 
@@ -90,25 +79,9 @@ Traditional grid layout with uniform thumbnail sizes and consistent spacing. Thu
 
 ### Algorithm
 
-```swift
-// 1. Calculate optimal grid dimensions
-let aspectRatio = mosaicWidth / (mosaicWidth / targetAspectRatio)
-let cols = ceil(sqrt(thumbnailCount * aspectRatio))
-let rows = ceil(thumbnailCount / cols)
-
-// 2. Calculate thumbnail size
-let spacing = 4.0
-let thumbnailWidth = (mosaicWidth - (cols + 1) * spacing) / cols
-let thumbnailHeight = thumbnailWidth / videoAspectRatio
-
-// 3. Position thumbnails in grid
-for (index, thumbnail) in thumbnails.enumerated() {
-    let col = index % cols
-    let row = index / cols
-    let x = spacing + col * (thumbnailWidth + spacing)
-    let y = spacing + row * (thumbnailHeight + spacing)
-}
-```
+For each column count, the rows that best fill the mosaic aspect follow from the two aspect ratios.
+The first column count holding at least the requested thumbnails wins, and every row is full.
+Thumbnails are at least 50 px wide.
 
 ### Visual Representation
 
@@ -145,41 +118,16 @@ let config = MosaicConfiguration(
 
 ### Description
 
-Screen-aware layout that automatically adapts to the display size. Queries the system for the main screen dimensions and optimizes the mosaic to fit.
-
-### Algorithm
-
-```swift
-// 1. Get screen dimensions
-let screenSize = NSScreen.main?.visibleFrame.size  // macOS
-let screenSize = UIScreen.main.bounds.size         // iOS
-
-// 2. Calculate scale factor
-let targetWidth = screenSize.width * screenScale
-let targetHeight = targetWidth / targetAspectRatio
-
-// 3. Optimize thumbnail count for screen
-let optimalCount = calculateOptimalCount(
-    for: targetWidth,
-    screenHeight: targetHeight,
-    videoAspectRatio: videoAspectRatio
-)
-```
-
-### Visual Representation
-
-Screen-dependent, adapts to:
-- **4K Display**: Larger mosaic, more thumbnails
-- **1080p Display**: Medium mosaic, balanced count
-- **Mobile Screen**: Smaller mosaic, fewer thumbnails
+The classic grid in the shape of the largest screen. The width, density and duration are the
+configured ones; only the canvas shape comes from the screen. Without a screen (a daemon, for
+example) the configured aspect ratio is used.
 
 ### Configuration
 
 ```swift
 let config = MosaicConfiguration(
-    layout: LayoutConfiguration(
-        layoutType: .auto  // No aspect ratio needed
-    )
+    width: 4000,
+    layout: LayoutConfiguration(layoutType: .auto)
 )
 ```
 
@@ -194,6 +142,8 @@ let config = MosaicConfiguration(
 `.custom`.
 
 ## iPhone Layout
+
+Deprecated in 2.0.1: it still decodes and is laid out as before (also with `forIphone: true`).
 
 ### Description
 

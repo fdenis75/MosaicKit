@@ -71,7 +71,10 @@ public enum LayoutType: String, Codable, Sendable {
     case custom
     /// A classic uniform grid layout.
     case classic
-    /// A layout optimized for portrait iPhone screens.
+    /// One 1200 px column of frames, capped at 8000 px high; the width and density are ignored.
+    ///
+    /// Deprecated in 2.0.1: it still decodes and is laid out as before.
+    @available(*, deprecated, message: "Unused. Use .custom or .classic.")
     case iphone
     /// A grid with a caller-chosen number of rows and columns. Requires
     /// ``LayoutConfiguration/grid``. A grid that cannot be laid out fails with
@@ -99,7 +102,10 @@ public enum LayoutType: String, Codable, Sendable {
     }
 
     /// An array of all available layout types.
-    public static let allCases: [LayoutType] = [.auto, .custom, .classic, .iphone, .fixedGrid, .uneven]
+    public static let allCases: [LayoutType] = [.auto, .custom, .classic, .fixedGrid, .uneven]
+
+    /// The deprecated ``iphone``, for the code that still lays it out (`forIphone`).
+    static var phone: LayoutType { LayoutType(rawValue: "iphone") ?? .custom }
 }
 
 /// An enumeration representing the predefined aspect ratios for a mosaic layout.

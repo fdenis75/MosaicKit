@@ -23,7 +23,7 @@ Add MosaicKit via Swift Package Manager:
 ```swift
 // Package.swift
 dependencies: [
-    .package(url: "https://github.com/fdenis75/MosaicKit.git", from: "2.0.0")
+    .package(url: "https://github.com/fdenis75/MosaicKit.git", from: "2.0.1")
 ]
 ```
 

@@ -168,45 +168,19 @@ struct LayoutProcessorTests {
 
     @Test("allCases lists every layout type")
     func allCasesList() {
-        #expect(LayoutType.allCases == [.auto, .custom, .classic, .iphone, .fixedGrid, .uneven])
+        #expect(LayoutType.allCases == [.auto, .custom, .classic, .fixedGrid, .uneven])
     }
 
     // MARK: - calculateLayout: auto (I-9)
 
-    @Test("Auto layout fits an iPhone-sized screen instead of failing (I-9)")
+    @Test("Auto layout follows a phone screen's shape at the configured width (I-9, I-41)")
     func autoLayoutOnIPhoneScreen() {
-        let proc = makeProcessor()
-        let phone = CGSize(width: 390, height: 844)
-        let maxCount = proc.calculateMaxThumbnails(screenSize: phone, scale: 3, videoAR: 16.0 / 9.0)
-        #expect(maxCount >= 4, "An iPhone screen fits \(maxCount) thumbnails")
-
-        let layout = proc.calculateAutoLayout(
-            originalAspectRatio: wideAR, thumbnailCount: 6, screenSize: phone, scale: 3
-        )
-        #expect(layout.positions.count == 6)
-        #expect(layout.cols >= 1 && layout.rows >= 1)
-        // The canvas is in pixels: 390 x 3 = 1170 wide.
-        #expect(layout.mosaicSize.width == 1170)
-    }
-
-    @Test("Auto layout never indexes an empty range on a tiny screen")
-    func autoLayoutOnTinyScreen() {
-        let proc = makeProcessor()
-        let tiny = CGSize(width: 100, height: 100)
-        #expect(proc.calculateMaxThumbnails(screenSize: tiny, scale: 2, videoAR: 16.0 / 9.0) >= 1)
-        let layout = proc.calculateAutoLayout(
-            originalAspectRatio: wideAR, thumbnailCount: 4, screenSize: tiny, scale: 2
-        )
-        #expect(layout.positions.count > 0)
-    }
-
-    @Test("Auto layout on a desktop screen is unchanged in shape")
-    func autoLayoutOnDesktopScreen() {
         let layout = makeProcessor().calculateAutoLayout(
-            originalAspectRatio: wideAR, thumbnailCount: 30, screenSize: CGSize(width: 1512, height: 944), scale: 2
+            originalAspectRatio: wideAR, thumbnailCount: 6, mosaicWidth: 1170, screenAspect: 390.0 / 844.0
         )
-        #expect(layout.positions.count == 30)
-        #expect(layout.mosaicSize.width == 3024)
+        #expect(layout.positions.count >= 6)
+        #expect(layout.cols >= 1 && layout.rows >= 1)
+        #expect(layout.mosaicSize.width == 1170)
     }
 
     // MARK: - calculateLayout: iphone
@@ -220,7 +194,7 @@ struct LayoutProcessorTests {
             thumbnailCount: 10,
             mosaicWidth: 5120,       // should be ignored
             density: .m,
-            layoutType: .iphone
+            layoutType: .phone
         )
         #expect(layout.mosaicSize.width == 1200)
     }
@@ -234,7 +208,7 @@ struct LayoutProcessorTests {
             thumbnailCount: 8,
             mosaicWidth: 1200,
             density: .m,
-            layoutType: .iphone
+            layoutType: .phone
         )
         #expect(layout.cols == 1)
     }
@@ -248,7 +222,7 @@ struct LayoutProcessorTests {
             thumbnailCount: 8,
             mosaicWidth: 1200,
             density: .m,
-            layoutType: .iphone
+            layoutType: .phone
         )
         let widths = layout.thumbnailSizes.map(\.width)
         guard let first = widths.first else { return }
@@ -266,7 +240,7 @@ struct LayoutProcessorTests {
             thumbnailCount: 10_000,   // far more than can fit
             mosaicWidth: 1200,
             density: .m,
-            layoutType: .iphone
+            layoutType: .phone
         )
         #expect(layout.mosaicSize.height <= 8200)  // 8000 + small spacing tolerance
     }
@@ -276,7 +250,7 @@ struct LayoutProcessorTests {
     @Test("All layout types produce non-negative thumbnail positions")
     func allLayoutTypesNonNegativePositions() throws {
         let proc = makeProcessor()
-        for layoutType in [LayoutType.classic, .custom, .iphone] {
+        for layoutType in [LayoutType.classic, .custom, .phone] {
             let layout = proc.calculateLayout(
                 originalAspectRatio: wideAR,
                 mosaicAspectRatio: .widescreen,
@@ -295,7 +269,7 @@ struct LayoutProcessorTests {
     @Test("All layout types produce at least one thumbnail")
     func allLayoutTypesAtLeastOneThumb() throws {
         let proc = makeProcessor()
-        for layoutType in [LayoutType.classic, .custom, .iphone] {
+        for layoutType in [LayoutType.classic, .custom, .phone] {
             let layout = proc.calculateLayout(
                 originalAspectRatio: wideAR,
                 mosaicAspectRatio: .widescreen,
